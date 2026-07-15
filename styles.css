@@ -4,18 +4,9 @@ name: Reference Linker
 id: reference-linker
 settings:
   -
-    id: reference-linker-highlight-color
-    title: Preview line highlight
-    description: Background of the target line in hover previews and embeds. Default follows the theme's selection colour.
-    type: variable-themed-color
-    format: hex
-    opacity: true
-    default-light: '#c8dcff80'
-    default-dark: '#3a4a6b80'
-  -
     id: reference-linker-stale-color
     title: Stale-link underline colour
-    description: Links whose stored line has drifted from the declaration. Default follows the theme's warning colour.
+    description: Reference links whose target document has moved or is missing. Default follows the theme's warning colour.
     type: variable-themed-color
     format: hex
     opacity: false
@@ -24,7 +15,7 @@ settings:
   -
     id: reference-linker-broken-color
     title: Broken-link underline colour
-    description: Links whose symbol was renamed or removed. Default follows the theme's error colour.
+    description: Reference links whose target document is gone. Default follows the theme's error colour.
     type: variable-themed-color
     format: hex
     opacity: false
@@ -97,11 +88,9 @@ settings:
   min-width: 0;
 }
 
-/* Snippet chrome shared by the hover popover and the inline embed. Both containers carry
-   .reference-linker-code (see the token colours below). The popover is a fixed overlay; the
-   embed flows inline — otherwise the parts match. --cl-lh is fixed so the highlight band
-   can be placed by row index, and body/pre carry no vertical padding so row 0 sits at
-   top 0. user-select on the popover lets the snippet be copied. */
+/* Chrome shared by the hover popover and the inline embed: a header above a body that holds
+   the rendered PDF page (canvas) or image. The popover is a fixed overlay; the embed flows
+   inline — otherwise the parts match. */
 .reference-linker-hover,
 .reference-linker-embed {
   overflow: hidden;
@@ -129,100 +118,25 @@ settings:
   border-bottom: 1px solid var(--background-modifier-border);
   color: var(--text-muted);
   font-size: var(--font-ui-smaller);
-  font-family: var(--font-monospace);
   white-space: nowrap;
-}
-.reference-linker-embed-header {
   overflow: hidden;
   text-overflow: ellipsis;
-  cursor: pointer;
 }
+.reference-linker-embed-header { cursor: pointer; }
 .reference-linker-hover-body,
 .reference-linker-embed-body {
-  position: relative;
   overflow: auto;
-  padding: 0;
-  font-family: var(--font-monospace);
-  font-size: var(--font-ui-smaller);
-  --cl-lh: 1.5em;
+  max-height: 60vh;
 }
-.reference-linker-hover-body { max-height: 60vh; }
-.reference-linker-embed-body { max-height: 60vh; }
-/* PDF page / image preview inside the hover popover. */
+/* Rendered PDF page (canvas) or image inside the popover / embed. */
 .reference-linker-hover-body canvas,
-.reference-linker-hover-body img {
+.reference-linker-hover-body img,
+.reference-linker-embed-body canvas,
+.reference-linker-embed-body img {
   display: block;
   max-width: 100%;
   height: auto;
 }
-/* The .reference-linker-code prefix raises specificity above the theme's / editor's own
-   `pre` rules — in Live Preview an embed is rendered where those would otherwise add a
-   top margin, border or a different line-height and push the code off the fixed band. */
-.reference-linker-code .reference-linker-hover-body pre,
-.reference-linker-code .reference-linker-embed-body pre {
-  position: relative;
-  z-index: 1;
-  margin: 0;
-  padding: 0 10px;
-  border: 0;
-  background: transparent;
-  font-size: inherit; /* keep it equal to the band's, so their em line heights match */
-  line-height: var(--cl-lh);
-  white-space: pre;
-}
-.reference-linker-code .reference-linker-hover-body code,
-.reference-linker-code .reference-linker-embed-body code {
-  margin: 0;
-  padding: 0;
-  font-family: inherit;
-  font-size: inherit;
-  background: transparent;
-  color: var(--code-normal, var(--text-normal));
-}
-.reference-linker-hover-band,
-.reference-linker-embed-band {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 0; /* actual row offset (row-index * line-height) is set inline */
-  height: var(--cl-lh);
-  background: var(--reference-linker-highlight-color, var(--text-selection));
-  z-index: 0;
-  pointer-events: none;
-}
-
-/* Prism token colours, shared by the hover popover and the inline embed (both carry
-   .reference-linker-code). The popover sits outside Obsidian's markdown containers where the
-   theme's token CSS doesn't reach, so map the tokens to Obsidian's --code-* variables. */
-.reference-linker-code .token.comment,
-.reference-linker-code .token.prolog,
-.reference-linker-code .token.doctype,
-.reference-linker-code .token.cdata { color: var(--code-comment, var(--text-faint)); }
-.reference-linker-code .token.punctuation { color: var(--code-punctuation, var(--text-muted)); }
-.reference-linker-code .token.property,
-.reference-linker-code .token.tag,
-.reference-linker-code .token.constant,
-.reference-linker-code .token.symbol,
-.reference-linker-code .token.deleted { color: var(--code-tag, var(--text-normal)); }
-.reference-linker-code .token.boolean,
-.reference-linker-code .token.number { color: var(--code-value, var(--text-normal)); }
-.reference-linker-code .token.selector,
-.reference-linker-code .token.attr-name,
-.reference-linker-code .token.string,
-.reference-linker-code .token.char,
-.reference-linker-code .token.builtin,
-.reference-linker-code .token.inserted { color: var(--code-string, var(--text-normal)); }
-.reference-linker-code .token.operator,
-.reference-linker-code .token.entity,
-.reference-linker-code .token.url { color: var(--code-operator, var(--text-normal)); }
-.reference-linker-code .token.atrule,
-.reference-linker-code .token.attr-value,
-.reference-linker-code .token.keyword { color: var(--code-keyword, var(--text-accent)); }
-.reference-linker-code .token.function,
-.reference-linker-code .token.class-name { color: var(--code-function, var(--text-normal)); }
-.reference-linker-code .token.regex,
-.reference-linker-code .token.important,
-.reference-linker-code .token.variable { color: var(--code-property, var(--text-normal)); }
 
 .reference-linker-embed-error,
 .reference-linker-embed-note {

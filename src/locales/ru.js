@@ -37,7 +37,9 @@ module.exports = {
 
   // Inline embeds
   'embed.empty': 'Reference Linker: пустой embed — укажите путь к документу',
-  'embed.fmt.file': 'Документ (по пути)',
+  'embed.fmt.file': 'Документ (первая страница)',
+  'embed.fmt.section': 'Страница раздела ({page})',
+  'embed.unsupported': 'Reference Linker: нет инлайн-превью для {path}',
   'embed.menu.open': 'Открыть документ',
   'embed.menu.refresh': 'Обновить embed',
   'embed.notFound': 'Reference Linker: нет документа для «{query}»',

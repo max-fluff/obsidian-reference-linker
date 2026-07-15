@@ -518,12 +518,6 @@ class ReferenceLinkerPlugin extends Plugin {
     this.watchTimer = setTimeout(() => this.rebuildIndex(false), 1500);
   }
 
-  // No syntax highlighting for documents yet (Phase 3 renders pages, not code); the
-  // dormant hover/embed helpers still call this, so return an empty grammar id.
-  prismIdFor() {
-    return '';
-  }
-
   // Empty the index (nothing to scan) and persist, telling whoever's listening.
   async resetIndex(noticeKey, notify) {
     this.setIndex([]);
@@ -667,10 +661,13 @@ class ReferenceLinkerPlugin extends Plugin {
     editor.replaceSelection(this.buildLink(e, inTable, template));
   }
 
-  // The ```reference-link block body offered for an entry. Page/range embeds come
-  // later (Phase 4); for now a document embeds by its relative path.
+  // The ```reference-link block body offered for an entry: a section embeds its page,
+  // and any document embeds by its relative path (page 1).
   embedFormats(e) {
-    return [{ label: t('embed.fmt.file'), body: e.path }];
+    const out = [];
+    if (e.kind === 'section' && e.page) out.push({ label: t('embed.fmt.section', { page: e.page }), body: e.path + '#page=' + e.page });
+    out.push({ label: t('embed.fmt.file'), body: e.path });
+    return out;
   }
 
   insertEmbed(editor, e) {

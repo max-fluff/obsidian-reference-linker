@@ -37,7 +37,9 @@ module.exports = {
 
   // Inline embeds
   'embed.empty': 'Reference Linker: empty embed — give a document path',
-  'embed.fmt.file': 'Document (by path)',
+  'embed.fmt.file': 'Document (first page)',
+  'embed.fmt.section': 'Section page ({page})',
+  'embed.unsupported': 'Reference Linker: no inline preview for {path}',
   'embed.menu.open': 'Open document',
   'embed.menu.refresh': 'Refresh embed',
   'embed.notFound': 'Reference Linker: no document matches “{query}”',

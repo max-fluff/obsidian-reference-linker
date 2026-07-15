@@ -1,140 +1,102 @@
 'use strict';
 
-// Inline reference embed: a ```reference-link fenced block that renders a document from
-// the note. The target is a path (page/range rendering comes in Phase 4). The block
-// re-renders on every index change, so an open embed follows changes on disk.
+// Inline reference embed: a ```reference-link fenced block that renders a document page (or
+// an image) inline in the note, on the same pdf.js renderer as the hover preview. The target
+// is a path (optionally with #page=N or :N), or a name/section resolved through the index.
+// The block re-renders on every index change, so an open embed follows changes on disk.
 
 const { MarkdownRenderChild, Menu } = require('obsidian');
 const nodePath = require('path');
-const { readLines, renderCode } = require('./render');
+const fs = require('fs');
+const { openDocument, renderPageToCanvas } = require('./pdf');
 const { t } = require('./shared/i18n');
 
 const EMBED_LANG = 'reference-link';
-const MAX_EMBED_LINES = 400; // bound how much a single embed can pour into the note
+const DEFAULT_WIDTH = 600; // CSS px the page/image is rendered at (override with `width:`)
 
-// First non-empty line is the target; later "key: value" lines are modifiers.
+const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'avif']);
+const MIME = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', svg: 'image/svg+xml', avif: 'image/avif' };
+
+const baseName = (p) => nodePath.basename(p).replace(/\.[^.]+$/, '');
+const looksLikePath = (s) => s.includes('/') || s.includes('\\') || /\.[a-z0-9]+$/i.test(s);
+
+// First non-empty line is the target; later "key: value" lines tune it.
 function parseSpec(source) {
-  const spec = { target: '', context: '', lines: '', title: '' };
+  const spec = { target: '', page: '', width: '', title: '' };
   for (const raw of source.split('\n')) {
     const line = raw.trim();
     if (!line) continue;
-    const m = /^(context|lines|title)\s*:\s*(.*)$/i.exec(line);
+    const m = /^(page|width|title)\s*:\s*(.*)$/i.exec(line);
     if (m) spec[m[1].toLowerCase()] = m[2].trim();
     else if (!spec.target) spec.target = line;
   }
   return spec;
 }
 
-const baseName = (p) => nodePath.basename(p).replace(/\.[^.]+$/, '');
-const intOr = (v, def) => { const n = parseInt(v, 10); return Number.isFinite(n) ? n : def; };
-
-// "<from>-<to>" or "<from>" -> { from, to } (from <= to), or null.
-function splitRange(v) {
-  const m = /^(\d+)(?:\s*-\s*(\d+))?$/.exec((v || '').trim());
-  if (!m) return null;
-  const a = parseInt(m[1], 10);
-  const b = m[2] ? parseInt(m[2], 10) : a;
-  return { from: Math.min(a, b), to: Math.max(a, b) };
+// Split a trailing page off a path target: "file.pdf#page=3" or "file.pdf:3".
+function splitPage(target) {
+  let m = /^(.*)#page=(\d+)\s*$/i.exec(target);
+  if (m) return { path: m[1], page: parseInt(m[2], 10) };
+  m = /^(.+?):(\d+)\s*$/.exec(target);
+  if (m) return { path: m[1], page: parseInt(m[2], 10) };
+  return { path: target, page: null };
 }
 
-// "<path>:<from>[-<to>]" -> { path, from, to, single }, or null. Relative code paths
-// don't contain colons, so the last :<digits> is unambiguously the line.
-function splitPathRange(t) {
-  const m = /^(.+?):(\d+)(?:-(\d+))?$/.exec(t);
-  if (!m) return null;
-  const from = parseInt(m[2], 10);
-  const to = m[3] ? parseInt(m[3], 10) : from;
-  return { path: m[1], from: Math.min(from, to), to: Math.max(from, to), single: !m[3] };
-}
-
-const looksLikePath = (s) => s.includes('/') || s.includes('\\') || /\.[a-z0-9]+$/i.test(s);
-
-function langForPath(plugin, relPath) {
-  const ext = nodePath.extname(relPath).toLowerCase();
-  const lang = plugin.languages.find((l) => l.extensions.includes(ext));
-  return lang ? lang.id : '';
-}
-
-// Resolve a path spec to a code-root-relative path. An indexed file is matched by its
-// tail through lookup(), so "http-client.ts" or "code-samples/http-client.ts" both work
-// regardless of the scan-root prefix. A path that isn't indexed is kept as given, so
-// out-of-index files still resolve under the root.
-function resolvePath(plugin, relPath) {
-  const norm = relPath.split('\\').join('/').replace(/^\.?\//, '');
-  const hit = plugin.lookup(norm)[0];
-  return hit ? hit.path : norm;
-}
-
-function build(plugin, relPath, langId, from, to, targetLine, name) {
-  const root = plugin.codeRoot();
-  const absPath = root ? nodePath.join(root, relPath) : relPath;
-  const requestedTo = to;
-  to = Math.min(to, from + MAX_EMBED_LINES - 1);
-  return {
-    absPath, relPath, from, to, targetLine,
-    truncated: to < requestedTo,
-    prismId: langId ? plugin.prismIdFor(langId) : '',
-    entry: { name: name || baseName(relPath), path: relPath, line: targetLine || from },
-  };
-}
-
-function fromPath(plugin, spec, relPath, from, to, targetLine) {
-  relPath = resolvePath(plugin, relPath);
-  const ctx = intOr(spec.context, 0);
-  const lr = splitRange(spec.lines);
-  if (lr) { from = lr.from; to = lr.to; targetLine = null; } // lines: overrides the range
-  if (from == null) { from = 1; to = MAX_EMBED_LINES; }      // bare path: whole file (capped)
-  // context grows the shown window symmetrically around the line or range.
-  from = Math.max(1, from - ctx);
-  to = to + ctx;
-  return build(plugin, relPath, langForPath(plugin, relPath), from, to, targetLine, null);
-}
-
-// Resolve a parsed spec to a render target, or { error } for the inline notice.
+// Resolve the spec to { absPath, relPath, ext, page, name, entry } or { error }.
 function resolve(plugin, spec) {
   const target = spec.target;
   if (!target) return { error: t('embed.empty') };
 
-  const pr = splitPathRange(target);
-  if (pr) return fromPath(plugin, spec, pr.path, pr.from, pr.to, pr.single ? pr.from : null);
-  if (looksLikePath(target)) return fromPath(plugin, spec, target, null, null, null);
+  const sp = splitPage(target);
+  let relPath, page, name;
+  if (looksLikePath(sp.path)) {
+    const norm = sp.path.split('\\').join('/').replace(/^\.?\//, '');
+    const hit = plugin.lookup(norm)[0];
+    relPath = hit ? hit.path : norm;
+    name = hit ? hit.name : baseName(relPath);
+    page = sp.page;
+  } else {
+    const f = plugin.parseQuery(target);
+    const matches = plugin.entriesByName(f.name).filter((m) => plugin.entryPassesFilter(m, f));
+    if (!matches.length) return { error: t('embed.notFound', { query: target }) };
+    const paths = new Set(matches.map((m) => m.path));
+    if (paths.size > 1) return { error: t('embed.ambiguous', { n: paths.size, query: target }) };
+    const e = matches.find((m) => m.kind === 'section') || matches[0];
+    relPath = e.path; name = e.name; page = e.page;
+  }
 
-  // A "py:"/"def:" filter narrows a name that collides across files (a dotted "Foo.bar"
-  // is a path here — looksLikePath owns the dot — so class scope is suggestion-only).
-  const f = plugin.parseQuery(target);
-  const matches = plugin.entriesByName(f.name).filter((m) => plugin.entryPassesFilter(m, f));
-  if (!matches.length) return { error: t('embed.notFound', { query: target }) };
-  const paths = new Set(matches.map((m) => m.path));
-  if (paths.size > 1) return { error: t('embed.ambiguous', { n: paths.size, query: target }) };
-  const e = matches.find((m) => m.kind !== 'file') || matches[0]; // declaration over file entry
-  const ctx = intOr(spec.context, 0);
-  const lr = splitRange(spec.lines);
-  const from = Math.max(1, (lr ? lr.from : e.line) - ctx);
-  const to = (lr ? lr.to : e.line) + ctx;
-  return build(plugin, e.path, e.lang, from, to, lr ? null : e.line, e.name);
+  const specPage = parseInt(spec.page, 10);
+  if (Number.isFinite(specPage)) page = specPage;
+  page = page || 1;
+  const root = plugin.codeRoot();
+  const absPath = root ? nodePath.join(root, relPath) : relPath;
+  const ext = nodePath.extname(relPath).slice(1).toLowerCase();
+  const kind = page > 1 ? 'section' : 'file';
+  return { absPath, relPath, ext, page, name, entry: { name, kind, path: relPath, line: page, page } };
 }
 
-class CodeEmbed extends MarkdownRenderChild {
+class ReferenceEmbed extends MarkdownRenderChild {
   constructor(containerEl, plugin, spec) {
     super(containerEl);
     this.plugin = plugin;
     this.spec = spec;
     this.renderId = 0;
+    this.blobUrl = '';
   }
 
   onload() {
     this.containerEl.addEventListener('contextmenu', (evt) => this.onContextMenu(evt));
     this.render();
-    // fs.watch -> rebuildIndex -> notifyIndexChange, so an open embed re-reads on edit.
+    // fs.watch -> rebuildIndex -> notifyIndexChange, so an open embed re-renders on change.
     this.unsub = this.plugin.onIndexChange(() => this.render());
   }
 
   onunload() {
     if (this.unsub) this.unsub();
+    this.revokeBlob();
   }
 
-  // Open the embedded file, honouring the editor-link preset (and the format picker
-  // when "Always ask" is on) — the same path the open/insert commands use.
+  // Open the embedded document at its page — the same path the open/insert commands use.
   open() {
     const e = this.res && this.res.entry;
     if (!e) return;
@@ -142,69 +104,74 @@ class CodeEmbed extends MarkdownRenderChild {
   }
 
   onContextMenu(evt) {
-    const res = this.res;
-    if (!res) return;
+    if (!this.res) return;
     evt.preventDefault();
     evt.stopPropagation();
     const menu = new Menu();
-    if (res.entry) menu.addItem((i) => i.setTitle(t('embed.menu.open')).setIcon('go-to-file').onClick(() => this.open()));
+    if (this.res.entry) menu.addItem((i) => i.setTitle(t('embed.menu.open')).setIcon('go-to-file').onClick(() => this.open()));
     menu.addItem((i) => i.setTitle(t('embed.menu.refresh')).setIcon('refresh-cw').onClick(() => this.render(true)));
     menu.showAtMouseEvent(evt);
   }
 
-  notice(cls, text) {
-    this.containerEl.empty();
-    this.containerEl.createDiv({ cls, text });
-  }
+  notice(cls, text) { this.containerEl.empty(); this.containerEl.createDiv({ cls, text }); }
+  revokeBlob() { if (this.blobUrl) { try { URL.revokeObjectURL(this.blobUrl); } catch { /* ignore */ } this.blobUrl = ''; } }
+  width() { const n = parseInt(this.spec.width, 10); return Number.isFinite(n) && n > 0 ? n : DEFAULT_WIDTH; }
 
   async render(force) {
-    const el = this.containerEl;
-    el.addClass('reference-linker-embed', 'reference-linker-code');
     const token = ++this.renderId;
     const res = resolve(this.plugin, this.spec);
-    this.res = res; // for the right-click menu (open file / refresh)
+    this.res = res; // for the right-click menu (open / refresh)
 
-    // Skip the re-read/re-tokenize/DOM rebuild when nothing this embed shows has changed.
-    // notifyIndexChange fires on any rebuild in the watched tree; the file's cached mtime
-    // (plus the resolved window) tells us whether *this* embed's content actually moved.
+    // Skip the re-render when nothing this embed shows has changed.
     const cached = res.relPath && this.plugin.fileCache.get(res.relPath);
     const mtime = cached ? cached.mtimeMs : null;
-    const sig = res.error ? 'err:' + res.error
-      : res.absPath + '|' + res.from + '|' + res.to + '|' + res.targetLine + '|' + mtime;
+    const sig = res.error ? 'err:' + res.error : res.absPath + '|' + res.page + '|' + mtime + '|' + this.width();
     if (!force && sig === this.lastSig && (res.error || mtime != null)) return;
     this.lastSig = sig;
 
     if (res.error) { this.notice('reference-linker-embed-error', res.error); return; }
 
-    // Read before clearing so a live refresh keeps the old snippet on screen until the
-    // new one is ready (no blank flash when the index rebuilds).
-    const snippet = await readLines(res.absPath, res.from, res.to);
-    if (token !== this.renderId) return; // a later render superseded this one
-    if (!snippet) { this.notice('reference-linker-embed-error', t('embed.unreadable', { path: res.relPath })); this.lastSig = null; return; }
+    const el = this.containerEl;
     el.empty();
-
-    const start = snippet.startLine;
-    const end = start + snippet.lines.length - 1;
+    el.addClass('reference-linker-embed');
     const header = el.createDiv({ cls: 'reference-linker-embed-header mod-clickable' });
-    header.createSpan({ text: this.spec.title || res.relPath + ':' + (start === end ? start : start + '-' + end) });
+    header.createSpan({ text: this.spec.title || res.name + (res.entry.kind === 'section' ? '  ·  p.' + res.page : '') });
     header.addEventListener('click', () => this.open());
-
     const body = el.createDiv({ cls: 'reference-linker-embed-body' });
-    if (res.targetLine != null) {
-      const idx = res.targetLine - start;
-      if (idx >= 0 && idx < snippet.lines.length) {
-        const band = body.createDiv({ cls: 'reference-linker-embed-band' });
-        band.style.top = 'calc(var(--cl-lh) * ' + idx + ')';
-      }
+
+    if (res.ext === 'pdf') {
+      const doc = await openDocument(res.absPath);
+      if (token !== this.renderId) { if (doc) { try { await doc.destroy(); } catch { /* ignore */ } } return; }
+      if (!doc) { this.fail(res); return; }
+      const canvas = body.createEl('canvas');
+      const ok = await renderPageToCanvas(doc, res.page, canvas, this.width());
+      try { await doc.destroy(); } catch { /* ignore */ }
+      if (token !== this.renderId) return;
+      if (!ok) { this.fail(res); return; }
+    } else if (IMAGE_EXT.has(res.ext)) {
+      let buf;
+      try { buf = fs.readFileSync(res.absPath); } catch { this.fail(res); return; }
+      if (token !== this.renderId) return;
+      this.revokeBlob();
+      this.blobUrl = URL.createObjectURL(new Blob([buf], { type: MIME[res.ext] || 'application/octet-stream' }));
+      const img = body.createEl('img');
+      img.src = this.blobUrl;
+      img.style.maxWidth = this.width() + 'px';
+    } else {
+      this.notice('reference-linker-embed-error', t('embed.unsupported', { path: res.relPath }));
+      this.lastSig = null;
     }
-    await renderCode(body, snippet.lines.join('\n'), res.prismId);
-    if (res.truncated) el.createDiv({ cls: 'reference-linker-embed-note', text: t('embed.truncated', { max: MAX_EMBED_LINES }) });
+  }
+
+  fail(res) {
+    this.notice('reference-linker-embed-error', t('embed.unreadable', { path: res.relPath }));
+    this.lastSig = null;
   }
 }
 
 function registerEmbed(plugin) {
   plugin.registerMarkdownCodeBlockProcessor(EMBED_LANG, (source, el, ctx) => {
-    ctx.addChild(new CodeEmbed(el, plugin, parseSpec(source)));
+    ctx.addChild(new ReferenceEmbed(el, plugin, parseSpec(source)));
   });
 }
 
