@@ -1,8 +1,9 @@
 'use strict';
 
-// PDF outline reading, on Obsidian's own pdf.js (the documented loadPdfJs() API — no
-// bundled copy, no worker setup: Obsidian pre-configures all of that). Used at index
-// time to turn a PDF's bookmarks into section entries with page numbers.
+// PDF work on Obsidian's own pdf.js (the documented loadPdfJs() API — no bundled copy,
+// no worker setup: Obsidian pre-configures all of that). Used to read a PDF's outline at
+// index time and to render a page to a canvas for the in-app page view (and, later, hover
+// previews and embeds).
 
 const obsidian = require('obsidian');
 const fs = require('fs');
@@ -18,6 +19,19 @@ function pdfjsLib() {
   return libPromise;
 }
 
+// Open a PDF from disk, or null when pdf.js is unavailable or the file can't be read.
+// The caller must destroy() the returned document.
+async function openDocument(absPath) {
+  const lib = await pdfjsLib();
+  if (!lib || typeof lib.getDocument !== 'function') return null;
+  try {
+    const data = new Uint8Array(fs.readFileSync(absPath));
+    return await lib.getDocument({ data, isEvalSupported: false }).promise;
+  } catch {
+    return null;
+  }
+}
+
 // An outline item's destination resolved to a 1-based page number, or null.
 async function pageOf(doc, dest) {
   try {
@@ -31,15 +45,12 @@ async function pageOf(doc, dest) {
 }
 
 // A PDF's outline flattened to [{ title, page }] (1-based, in reading order). Returns []
-// when there's no outline, pdf.js is unavailable, or the file can't be parsed — the
-// caller then falls back to the file-level entry.
+// when there's no outline or the file can't be parsed — the caller then falls back to the
+// file-level entry.
 async function readOutline(absPath) {
-  const lib = await pdfjsLib();
-  if (!lib || typeof lib.getDocument !== 'function') return [];
-  let doc = null;
+  const doc = await openDocument(absPath);
+  if (!doc) return [];
   try {
-    const data = new Uint8Array(fs.readFileSync(absPath));
-    doc = await lib.getDocument({ data, isEvalSupported: false }).promise;
     const outline = await doc.getOutline();
     if (!outline || !outline.length) return [];
     const out = [];
@@ -56,8 +67,8 @@ async function readOutline(absPath) {
   } catch {
     return [];
   } finally {
-    if (doc) { try { await doc.destroy(); } catch { /* already gone */ } }
+    try { await doc.destroy(); } catch { /* already gone */ }
   }
 }
 
-module.exports = { readOutline };
+module.exports = { openDocument, readOutline };

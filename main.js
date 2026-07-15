@@ -1324,6 +1324,17 @@ var require_pdf = __commonJS({
       }
       return libPromise;
     }
+    async function openDocument(absPath) {
+      const lib = await pdfjsLib();
+      if (!lib || typeof lib.getDocument !== "function")
+        return null;
+      try {
+        const data = new Uint8Array(fs2.readFileSync(absPath));
+        return await lib.getDocument({ data, isEvalSupported: false }).promise;
+      } catch (e) {
+        return null;
+      }
+    }
     async function pageOf(doc, dest) {
       try {
         let d = dest;
@@ -1337,13 +1348,10 @@ var require_pdf = __commonJS({
       }
     }
     async function readOutline2(absPath) {
-      const lib = await pdfjsLib();
-      if (!lib || typeof lib.getDocument !== "function")
+      const doc = await openDocument(absPath);
+      if (!doc)
         return [];
-      let doc = null;
       try {
-        const data = new Uint8Array(fs2.readFileSync(absPath));
-        doc = await lib.getDocument({ data, isEvalSupported: false }).promise;
         const outline = await doc.getOutline();
         if (!outline || !outline.length)
           return [];
@@ -1363,15 +1371,13 @@ var require_pdf = __commonJS({
       } catch (e) {
         return [];
       } finally {
-        if (doc) {
-          try {
-            await doc.destroy();
-          } catch (e) {
-          }
+        try {
+          await doc.destroy();
+        } catch (e) {
         }
       }
     }
-    module2.exports = { readOutline: readOutline2 };
+    module2.exports = { openDocument, readOutline: readOutline2 };
   }
 });
 
@@ -1686,6 +1692,14 @@ var { ReferenceLinkerSettingTab } = require_settings_tab();
 var { readOutline } = require_pdf();
 var { initI18n, t, plural } = require_i18n();
 var api = require_api();
+function openExternal(uri) {
+  try {
+    require("electron").shell.openExternal(uri);
+  } catch (e) {
+    window.open(uri);
+  }
+}
+var PAGE_LINK = /^file:\/\/\/.+#page=\d+/i;
 var ReferenceLinkerPlugin = class extends Plugin {
   async onload() {
     initI18n({ en: require_en(), ru: require_ru() });
@@ -1730,6 +1744,8 @@ var ReferenceLinkerPlugin = class extends Plugin {
       if (evt.key === "Escape")
         this.hover.hide();
     });
+    this.registerDomEvent(document, "click", (evt) => this.onAnchorClick(evt), { capture: true });
+    this.registerDomEvent(document, "auxclick", (evt) => this.onAnchorClick(evt), { capture: true });
     this.addSettingTab(new ReferenceLinkerSettingTab(this.app, this));
     this.statusEl = this.addStatusBarItem();
     this.editorStatusEl = this.addStatusBarItem();
@@ -1924,8 +1940,25 @@ var ReferenceLinkerPlugin = class extends Plugin {
     evt.preventDefault();
     evt.stopPropagation();
     if (open)
-      window.open(uri);
+      openExternal(uri);
     return true;
+  }
+  // Reading view renders our links as real <a>. Obsidian's own click handler opens them
+  // via window.open, which doubles a #page= fragment — so for those links we intercept in
+  // the capture phase and open through the shell instead. Other links are left to Obsidian.
+  onAnchorClick(evt) {
+    if (evt.button !== 0 && evt.button !== 1)
+      return;
+    const a = evt.target && evt.target.closest && evt.target.closest("a");
+    if (!a)
+      return;
+    const href = a.getAttribute("href") || a.getAttribute("data-href") || "";
+    const filled = /\{root\}|%7Broot%7D/i.test(href) ? this.fillRoot(href) : href;
+    if (!PAGE_LINK.test(filled))
+      return;
+    evt.preventDefault();
+    evt.stopPropagation();
+    openExternal(filled);
   }
   // The markdown link at screen coords in Live Preview, as { name, target }. The
   // rendered span has no href, so map the coords to a document position and read it.
@@ -2028,13 +2061,14 @@ var ReferenceLinkerPlugin = class extends Plugin {
   entriesByName(name) {
     return this.byName.get(String(name).toLowerCase()) || [];
   }
-  // No language filter in the file index (Phase 0); an inline "x:" token never
-  // resolves to a language, so it's treated as a kind filter or part of the name.
-  resolveLangToken() {
-    return null;
-  }
+  // There's no language filter in the file index; an inline "x:" token is a kind filter
+  // or part of the name. "sec:" is accepted as a shorthand for the "section" kind.
   parseQuery(raw) {
-    return filter.parseQuery(raw, (t2) => this.resolveLangToken(t2), this.kinds);
+    const kinds = this.kinds && this.kinds.has("section") ? /* @__PURE__ */ new Set([...this.kinds, "sec"]) : this.kinds;
+    const f = filter.parseQuery(raw, () => null, kinds);
+    if (f.kind === "sec")
+      f.kind = "section";
+    return f;
   }
   // Whether an entry passes a parsed inline filter (the caller matches the name). A
   // container must be declared in the same file — its class name stands in for the path.
@@ -2249,7 +2283,11 @@ var ReferenceLinkerPlugin = class extends Plugin {
     const absFwd = this.entryPath(e).split(nodePath.sep).join("/");
     const page = String(e.page || 1);
     const encPath = (p) => p.split("/").map(encodeURIComponent).join("/");
-    return tpl.replace(/{abs}/g, encodeURI(absFwd)).replace(/{path}/g, encPath(e.path)).replace(/{page}/g, page).replace(/{name}/g, encodeURIComponent(e.name));
+    let uri = tpl.replace(/{abs}/g, encodeURI(absFwd)).replace(/{path}/g, encPath(e.path)).replace(/{page}/g, page).replace(/{name}/g, encodeURIComponent(e.name));
+    if (e.kind === "section" && e.page && /^file:/i.test(uri) && !/#page=/i.test(uri)) {
+      uri += "#page=" + e.page;
+    }
+    return uri;
   }
   // The markdown link to insert. Inside a table cell a literal pipe splits the row.
   buildLink(e, inTable, template) {
@@ -2352,7 +2390,7 @@ var ReferenceLinkerPlugin = class extends Plugin {
   }
   // fillRoot resolves the portable {root} token, since there's no note to render it.
   openEntry(e, template) {
-    window.open(this.fillRoot(this.buildUri(e, template)));
+    openExternal(this.fillRoot(this.buildUri(e, template)));
   }
   // Entries matched by name, or by path tail so a selected "Foo/Bar.cs" resolves too.
   lookup(text) {

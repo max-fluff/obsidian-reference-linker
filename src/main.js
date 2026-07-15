@@ -27,6 +27,17 @@ const { readOutline } = require('./pdf');
 const { initI18n, t, plural } = require('./shared/i18n');
 const api = require('./api');
 
+// Open a URL through the OS. Obsidian's window.open corrupts a file:// #page= fragment
+// (it doubles it — "…pdf#page=3#page=3" — and the OS then can't find the file), so hand it
+// straight to the shell, which preserves it; the default PDF app (a browser) honours #page=.
+function openExternal(uri) {
+  try { require('electron').shell.openExternal(uri); }
+  catch { window.open(uri); }
+}
+
+// A file:// link carrying a #page= fragment — the case window.open would double.
+const PAGE_LINK = /^file:\/\/\/.+#page=\d+/i;
+
 class ReferenceLinkerPlugin extends Plugin {
   async onload() {
     initI18n({ en: require('./locales/en'), ru: require('./locales/ru') });
@@ -80,6 +91,10 @@ class ReferenceLinkerPlugin extends Plugin {
     }, { capture: true });
     this.registerDomEvent(window, 'blur', () => this.hover.hide());
     this.registerDomEvent(document, 'keyup', (evt) => { if (evt.key === 'Escape') this.hover.hide(); });
+    // Reading-view clicks on a #page= link: intercept before Obsidian's opener doubles the
+    // fragment (Live Preview goes through onEditorLink).
+    this.registerDomEvent(document, 'click', (evt) => this.onAnchorClick(evt), { capture: true });
+    this.registerDomEvent(document, 'auxclick', (evt) => this.onAnchorClick(evt), { capture: true });
     this.addSettingTab(new ReferenceLinkerSettingTab(this.app, this));
     this.statusEl = this.addStatusBarItem();
     this.editorStatusEl = this.addStatusBarItem();
@@ -281,10 +296,23 @@ class ReferenceLinkerPlugin extends Plugin {
     // reaching Obsidian's document-level opener (which would open the literal URL).
     evt.preventDefault();
     evt.stopPropagation();
-    // window.open routes through Obsidian's handler, so the user gets the same native
-    // confirmation as any other external link.
-    if (open) window.open(uri);
+    if (open) openExternal(uri);
     return true;
+  }
+
+  // Reading view renders our links as real <a>. Obsidian's own click handler opens them
+  // via window.open, which doubles a #page= fragment — so for those links we intercept in
+  // the capture phase and open through the shell instead. Other links are left to Obsidian.
+  onAnchorClick(evt) {
+    if (evt.button !== 0 && evt.button !== 1) return;
+    const a = evt.target && evt.target.closest && evt.target.closest('a');
+    if (!a) return;
+    const href = a.getAttribute('href') || a.getAttribute('data-href') || '';
+    const filled = /\{root\}|%7Broot%7D/i.test(href) ? this.fillRoot(href) : href;
+    if (!PAGE_LINK.test(filled)) return;
+    evt.preventDefault();
+    evt.stopPropagation();
+    openExternal(filled);
   }
 
   // The markdown link at screen coords in Live Preview, as { name, target }. The
@@ -386,14 +414,13 @@ class ReferenceLinkerPlugin extends Plugin {
     return this.byName.get(String(name).toLowerCase()) || [];
   }
 
-  // No language filter in the file index (Phase 0); an inline "x:" token never
-  // resolves to a language, so it's treated as a kind filter or part of the name.
-  resolveLangToken() {
-    return null;
-  }
-
+  // There's no language filter in the file index; an inline "x:" token is a kind filter
+  // or part of the name. "sec:" is accepted as a shorthand for the "section" kind.
   parseQuery(raw) {
-    return filter.parseQuery(raw, (t) => this.resolveLangToken(t), this.kinds);
+    const kinds = this.kinds && this.kinds.has('section') ? new Set([...this.kinds, 'sec']) : this.kinds;
+    const f = filter.parseQuery(raw, () => null, kinds);
+    if (f.kind === 'sec') f.kind = 'section';
+    return f;
   }
 
   // Whether an entry passes a parsed inline filter (the caller matches the name). A
@@ -609,14 +636,20 @@ class ReferenceLinkerPlugin extends Plugin {
   buildUri(e, template) {
     const tpl = template || this.settings.uriTemplate;
     const absFwd = this.entryPath(e).split(nodePath.sep).join('/');
-    const page = String(e.page || 1); // no per-section pages yet (Phase 2); default to the first
+    const page = String(e.page || 1);
     // Encode segments so #, ?, & or spaces can't rewrite the URL ({abs} keeps the C: colon).
     const encPath = (p) => p.split('/').map(encodeURIComponent).join('/');
-    return tpl
+    let uri = tpl
       .replace(/{abs}/g, encodeURI(absFwd))
       .replace(/{path}/g, encPath(e.path))
       .replace(/{page}/g, page)
       .replace(/{name}/g, encodeURIComponent(e.name));
+    // A section carries its page in the link so it opens there; the file preset has no
+    // {page}, so append the fragment when the template didn't already encode one.
+    if (e.kind === 'section' && e.page && /^file:/i.test(uri) && !/#page=/i.test(uri)) {
+      uri += '#page=' + e.page;
+    }
+    return uri;
   }
 
   // The markdown link to insert. Inside a table cell a literal pipe splits the row.
@@ -730,7 +763,7 @@ class ReferenceLinkerPlugin extends Plugin {
 
   // fillRoot resolves the portable {root} token, since there's no note to render it.
   openEntry(e, template) {
-    window.open(this.fillRoot(this.buildUri(e, template)));
+    openExternal(this.fillRoot(this.buildUri(e, template)));
   }
 
   // Entries matched by name, or by path tail so a selected "Foo/Bar.cs" resolves too.
