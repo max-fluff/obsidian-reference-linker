@@ -1,0 +1,19 @@
+{
+  "name": "obsidian-reference-linker",
+  "version": "1.0.0",
+  "description": "Obsidian plugin: autocomplete links to external documents and insert a deep-link that opens them at the right page.",
+  "author": "max-fluff",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/max-fluff/obsidian-reference-linker.git"
+  },
+  "keywords": ["obsidian", "obsidian-plugin", "pdf", "reference", "autocomplete"],
+  "private": true,
+  "scripts": {
+    "build": "node esbuild.config.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.17.19"
+  }
+}

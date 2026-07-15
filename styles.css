@@ -1,0 +1,287 @@
+/* @settings
+
+name: Reference Linker
+id: reference-linker
+settings:
+  -
+    id: reference-linker-highlight-color
+    title: Preview line highlight
+    description: Background of the target line in hover previews and embeds. Default follows the theme's selection colour.
+    type: variable-themed-color
+    format: hex
+    opacity: true
+    default-light: '#c8dcff80'
+    default-dark: '#3a4a6b80'
+  -
+    id: reference-linker-stale-color
+    title: Stale-link underline colour
+    description: Links whose stored line has drifted from the declaration. Default follows the theme's warning colour.
+    type: variable-themed-color
+    format: hex
+    opacity: false
+    default-light: '#c1810b'
+    default-dark: '#e0a526'
+  -
+    id: reference-linker-broken-color
+    title: Broken-link underline colour
+    description: Links whose symbol was renamed or removed. Default follows the theme's error colour.
+    type: variable-themed-color
+    format: hex
+    opacity: false
+    default-light: '#c4302b'
+    default-dark: '#e35555'
+  -
+    id: reference-linker-mark-underline-style
+    title: Stale / broken underline style
+    type: variable-select
+    default: dotted
+    options:
+      - dotted
+      - dashed
+      - solid
+      - double
+
+*/
+
+.reference-linker-suggestion {
+  display: flex;
+  gap: 0.5em;
+  align-items: baseline;
+}
+.reference-linker-name {
+  font-weight: var(--font-semibold);
+}
+.reference-linker-kind {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+.reference-linker-path {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+}
+
+.reference-linker-input {
+  width: 100%;
+}
+
+/* Muted helper / status line under a control or section — one class for every such
+   note in the pane. .is-error tints it for a missing folder or other problem. */
+.reference-linker-note {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  margin: 4px 0 14px;
+}
+.reference-linker-note.is-error {
+  color: var(--text-error);
+}
+
+/* User editor preset rows: name + template + remove on one line, wrapping to
+   two lines on a narrow pane so nothing collides. The full control area is used
+   (the empty name label is hidden) and the theme styles the row like any other. */
+.reference-linker-editor-row .setting-item-info {
+  display: none;
+}
+.reference-linker-editor-row .setting-item-control {
+  width: 100%;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 8px;
+}
+.reference-linker-editor-name {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+.reference-linker-editor-tpl {
+  flex: 3 1 240px;
+  min-width: 0;
+}
+
+/* Snippet chrome shared by the hover popover and the inline embed. Both containers carry
+   .reference-linker-code (see the token colours below). The popover is a fixed overlay; the
+   embed flows inline — otherwise the parts match. --cl-lh is fixed so the highlight band
+   can be placed by row index, and body/pre carry no vertical padding so row 0 sits at
+   top 0. user-select on the popover lets the snippet be copied. */
+.reference-linker-hover,
+.reference-linker-embed {
+  overflow: hidden;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+}
+.reference-linker-hover {
+  position: fixed;
+  z-index: var(--layer-popover);
+  max-width: min(720px, 90vw);
+  box-shadow: var(--shadow-s);
+  user-select: text;
+  -webkit-user-select: text;
+}
+.reference-linker-hover.reference-linker-hidden {
+  display: none;
+}
+.reference-linker-embed {
+  margin: var(--p-spacing, 1em) 0;
+}
+.reference-linker-hover-header,
+.reference-linker-embed-header {
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  font-family: var(--font-monospace);
+  white-space: nowrap;
+}
+.reference-linker-embed-header {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.reference-linker-hover-body,
+.reference-linker-embed-body {
+  position: relative;
+  overflow: auto;
+  padding: 0;
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+  --cl-lh: 1.5em;
+}
+.reference-linker-hover-body { max-height: 40vh; }
+.reference-linker-embed-body { max-height: 60vh; }
+/* The .reference-linker-code prefix raises specificity above the theme's / editor's own
+   `pre` rules — in Live Preview an embed is rendered where those would otherwise add a
+   top margin, border or a different line-height and push the code off the fixed band. */
+.reference-linker-code .reference-linker-hover-body pre,
+.reference-linker-code .reference-linker-embed-body pre {
+  position: relative;
+  z-index: 1;
+  margin: 0;
+  padding: 0 10px;
+  border: 0;
+  background: transparent;
+  font-size: inherit; /* keep it equal to the band's, so their em line heights match */
+  line-height: var(--cl-lh);
+  white-space: pre;
+}
+.reference-linker-code .reference-linker-hover-body code,
+.reference-linker-code .reference-linker-embed-body code {
+  margin: 0;
+  padding: 0;
+  font-family: inherit;
+  font-size: inherit;
+  background: transparent;
+  color: var(--code-normal, var(--text-normal));
+}
+.reference-linker-hover-band,
+.reference-linker-embed-band {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0; /* actual row offset (row-index * line-height) is set inline */
+  height: var(--cl-lh);
+  background: var(--reference-linker-highlight-color, var(--text-selection));
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* Prism token colours, shared by the hover popover and the inline embed (both carry
+   .reference-linker-code). The popover sits outside Obsidian's markdown containers where the
+   theme's token CSS doesn't reach, so map the tokens to Obsidian's --code-* variables. */
+.reference-linker-code .token.comment,
+.reference-linker-code .token.prolog,
+.reference-linker-code .token.doctype,
+.reference-linker-code .token.cdata { color: var(--code-comment, var(--text-faint)); }
+.reference-linker-code .token.punctuation { color: var(--code-punctuation, var(--text-muted)); }
+.reference-linker-code .token.property,
+.reference-linker-code .token.tag,
+.reference-linker-code .token.constant,
+.reference-linker-code .token.symbol,
+.reference-linker-code .token.deleted { color: var(--code-tag, var(--text-normal)); }
+.reference-linker-code .token.boolean,
+.reference-linker-code .token.number { color: var(--code-value, var(--text-normal)); }
+.reference-linker-code .token.selector,
+.reference-linker-code .token.attr-name,
+.reference-linker-code .token.string,
+.reference-linker-code .token.char,
+.reference-linker-code .token.builtin,
+.reference-linker-code .token.inserted { color: var(--code-string, var(--text-normal)); }
+.reference-linker-code .token.operator,
+.reference-linker-code .token.entity,
+.reference-linker-code .token.url { color: var(--code-operator, var(--text-normal)); }
+.reference-linker-code .token.atrule,
+.reference-linker-code .token.attr-value,
+.reference-linker-code .token.keyword { color: var(--code-keyword, var(--text-accent)); }
+.reference-linker-code .token.function,
+.reference-linker-code .token.class-name { color: var(--code-function, var(--text-normal)); }
+.reference-linker-code .token.regex,
+.reference-linker-code .token.important,
+.reference-linker-code .token.variable { color: var(--code-property, var(--text-normal)); }
+
+.reference-linker-embed-error,
+.reference-linker-embed-note {
+  padding: 6px 10px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+.reference-linker-embed-error { color: var(--text-error); }
+
+/* Drifted line (stale) and renamed/removed symbol (broken), in both render modes.
+   A border-bottom rather than text-decoration: wavy/offset underlines render
+   inconsistently across platforms, so a plain border is the reliable choice. */
+.reference-linker-stale,
+.reference-linker-broken {
+  border-bottom-width: 1px;
+  border-bottom-style: var(--reference-linker-mark-underline-style, dotted);
+}
+.reference-linker-stale { border-bottom-color: var(--reference-linker-stale-color, var(--text-warning)); }
+.reference-linker-broken { border-bottom-color: var(--reference-linker-broken-color, var(--text-error)); }
+
+/* Nested sub-rows — searchable kinds under a language, and chosen folders under a
+   folder list — share one indent and compact height so the pane reads as one list
+   style. The kind rule is unqualified so it also indents the plain rebuild hint. */
+.reference-linker-kind-row,
+.reference-linker-folder-row {
+  margin-left: 1.5em;
+  padding-left: 0.75em;
+  border-left: 2px solid var(--background-modifier-border);
+}
+.reference-linker-kind-row.setting-item,
+.reference-linker-folder-row.setting-item {
+  border-top: 0;
+  padding: 4px 6px 4px 0.75em;
+}
+.reference-linker-kind-row .setting-item-name {
+  font-size: 0.9em;
+  opacity: 0.85;
+}
+
+/* Folder-set editor: a full-width input with autocomplete and an add button below
+   the chosen-folder rows. */
+.reference-linker-folder-rows:not(:empty) {
+  margin: 6px 0;
+}
+.reference-linker-folder-row .setting-item-name {
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+  overflow-wrap: anywhere;
+}
+.reference-linker-folder-add {
+  display: flex;
+  gap: 8px;
+  margin: 6px 0 18px 1.5em;
+}
+.reference-linker-folder-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.reference-linker-folder-addbtn {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.reference-linker-folder-addbtn svg {
+  width: 16px;
+  height: 16px;
+}

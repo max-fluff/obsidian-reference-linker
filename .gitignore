@@ -1,0 +1,7 @@
+node_modules/
+test-vault/
+esbuild.local.mjs
+.idea/
+*.log
+.DS_Store
+data.json

@@ -1,0 +1,10 @@
+{
+  "id": "reference-linker",
+  "name": "Reference Linker",
+  "version": "1.0.0",
+  "minAppVersion": "1.4.0",
+  "description": "Autocomplete links to external documents (PDF, Office, images) and insert a deep-link that opens them at the right page in an external viewer.",
+  "author": "max-fluff",
+  "authorUrl": "https://github.com/max-fluff",
+  "isDesktopOnly": true
+}
