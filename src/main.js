@@ -23,6 +23,7 @@ const { registerEmbed } = require('./embed');
 const actualize = require('./actualize');
 const { ReferenceLinkModal, PresetPickerModal } = require('./modal');
 const { ReferenceLinkerSettingTab } = require('./settings-tab');
+const { readOutline } = require('./pdf');
 const { initI18n, t, plural } = require('./shared/i18n');
 const api = require('./api');
 
@@ -281,7 +282,7 @@ class ReferenceLinkerPlugin extends Plugin {
     evt.preventDefault();
     evt.stopPropagation();
     // window.open routes through Obsidian's handler, so the user gets the same native
-    // confirmation as any other external link — for editor schemes and file:// alike.
+    // confirmation as any other external link.
     if (open) window.open(uri);
     return true;
   }
@@ -325,10 +326,11 @@ class ReferenceLinkerPlugin extends Plugin {
     return normalizePath(`${this.manifest.dir}/index-cache.json`);
   }
 
-  // A fingerprint of what the scan would produce: the indexed extensions. When it
+  // A fingerprint of what the scan would produce: the indexed extensions plus a format
+  // version (bumped when indexing logic changes, e.g. PDF sections were added). When it
   // changes, the per-file cache is stale even if mtimes haven't moved, so we drop it.
   indexSignature() {
-    return JSON.stringify([...parseExtensions(this.settings.extensions)].sort());
+    return JSON.stringify({ v: 2, exts: [...parseExtensions(this.settings.extensions)].sort() });
   }
 
   async loadCache() {
@@ -582,10 +584,17 @@ class ReferenceLinkerPlugin extends Plugin {
       scan.next.set(rel, cached);
       return;
     }
-    // One entry per file: its base name, keyed by extension (no dot) as the "lang".
+    // The file-level entry, keyed by extension (no dot) as the "lang".
     const base = nodePath.basename(abs).replace(/\.[^.]+$/, '');
     const ext = nodePath.extname(abs).slice(1).toLowerCase();
-    const entries = [{ name: base, kind: 'file', lang: ext, path: rel, line: 1 }];
+    const entries = [{ name: base, kind: 'file', lang: ext, path: rel, line: 1, page: 1 }];
+    // A PDF's outline becomes section entries on their pages (the Phase 2 differentiator).
+    // Cached with the file, so a PDF's outline is only re-read when its mtime changes.
+    if (ext === 'pdf') {
+      for (const s of await readOutline(abs)) {
+        entries.push({ name: s.title, kind: 'section', lang: 'pdf', path: rel, line: s.page, page: s.page });
+      }
+    }
     scan.next.set(rel, { mtimeMs: stat.mtimeMs, entries });
   }
 
@@ -643,7 +652,6 @@ class ReferenceLinkerPlugin extends Plugin {
   editorPresets() {
     const out = [
       { key: 'file', label: t('set.preset.file'), template: PRESETS.file, builtin: true },
-      { key: 'browser', label: t('set.preset.browser'), template: PRESETS.browser, builtin: true },
     ];
     (this.settings.editors || []).forEach((e, i) =>
       out.push({ key: 'u:' + i, label: e.name || `Editor ${i + 1}`, template: e.template, builtin: false }));

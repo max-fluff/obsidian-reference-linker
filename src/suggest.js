@@ -59,7 +59,7 @@ class ReferenceSuggest extends EditorSuggest {
   renderSuggestion(e, el) {
     el.addClass('reference-linker-suggestion');
     el.createSpan({ cls: 'reference-linker-name', text: e.name });
-    el.createSpan({ cls: 'reference-linker-kind', text: e.lang });
+    el.createSpan({ cls: 'reference-linker-kind', text: e.kind === 'section' ? 'p.' + e.page : e.lang });
     el.createSpan({ cls: 'reference-linker-path', text: e.path });
   }
 

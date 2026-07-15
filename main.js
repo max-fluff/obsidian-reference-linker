@@ -86,10 +86,8 @@ var require_constants = __commonJS({
     var { splitLines: splitLines2 } = require_markdown();
     var PRESETS2 = {
       // {root} keeps the note portable: the file holds a relative path, the absolute
-      // reference root is filled in on render/click.
-      file: "file:///{root}/{path}",
-      // Browsers honour #page=N in their PDF viewer, so this is a cross-platform page jump.
-      browser: "file:///{root}/{path}#page={page}"
+      // reference root is filled in on render/click. Opens in the OS default app.
+      file: "file:///{root}/{path}"
     };
     var DEFAULT_SETTINGS2 = {
       // @@ is Code Linker's default; @! avoids a clash when both are installed.
@@ -242,7 +240,7 @@ var require_suggest = __commonJS({
       renderSuggestion(e, el) {
         el.addClass("reference-linker-suggestion");
         el.createSpan({ cls: "reference-linker-name", text: e.name });
-        el.createSpan({ cls: "reference-linker-kind", text: e.lang });
+        el.createSpan({ cls: "reference-linker-kind", text: e.kind === "section" ? "p." + e.page : e.lang });
         el.createSpan({ cls: "reference-linker-path", text: e.path });
       }
       selectSuggestion(e) {
@@ -1313,6 +1311,70 @@ var require_settings_tab = __commonJS({
   }
 });
 
+// src/pdf.js
+var require_pdf = __commonJS({
+  "src/pdf.js"(exports2, module2) {
+    "use strict";
+    var obsidian = require("obsidian");
+    var fs2 = require("fs");
+    var libPromise = null;
+    function pdfjsLib() {
+      if (!libPromise) {
+        libPromise = typeof obsidian.loadPdfJs === "function" ? obsidian.loadPdfJs().catch(() => null) : Promise.resolve(null);
+      }
+      return libPromise;
+    }
+    async function pageOf(doc, dest) {
+      try {
+        let d = dest;
+        if (typeof d === "string")
+          d = await doc.getDestination(d);
+        if (!Array.isArray(d) || !d[0])
+          return null;
+        return await doc.getPageIndex(d[0]) + 1;
+      } catch (e) {
+        return null;
+      }
+    }
+    async function readOutline2(absPath) {
+      const lib = await pdfjsLib();
+      if (!lib || typeof lib.getDocument !== "function")
+        return [];
+      let doc = null;
+      try {
+        const data = new Uint8Array(fs2.readFileSync(absPath));
+        doc = await lib.getDocument({ data, isEvalSupported: false }).promise;
+        const outline = await doc.getOutline();
+        if (!outline || !outline.length)
+          return [];
+        const out = [];
+        const walk = async (items) => {
+          for (const it of items) {
+            const page = await pageOf(doc, it.dest);
+            const title = it.title && it.title.trim();
+            if (title && page)
+              out.push({ title, page });
+            if (it.items && it.items.length)
+              await walk(it.items);
+          }
+        };
+        await walk(outline);
+        return out;
+      } catch (e) {
+        return [];
+      } finally {
+        if (doc) {
+          try {
+            await doc.destroy();
+          } catch (e) {
+          }
+        }
+      }
+    }
+    module2.exports = { readOutline: readOutline2 };
+  }
+});
+
 // src/api.js
 var require_api = __commonJS({
   "src/api.js"(exports2, module2) {
@@ -1464,9 +1526,8 @@ var require_en = __commonJS({
       "set.maxResults.name": "Max results",
       "set.maxResults.desc": "Most suggestions to show at once.",
       "set.editorPreset.name": "Viewer link preset",
-      "set.editorPreset.desc": "How inserted links open. file:// uses the OS default app; browser adds #page= for a page jump. Add your own under \u201CYour viewers\u201D.",
+      "set.editorPreset.desc": "How inserted links open. file:// uses the OS default app. Add your own under \u201CYour viewers\u201D.",
       "set.preset.file": "file://",
-      "set.preset.browser": "Browser (#page=)",
       "set.preset.ask": "Always ask",
       "set.editors.name": "Your viewers",
       "set.editors.count": "{n} added",
@@ -1579,9 +1640,8 @@ var require_ru = __commonJS({
       "set.maxResults.name": "\u041C\u0430\u043A\u0441\u0438\u043C\u0443\u043C \u0440\u0435\u0437\u0443\u043B\u044C\u0442\u0430\u0442\u043E\u0432",
       "set.maxResults.desc": "\u0421\u043A\u043E\u043B\u044C\u043A\u043E \u043F\u043E\u0434\u0441\u043A\u0430\u0437\u043E\u043A \u043F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0442\u044C \u043E\u0434\u043D\u043E\u0432\u0440\u0435\u043C\u0435\u043D\u043D\u043E.",
       "set.editorPreset.name": "\u041F\u0440\u0435\u0441\u0435\u0442 \u043E\u0442\u043A\u0440\u044B\u0442\u0438\u044F",
-      "set.editorPreset.desc": "\u041A\u0430\u043A \u043E\u0442\u043A\u0440\u044B\u0432\u0430\u044E\u0442\u0441\u044F \u0432\u0441\u0442\u0430\u0432\u043B\u0435\u043D\u043D\u044B\u0435 \u0441\u0441\u044B\u043B\u043A\u0438. file:// \u2014 \u043F\u0440\u0438\u043B\u043E\u0436\u0435\u043D\u0438\u0435 \u041E\u0421 \u043F\u043E \u0443\u043C\u043E\u043B\u0447\u0430\u043D\u0438\u044E; browser \u0434\u043E\u0431\u0430\u0432\u043B\u044F\u0435\u0442 #page= \u0434\u043B\u044F \u043F\u0435\u0440\u0435\u0445\u043E\u0434\u0430 \u043D\u0430 \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0443. \u0421\u0432\u043E\u0438 \u2014 \u0432 \xAB\u0412\u0430\u0448\u0438 \u043F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0449\u0438\u043A\u0438\xBB.",
+      "set.editorPreset.desc": "\u041A\u0430\u043A \u043E\u0442\u043A\u0440\u044B\u0432\u0430\u044E\u0442\u0441\u044F \u0432\u0441\u0442\u0430\u0432\u043B\u0435\u043D\u043D\u044B\u0435 \u0441\u0441\u044B\u043B\u043A\u0438. file:// \u2014 \u043F\u0440\u0438\u043B\u043E\u0436\u0435\u043D\u0438\u0435 \u041E\u0421 \u043F\u043E \u0443\u043C\u043E\u043B\u0447\u0430\u043D\u0438\u044E. \u0421\u0432\u043E\u0438 \u2014 \u0432 \xAB\u0412\u0430\u0448\u0438 \u043F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0449\u0438\u043A\u0438\xBB.",
       "set.preset.file": "file://",
-      "set.preset.browser": "\u0411\u0440\u0430\u0443\u0437\u0435\u0440 (#page=)",
       "set.preset.ask": "\u0412\u0441\u0435\u0433\u0434\u0430 \u0441\u043F\u0440\u0430\u0448\u0438\u0432\u0430\u0442\u044C",
       "set.editors.name": "\u0412\u0430\u0448\u0438 \u043F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0449\u0438\u043A\u0438",
       "set.editors.count": "\u0434\u043E\u0431\u0430\u0432\u043B\u0435\u043D\u043E: {n}",
@@ -1623,6 +1683,7 @@ var { registerEmbed } = require_embed();
 var actualize = require_actualize();
 var { ReferenceLinkModal, PresetPickerModal } = require_modal();
 var { ReferenceLinkerSettingTab } = require_settings_tab();
+var { readOutline } = require_pdf();
 var { initI18n, t, plural } = require_i18n();
 var api = require_api();
 var ReferenceLinkerPlugin = class extends Plugin {
@@ -1907,10 +1968,11 @@ var ReferenceLinkerPlugin = class extends Plugin {
   cacheFilePath() {
     return normalizePath(`${this.manifest.dir}/index-cache.json`);
   }
-  // A fingerprint of what the scan would produce: the indexed extensions. When it
+  // A fingerprint of what the scan would produce: the indexed extensions plus a format
+  // version (bumped when indexing logic changes, e.g. PDF sections were added). When it
   // changes, the per-file cache is stale even if mtimes haven't moved, so we drop it.
   indexSignature() {
-    return JSON.stringify([...parseExtensions(this.settings.extensions)].sort());
+    return JSON.stringify({ v: 2, exts: [...parseExtensions(this.settings.extensions)].sort() });
   }
   async loadCache() {
     try {
@@ -2167,7 +2229,12 @@ var ReferenceLinkerPlugin = class extends Plugin {
     }
     const base = nodePath.basename(abs).replace(/\.[^.]+$/, "");
     const ext = nodePath.extname(abs).slice(1).toLowerCase();
-    const entries = [{ name: base, kind: "file", lang: ext, path: rel, line: 1 }];
+    const entries = [{ name: base, kind: "file", lang: ext, path: rel, line: 1, page: 1 }];
+    if (ext === "pdf") {
+      for (const s of await readOutline(abs)) {
+        entries.push({ name: s.title, kind: "section", lang: "pdf", path: rel, line: s.page, page: s.page });
+      }
+    }
     scan.next.set(rel, { mtimeMs: stat.mtimeMs, entries });
   }
   // An entry's absolute path on disk: the code root joined with its stored relative path.
@@ -2211,8 +2278,7 @@ var ReferenceLinkerPlugin = class extends Plugin {
   // where key is the value the settings dropdown stores ('u:<i>' for a user editor).
   editorPresets() {
     const out = [
-      { key: "file", label: t("set.preset.file"), template: PRESETS.file, builtin: true },
-      { key: "browser", label: t("set.preset.browser"), template: PRESETS.browser, builtin: true }
+      { key: "file", label: t("set.preset.file"), template: PRESETS.file, builtin: true }
     ];
     (this.settings.editors || []).forEach((e, i) => out.push({ key: "u:" + i, label: e.name || `Editor ${i + 1}`, template: e.template, builtin: false }));
     return out;
