@@ -146,8 +146,15 @@ settings:
   font-size: var(--font-ui-smaller);
   --cl-lh: 1.5em;
 }
-.reference-linker-hover-body { max-height: 40vh; }
+.reference-linker-hover-body { max-height: 60vh; }
 .reference-linker-embed-body { max-height: 60vh; }
+/* PDF page / image preview inside the hover popover. */
+.reference-linker-hover-body canvas,
+.reference-linker-hover-body img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
 /* The .reference-linker-code prefix raises specificity above the theme's / editor's own
    `pre` rules — in Live Preview an embed is rendered where those would otherwise add a
    top margin, border or a different line-height and push the code off the fixed band. */

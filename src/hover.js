@@ -1,15 +1,21 @@
 'use strict';
 
-// Our own popover, not Obsidian's HoverPopover (which hides as soon as the pointer
-// leaves the link), so you can scroll and select inside the preview.
+// Our own popover, not Obsidian's HoverPopover (which hides as soon as the pointer leaves
+// the link), so you can scroll and stay inside the preview. Shows the target PDF page
+// (rendered by pdf.js) or the image itself; other file types have no preview.
 
 const nodePath = require('path');
-const { readLines, renderCode } = require('./render');
+const fs = require('fs');
+const { openDocument, renderPageToCanvas } = require('./pdf');
 
 const SHOW_DELAY = 200;
 const HIDE_GRACE = 250;
+const PREVIEW_WIDTH = 420; // CSS px the page/image is shown at
 
-const keyOf = (e) => e.path + ':' + e.line;
+const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'avif']);
+const MIME = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', svg: 'image/svg+xml', avif: 'image/avif' };
+
+const keyOf = (e) => e.path + ':' + (e.page || e.line || 1);
 
 class HoverPreview {
   constructor(plugin) {
@@ -17,13 +23,17 @@ class HoverPreview {
     this.el = null;
     this.timer = null;
     this.hideTimer = null;
-    this.key = '';        // path:line currently shown
-    this.pendingKey = ''; // path:line scheduled next
+    this.key = '';        // what's currently shown
+    this.pendingKey = ''; // what's scheduled next
+    this.token = 0;       // guards against a stale async render revealing itself
+    this.docPath = '';    // cached PDF document, reused across pages of the same file
+    this.doc = null;
+    this.blobUrl = '';    // object URL of the currently shown image
   }
 
   ensureEl() {
     if (!this.el) {
-      this.el = document.body.createDiv({ cls: 'reference-linker-hover reference-linker-code reference-linker-hidden' });
+      this.el = document.body.createDiv({ cls: 'reference-linker-hover reference-linker-hidden' });
       this.el.addEventListener('mouseenter', () => this.cancelHide());
       this.el.addEventListener('mouseleave', () => this.leave());
     }
@@ -34,8 +44,15 @@ class HoverPreview {
   contains(node) { return !!this.el && !!node && this.el.contains(node); }
   cancelHide() { clearTimeout(this.hideTimer); this.hideTimer = null; }
 
+  // Only PDFs and images preview; skip other types so nothing schedules for them.
+  previewable(entry) {
+    const ext = (entry.lang || '').toLowerCase();
+    return ext === 'pdf' || IMAGE_EXT.has(ext);
+  }
+
   schedule(entry, x, y) {
     this.cancelHide();
+    if (!this.previewable(entry)) return;
     const key = keyOf(entry);
     if (key === this.key && this.isVisible()) return;
     if (key === this.pendingKey) return;
@@ -49,37 +66,50 @@ class HoverPreview {
     this.hideTimer = setTimeout(() => this.hide(), HIDE_GRACE);
   }
 
+  // Open + cache the PDF for `abs`, reusing it while hovering pages of the same file.
+  async getDoc(abs) {
+    if (this.docPath === abs && this.doc) return this.doc;
+    if (this.doc) { try { await this.doc.destroy(); } catch { /* already gone */ } this.doc = null; }
+    this.doc = await openDocument(abs);
+    this.docPath = this.doc ? abs : '';
+    return this.doc;
+  }
+
   async show(entry, x, y) {
-    const s = this.plugin.settings;
     const root = this.plugin.codeRoot();
     const abs = root ? nodePath.join(root, entry.path) : entry.path;
-    const line = entry.line || 1;
-    // Negative means no limit in that direction — read to the file edge.
-    const before = s.hoverBefore < 0 ? Infinity : Math.max(0, s.hoverBefore | 0);
-    const after = s.hoverAfter < 0 ? Infinity : Math.max(0, s.hoverAfter | 0);
-    const snippet = await readLines(abs, line - before, line + after);
-    if (!snippet) return;
+    const ext = (entry.lang || '').toLowerCase();
+    const token = ++this.token; // any newer show()/hide() invalidates this render
 
-    this.key = keyOf(entry);
     const el = this.ensureEl();
     el.empty();
-    el.createDiv({ cls: 'reference-linker-hover-header', text: keyOf(entry) });
+    const header = entry.kind === 'section' ? entry.name + '  ·  p.' + (entry.page || 1) : entry.name;
+    el.createDiv({ cls: 'reference-linker-hover-header', text: header });
     const body = el.createDiv({ cls: 'reference-linker-hover-body' });
 
-    const idx = Math.min(Math.max(0, line - snippet.startLine), snippet.lines.length - 1);
-    const band = body.createDiv({ cls: 'reference-linker-hover-band' });
-    band.style.top = 'calc(var(--cl-lh) * ' + idx + ')';
+    if (ext === 'pdf') {
+      const doc = await this.getDoc(abs);
+      if (token !== this.token || !doc) return;
+      const canvas = body.createEl('canvas');
+      const ok = await renderPageToCanvas(doc, entry.page || 1, canvas, PREVIEW_WIDTH);
+      if (token !== this.token || !ok) return;
+    } else if (IMAGE_EXT.has(ext)) {
+      let buf;
+      try { buf = fs.readFileSync(abs); } catch { return; }
+      if (token !== this.token) return;
+      this.revokeBlob();
+      this.blobUrl = URL.createObjectURL(new Blob([buf], { type: MIME[ext] || 'application/octet-stream' }));
+      body.createEl('img').src = this.blobUrl;
+    } else {
+      return;
+    }
 
-    await renderCode(body, snippet.lines.join('\n'), this.plugin.prismIdFor(entry.lang));
-
-    // Reveal (display via CSS class) but keep it invisible and off-screen while we
-    // measure, then place near the cursor, flipping when it would overflow. The final
-    // coordinates are dynamic, so left/top stay inline.
+    this.key = keyOf(entry);
+    // Reveal off-screen to measure, then place near the cursor, flipping on overflow.
     el.style.visibility = 'hidden';
     el.style.left = '-9999px';
     el.style.top = '0px';
     el.removeClass('reference-linker-hidden');
-    body.scrollTop = Math.max(0, band.offsetTop - (body.clientHeight - band.offsetHeight) / 2); // center the target line
     const r = el.getBoundingClientRect();
     const pad = 12;
     let left = x + pad;
@@ -91,18 +121,26 @@ class HoverPreview {
     el.style.visibility = 'visible';
   }
 
+  revokeBlob() {
+    if (this.blobUrl) { try { URL.revokeObjectURL(this.blobUrl); } catch { /* ignore */ } this.blobUrl = ''; }
+  }
+
   hide() {
     clearTimeout(this.timer);
     clearTimeout(this.hideTimer);
     this.hideTimer = null;
     this.pendingKey = '';
     this.key = '';
+    this.token++;
+    this.revokeBlob();
     if (this.el) { this.el.addClass('reference-linker-hidden'); this.el.empty(); }
   }
 
   destroy() {
     clearTimeout(this.timer);
     clearTimeout(this.hideTimer);
+    this.revokeBlob();
+    if (this.doc) { try { this.doc.destroy(); } catch { /* already gone */ } this.doc = null; }
     if (this.el) { this.el.remove(); this.el = null; }
   }
 }

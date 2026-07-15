@@ -288,6 +288,272 @@ var require_filter = __commonJS({
   }
 });
 
+// src/pdf.js
+var require_pdf = __commonJS({
+  "src/pdf.js"(exports2, module2) {
+    "use strict";
+    var obsidian = require("obsidian");
+    var fs2 = require("fs");
+    var libPromise = null;
+    function pdfjsLib() {
+      if (!libPromise) {
+        libPromise = typeof obsidian.loadPdfJs === "function" ? obsidian.loadPdfJs().catch(() => null) : Promise.resolve(null);
+      }
+      return libPromise;
+    }
+    async function openDocument(absPath) {
+      const lib = await pdfjsLib();
+      if (!lib || typeof lib.getDocument !== "function")
+        return null;
+      try {
+        const data = new Uint8Array(fs2.readFileSync(absPath));
+        return await lib.getDocument({ data, isEvalSupported: false }).promise;
+      } catch (e) {
+        return null;
+      }
+    }
+    async function pageOf(doc, dest) {
+      try {
+        let d = dest;
+        if (typeof d === "string")
+          d = await doc.getDestination(d);
+        if (!Array.isArray(d) || !d[0])
+          return null;
+        return await doc.getPageIndex(d[0]) + 1;
+      } catch (e) {
+        return null;
+      }
+    }
+    async function readOutline2(absPath) {
+      const doc = await openDocument(absPath);
+      if (!doc)
+        return [];
+      try {
+        const outline = await doc.getOutline();
+        if (!outline || !outline.length)
+          return [];
+        const out = [];
+        const walk = async (items) => {
+          for (const it of items) {
+            const page = await pageOf(doc, it.dest);
+            const title = it.title && it.title.trim();
+            if (title && page)
+              out.push({ title, page });
+            if (it.items && it.items.length)
+              await walk(it.items);
+          }
+        };
+        await walk(outline);
+        return out;
+      } catch (e) {
+        return [];
+      } finally {
+        try {
+          await doc.destroy();
+        } catch (e) {
+        }
+      }
+    }
+    async function renderPageToCanvas(doc, pageNum, canvas, cssWidth) {
+      try {
+        const n = Math.min(Math.max(1, pageNum | 0), doc.numPages);
+        const page = await doc.getPage(n);
+        const unit = page.getViewport({ scale: 1 });
+        const dpr = window.devicePixelRatio || 1;
+        const viewport = page.getViewport({ scale: cssWidth / unit.width * dpr });
+        canvas.width = Math.floor(viewport.width);
+        canvas.height = Math.floor(viewport.height);
+        canvas.style.width = viewport.width / dpr + "px";
+        canvas.style.height = viewport.height / dpr + "px";
+        await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+        page.cleanup();
+        return true;
+      } catch (e) {
+        return false;
+      }
+    }
+    module2.exports = { openDocument, readOutline: readOutline2, renderPageToCanvas };
+  }
+});
+
+// src/hover.js
+var require_hover = __commonJS({
+  "src/hover.js"(exports2, module2) {
+    "use strict";
+    var nodePath2 = require("path");
+    var fs2 = require("fs");
+    var { openDocument, renderPageToCanvas } = require_pdf();
+    var SHOW_DELAY = 200;
+    var HIDE_GRACE = 250;
+    var PREVIEW_WIDTH = 420;
+    var IMAGE_EXT = /* @__PURE__ */ new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "avif"]);
+    var MIME = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", bmp: "image/bmp", svg: "image/svg+xml", avif: "image/avif" };
+    var keyOf = (e) => e.path + ":" + (e.page || e.line || 1);
+    var HoverPreview2 = class {
+      constructor(plugin) {
+        this.plugin = plugin;
+        this.el = null;
+        this.timer = null;
+        this.hideTimer = null;
+        this.key = "";
+        this.pendingKey = "";
+        this.token = 0;
+        this.docPath = "";
+        this.doc = null;
+        this.blobUrl = "";
+      }
+      ensureEl() {
+        if (!this.el) {
+          this.el = document.body.createDiv({ cls: "reference-linker-hover reference-linker-hidden" });
+          this.el.addEventListener("mouseenter", () => this.cancelHide());
+          this.el.addEventListener("mouseleave", () => this.leave());
+        }
+        return this.el;
+      }
+      isVisible() {
+        return !!this.el && !this.el.classList.contains("reference-linker-hidden");
+      }
+      contains(node) {
+        return !!this.el && !!node && this.el.contains(node);
+      }
+      cancelHide() {
+        clearTimeout(this.hideTimer);
+        this.hideTimer = null;
+      }
+      // Only PDFs and images preview; skip other types so nothing schedules for them.
+      previewable(entry) {
+        const ext = (entry.lang || "").toLowerCase();
+        return ext === "pdf" || IMAGE_EXT.has(ext);
+      }
+      schedule(entry, x, y) {
+        this.cancelHide();
+        if (!this.previewable(entry))
+          return;
+        const key = keyOf(entry);
+        if (key === this.key && this.isVisible())
+          return;
+        if (key === this.pendingKey)
+          return;
+        this.pendingKey = key;
+        clearTimeout(this.timer);
+        this.timer = setTimeout(() => {
+          this.pendingKey = "";
+          this.show(entry, x, y);
+        }, SHOW_DELAY);
+      }
+      leave() {
+        if (this.hideTimer)
+          return;
+        this.hideTimer = setTimeout(() => this.hide(), HIDE_GRACE);
+      }
+      // Open + cache the PDF for `abs`, reusing it while hovering pages of the same file.
+      async getDoc(abs) {
+        if (this.docPath === abs && this.doc)
+          return this.doc;
+        if (this.doc) {
+          try {
+            await this.doc.destroy();
+          } catch (e) {
+          }
+          this.doc = null;
+        }
+        this.doc = await openDocument(abs);
+        this.docPath = this.doc ? abs : "";
+        return this.doc;
+      }
+      async show(entry, x, y) {
+        const root = this.plugin.codeRoot();
+        const abs = root ? nodePath2.join(root, entry.path) : entry.path;
+        const ext = (entry.lang || "").toLowerCase();
+        const token = ++this.token;
+        const el = this.ensureEl();
+        el.empty();
+        const header = entry.kind === "section" ? entry.name + "  \xB7  p." + (entry.page || 1) : entry.name;
+        el.createDiv({ cls: "reference-linker-hover-header", text: header });
+        const body = el.createDiv({ cls: "reference-linker-hover-body" });
+        if (ext === "pdf") {
+          const doc = await this.getDoc(abs);
+          if (token !== this.token || !doc)
+            return;
+          const canvas = body.createEl("canvas");
+          const ok = await renderPageToCanvas(doc, entry.page || 1, canvas, PREVIEW_WIDTH);
+          if (token !== this.token || !ok)
+            return;
+        } else if (IMAGE_EXT.has(ext)) {
+          let buf;
+          try {
+            buf = fs2.readFileSync(abs);
+          } catch (e) {
+            return;
+          }
+          if (token !== this.token)
+            return;
+          this.revokeBlob();
+          this.blobUrl = URL.createObjectURL(new Blob([buf], { type: MIME[ext] || "application/octet-stream" }));
+          body.createEl("img").src = this.blobUrl;
+        } else {
+          return;
+        }
+        this.key = keyOf(entry);
+        el.style.visibility = "hidden";
+        el.style.left = "-9999px";
+        el.style.top = "0px";
+        el.removeClass("reference-linker-hidden");
+        const r = el.getBoundingClientRect();
+        const pad = 12;
+        let left = x + pad;
+        let top = y + pad;
+        if (left + r.width > window.innerWidth - pad)
+          left = Math.max(pad, x - pad - r.width);
+        if (top + r.height > window.innerHeight - pad)
+          top = Math.max(pad, y - pad - r.height);
+        el.style.left = left + "px";
+        el.style.top = top + "px";
+        el.style.visibility = "visible";
+      }
+      revokeBlob() {
+        if (this.blobUrl) {
+          try {
+            URL.revokeObjectURL(this.blobUrl);
+          } catch (e) {
+          }
+          this.blobUrl = "";
+        }
+      }
+      hide() {
+        clearTimeout(this.timer);
+        clearTimeout(this.hideTimer);
+        this.hideTimer = null;
+        this.pendingKey = "";
+        this.key = "";
+        this.token++;
+        this.revokeBlob();
+        if (this.el) {
+          this.el.addClass("reference-linker-hidden");
+          this.el.empty();
+        }
+      }
+      destroy() {
+        clearTimeout(this.timer);
+        clearTimeout(this.hideTimer);
+        this.revokeBlob();
+        if (this.doc) {
+          try {
+            this.doc.destroy();
+          } catch (e) {
+          }
+          this.doc = null;
+        }
+        if (this.el) {
+          this.el.remove();
+          this.el = null;
+        }
+      }
+    };
+    module2.exports = { HoverPreview: HoverPreview2 };
+  }
+});
+
 // src/render.js
 var require_render = __commonJS({
   "src/render.js"(exports2, module2) {
@@ -374,121 +640,6 @@ var require_render = __commonJS({
         code.setText(text);
     }
     module2.exports = { readLines, renderCode };
-  }
-});
-
-// src/hover.js
-var require_hover = __commonJS({
-  "src/hover.js"(exports2, module2) {
-    "use strict";
-    var nodePath2 = require("path");
-    var { readLines, renderCode } = require_render();
-    var SHOW_DELAY = 200;
-    var HIDE_GRACE = 250;
-    var keyOf = (e) => e.path + ":" + e.line;
-    var HoverPreview2 = class {
-      constructor(plugin) {
-        this.plugin = plugin;
-        this.el = null;
-        this.timer = null;
-        this.hideTimer = null;
-        this.key = "";
-        this.pendingKey = "";
-      }
-      ensureEl() {
-        if (!this.el) {
-          this.el = document.body.createDiv({ cls: "reference-linker-hover reference-linker-code reference-linker-hidden" });
-          this.el.addEventListener("mouseenter", () => this.cancelHide());
-          this.el.addEventListener("mouseleave", () => this.leave());
-        }
-        return this.el;
-      }
-      isVisible() {
-        return !!this.el && !this.el.classList.contains("reference-linker-hidden");
-      }
-      contains(node) {
-        return !!this.el && !!node && this.el.contains(node);
-      }
-      cancelHide() {
-        clearTimeout(this.hideTimer);
-        this.hideTimer = null;
-      }
-      schedule(entry, x, y) {
-        this.cancelHide();
-        const key = keyOf(entry);
-        if (key === this.key && this.isVisible())
-          return;
-        if (key === this.pendingKey)
-          return;
-        this.pendingKey = key;
-        clearTimeout(this.timer);
-        this.timer = setTimeout(() => {
-          this.pendingKey = "";
-          this.show(entry, x, y);
-        }, SHOW_DELAY);
-      }
-      leave() {
-        if (this.hideTimer)
-          return;
-        this.hideTimer = setTimeout(() => this.hide(), HIDE_GRACE);
-      }
-      async show(entry, x, y) {
-        const s = this.plugin.settings;
-        const root = this.plugin.codeRoot();
-        const abs = root ? nodePath2.join(root, entry.path) : entry.path;
-        const line = entry.line || 1;
-        const before = s.hoverBefore < 0 ? Infinity : Math.max(0, s.hoverBefore | 0);
-        const after = s.hoverAfter < 0 ? Infinity : Math.max(0, s.hoverAfter | 0);
-        const snippet = await readLines(abs, line - before, line + after);
-        if (!snippet)
-          return;
-        this.key = keyOf(entry);
-        const el = this.ensureEl();
-        el.empty();
-        el.createDiv({ cls: "reference-linker-hover-header", text: keyOf(entry) });
-        const body = el.createDiv({ cls: "reference-linker-hover-body" });
-        const idx = Math.min(Math.max(0, line - snippet.startLine), snippet.lines.length - 1);
-        const band = body.createDiv({ cls: "reference-linker-hover-band" });
-        band.style.top = "calc(var(--cl-lh) * " + idx + ")";
-        await renderCode(body, snippet.lines.join("\n"), this.plugin.prismIdFor(entry.lang));
-        el.style.visibility = "hidden";
-        el.style.left = "-9999px";
-        el.style.top = "0px";
-        el.removeClass("reference-linker-hidden");
-        body.scrollTop = Math.max(0, band.offsetTop - (body.clientHeight - band.offsetHeight) / 2);
-        const r = el.getBoundingClientRect();
-        const pad = 12;
-        let left = x + pad;
-        let top = y + pad;
-        if (left + r.width > window.innerWidth - pad)
-          left = Math.max(pad, x - pad - r.width);
-        if (top + r.height > window.innerHeight - pad)
-          top = Math.max(pad, y - pad - r.height);
-        el.style.left = left + "px";
-        el.style.top = top + "px";
-        el.style.visibility = "visible";
-      }
-      hide() {
-        clearTimeout(this.timer);
-        clearTimeout(this.hideTimer);
-        this.hideTimer = null;
-        this.pendingKey = "";
-        this.key = "";
-        if (this.el) {
-          this.el.addClass("reference-linker-hidden");
-          this.el.empty();
-        }
-      }
-      destroy() {
-        clearTimeout(this.timer);
-        clearTimeout(this.hideTimer);
-        if (this.el) {
-          this.el.remove();
-          this.el = null;
-        }
-      }
-    };
-    module2.exports = { HoverPreview: HoverPreview2 };
   }
 });
 
@@ -1308,76 +1459,6 @@ var require_settings_tab = __commonJS({
       }
     };
     module2.exports = { ReferenceLinkerSettingTab: ReferenceLinkerSettingTab2 };
-  }
-});
-
-// src/pdf.js
-var require_pdf = __commonJS({
-  "src/pdf.js"(exports2, module2) {
-    "use strict";
-    var obsidian = require("obsidian");
-    var fs2 = require("fs");
-    var libPromise = null;
-    function pdfjsLib() {
-      if (!libPromise) {
-        libPromise = typeof obsidian.loadPdfJs === "function" ? obsidian.loadPdfJs().catch(() => null) : Promise.resolve(null);
-      }
-      return libPromise;
-    }
-    async function openDocument(absPath) {
-      const lib = await pdfjsLib();
-      if (!lib || typeof lib.getDocument !== "function")
-        return null;
-      try {
-        const data = new Uint8Array(fs2.readFileSync(absPath));
-        return await lib.getDocument({ data, isEvalSupported: false }).promise;
-      } catch (e) {
-        return null;
-      }
-    }
-    async function pageOf(doc, dest) {
-      try {
-        let d = dest;
-        if (typeof d === "string")
-          d = await doc.getDestination(d);
-        if (!Array.isArray(d) || !d[0])
-          return null;
-        return await doc.getPageIndex(d[0]) + 1;
-      } catch (e) {
-        return null;
-      }
-    }
-    async function readOutline2(absPath) {
-      const doc = await openDocument(absPath);
-      if (!doc)
-        return [];
-      try {
-        const outline = await doc.getOutline();
-        if (!outline || !outline.length)
-          return [];
-        const out = [];
-        const walk = async (items) => {
-          for (const it of items) {
-            const page = await pageOf(doc, it.dest);
-            const title = it.title && it.title.trim();
-            if (title && page)
-              out.push({ title, page });
-            if (it.items && it.items.length)
-              await walk(it.items);
-          }
-        };
-        await walk(outline);
-        return out;
-      } catch (e) {
-        return [];
-      } finally {
-        try {
-          await doc.destroy();
-        } catch (e) {
-        }
-      }
-    }
-    module2.exports = { openDocument, readOutline: readOutline2 };
   }
 });
 

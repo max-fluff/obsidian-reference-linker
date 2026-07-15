@@ -71,4 +71,26 @@ async function readOutline(absPath) {
   }
 }
 
-module.exports = { openDocument, readOutline };
+// Render page `pageNum` of an open document into `canvas`, sized to `cssWidth` CSS px wide
+// (height follows the page aspect), rasterised at devicePixelRatio for sharpness. Returns
+// true on success.
+async function renderPageToCanvas(doc, pageNum, canvas, cssWidth) {
+  try {
+    const n = Math.min(Math.max(1, pageNum | 0), doc.numPages);
+    const page = await doc.getPage(n);
+    const unit = page.getViewport({ scale: 1 });
+    const dpr = window.devicePixelRatio || 1;
+    const viewport = page.getViewport({ scale: (cssWidth / unit.width) * dpr });
+    canvas.width = Math.floor(viewport.width);
+    canvas.height = Math.floor(viewport.height);
+    canvas.style.width = (viewport.width / dpr) + 'px';
+    canvas.style.height = (viewport.height / dpr) + 'px';
+    await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+    page.cleanup();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+module.exports = { openDocument, readOutline, renderPageToCanvas };
