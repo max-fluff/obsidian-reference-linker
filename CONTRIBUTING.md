@@ -13,11 +13,11 @@ npm install      # once, installs esbuild
 npm run build    # bundle src/ -> main.js
 ```
 
-`main.js` is generated. Edit the modules in `src/` and rebuild — don't edit `main.js` by hand. The [Development](README.md#development) section explains how `src/` is laid out.
+`main.js` is generated. Edit the modules in `src/` and rebuild; don't edit `main.js` by hand. The [Development](README.md#development) section explains how `src/` is laid out.
 
 ## Adding a viewer preset
 
-Built-in viewer presets live in `src/constants.js` (`PRESETS`) with their labels in `src/locales/`. A preset is a **URL template** built from the placeholders `{root}` `{path}` `{abs}` `{page}` `{name}`; links are opened by handing that URL to the OS (`shell.openExternal`), which is what keeps a PDF's `#page=` fragment intact. The plugin deliberately doesn't spawn viewer processes — if you need a specific app, add a named template under *Your viewers* with a URL scheme it registers.
+Built-in viewer presets live in `src/constants.js` (`PRESETS`) with their labels in `src/locales/`. A preset is a URL template built from the placeholders `{root}` `{path}` `{abs}` `{page}` `{name}`. Links are opened by handing that URL to the OS (`shell.openExternal`), which is what keeps a PDF's `#page=` fragment intact. The plugin deliberately doesn't spawn viewer processes. If you need a specific app, add a named template under *Your viewers* with a URL scheme it registers.
 
 ## Pull requests
 
