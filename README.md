@@ -1,4 +1,13 @@
+<p align="center">
+  <img src="docs/images/banner.svg" alt="Reference Linker — autocomplete document references, jump to the exact page" width="760">
+</p>
+
 # Reference Linker
+
+<p align="center">
+  <a href="https://github.com/max-fluff/obsidian-reference-linker/releases/latest"><img src="https://img.shields.io/github/v/release/max-fluff/obsidian-reference-linker?sort=semver&color=7c3aed&label=release" alt="Latest release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/max-fluff/obsidian-reference-linker?color=7c3aed" alt="License: MIT"></a>
+</p>
 
 An Obsidian plugin that autocompletes links to your **external documents** — PDFs, Office files, images — and inserts a markdown link that opens the document in your default app, **at the right page**. For PDFs it also indexes the outline, so you can link straight to a section, preview the page on hover, and embed it inline.
 
@@ -195,8 +204,17 @@ In an existing clone without the submodule, run `git submodule update --init` fi
 - `modal.js` — the fuzzy pickers (index entries, viewer formats).
 - `settings-tab.js` — the settings UI.
 - `folder-suggest.js` — filesystem folder autocomplete for the root/scan/skip fields (feature-detected).
-- `shared/` — git submodule shared with Code Linker and Glossary Linker: markdown helpers, the i18n engine, and the folder-list settings editor.
+- `shared/` — git submodule shared with the sibling linker plugins: markdown helpers, the i18n engine, the folder-list settings editor, and the family's branding generators (dev-only — nothing under `shared/branding/` is bundled).
 - `locales/` — interface strings (English and Russian), fed to the shared i18n engine.
+
+The header images are generated, not hand-drawn — `docs/branding.config.mjs` holds this plugin's mark, motif and copy, and the shared generators turn it into the assets:
+
+```sh
+npm run banner   # docs/images/banner.svg + social-preview.svg
+npm run plates   # store screenshot backdrops -> docs/images/store/
+```
+
+`icon.svg` and `icon-mono.svg` are hand-written, and the config reuses their paths verbatim, so the mark on the icon, the banner and the store plates is one drawing. See [`BRANDING.md`](src/shared/branding/BRANDING.md) for the conventions.
 
 To deploy into a test vault on each build, create `esbuild.local.mjs` exporting `deployTargets` (a list of plugin folders to copy the build into). `node_modules/`, `test-vault/` and `esbuild.local.mjs` are git-ignored.
 
@@ -221,10 +239,31 @@ Nothing below is required — the plugin runs on its own — but it cooperates w
 
 ## Related plugins
 
-Also by the author — part of the same linker family:
+Also by the author — the rest of the linker family. Two of them autocomplete a name into a deep-link that lands on the exact spot; two highlight words already in your notes and link them.
 
-- **[Code Linker](https://github.com/max-fluff/obsidian-code-linker)** — autocomplete links to your source code, opening the file at the right line in your editor.
-- **[Glossary Linker](https://github.com/max-fluff/obsidian-glossary-linker)** — highlight glossary terms in any word form and turn them into links.
+**[Code Linker](https://community.obsidian.md/plugins/code-linker)** — autocompletes references to your source code and inserts a deep-link that opens the file at the exact line in your editor (VS Code, JetBrains, …). Desktop-only. This plugin is its document counterpart — a section on its page instead of a symbol on its line.
+
+<p align="center">
+  <a href="https://community.obsidian.md/plugins/code-linker">
+    <img src="docs/images/code-linker-banner.svg" alt="Code Linker — autocomplete code references, jump to the exact line" width="480">
+  </a>
+</p>
+
+**[Glossary Linker](https://community.obsidian.md/plugins/glossary-linker)** — highlights glossary terms in any word form, turns them into real links, and learns new aliases from links you've already made. Works on desktop and mobile.
+
+<p align="center">
+  <a href="https://community.obsidian.md/plugins/glossary-linker">
+    <img src="docs/images/glossary-linker-banner.svg" alt="Glossary Linker — highlight terms in any word form, then link them" width="480">
+  </a>
+</p>
+
+**[Heading Linker](https://github.com/max-fluff/obsidian-heading-linker)** — the file-based sibling of Glossary Linker: each heading inside a chosen file is a term, matched in any word form and turned into a link. Works on desktop and mobile. Not in the community catalog yet.
+
+<p align="center">
+  <a href="https://github.com/max-fluff/obsidian-heading-linker">
+    <img src="docs/images/heading-linker-banner.svg" alt="Heading Linker — highlight words in any form, link them to headings" width="480">
+  </a>
+</p>
 
 ## License
 

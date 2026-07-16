@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" width="1280" height="640" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#27243d"/>
+      <stop offset="1" stop-color="#191826"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="1280" height="640" fill="url(#bg)"/>
+
+  <g fill="#b6a6e8" font-family="ui-monospace,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" font-weight="500">
+    <text x="80" y="96" font-size="40" fill-opacity="0.1">.pdf</text>
+    <text x="360" y="80" font-size="36" fill-opacity="0.08">#page=12</text>
+    <text x="560" y="100" font-size="32" fill-opacity="0.07">.docx</text>
+    <text x="720" y="86" font-size="44" fill-opacity="0.11">p. 148</text>
+    <text x="920" y="96" font-size="38" fill-opacity="0.09">.epub</text>
+    <text x="1120" y="90" font-size="30" fill-opacity="0.07">.xlsx</text>
+    <text x="90" y="586" font-size="36" fill-opacity="0.09">§ 3.2</text>
+    <text x="300" y="600" font-size="30" fill-opacity="0.07">.png</text>
+    <text x="470" y="588" font-size="34" fill-opacity="0.08">Chapter 7</text>
+    <text x="680" y="600" font-size="38" fill-opacity="0.1">.pptx</text>
+    <text x="850" y="586" font-size="36" fill-opacity="0.09">#page=3</text>
+    <text x="1110" y="598" font-size="32" fill-opacity="0.08">.jpg</text>
+  </g>
+
+<g transform="translate(505.14,101.14) scale(0.5268)"><g fill="none" stroke="#fff" stroke-linejoin="round">
+    <g stroke-width="24">
+      <path d="M159 156H119v200h40"/>
+      <path d="M353 156h40v200h-40"/>
+    </g>
+    <g stroke-width="26">
+      <path d="M216 187h34l58 58v68a12 12 0 0 1-12 12h-80a12 12 0 0 1-12-12V199a12 12 0 0 1 12-12z"/>
+      <path d="M250 187v46a12 12 0 0 0 12 12h46"/>
+    </g>
+  </g></g>
+
+  <text x="640" y="432" font-size="100" font-weight="700" fill="#f4f4f6" text-anchor="middle">Reference Linker</text>
+  <text x="640" y="496" font-size="36" fill="#c2bfd2" text-anchor="middle">Autocomplete document references, jump to the exact page.</text>
+</svg>

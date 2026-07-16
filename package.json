@@ -11,7 +11,9 @@
   "keywords": ["obsidian", "obsidian-plugin", "pdf", "reference", "autocomplete"],
   "private": true,
   "scripts": {
-    "build": "node esbuild.config.mjs"
+    "build": "node esbuild.config.mjs",
+    "plates": "node src/shared/branding/make-plates.mjs",
+    "banner": "node src/shared/branding/make-banner.mjs"
   },
   "devDependencies": {
     "esbuild": "0.17.19"
