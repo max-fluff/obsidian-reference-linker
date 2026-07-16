@@ -29,12 +29,11 @@ class ReferenceSuggest extends EditorSuggest {
     const idx = this.plugin.index;
     if (!idx || !idx.length) return [];
     const max = this.plugin.settings.maxResults;
-    const hidden = new Set(this.plugin.settings.disabledKinds || []);
-    // Inline filter: "py:handler", "def:handler", "Foo.bar".
+    // Inline filter: "pdf:report", "sec:intro".
     const f = this.plugin.parseQuery(ctx.query);
-    const pass = (e) => !hidden.has(e.lang + ':' + e.kind) && this.plugin.entryPassesFilter(e, f);
+    const pass = (e) => this.plugin.entryPassesFilter(e, f);
 
-    if (!f.name) { // "py:", "Foo." or empty — list what passes the filter
+    if (!f.name) { // "sec:" or empty — list what passes the filter
       const out = [];
       for (const e of idx) {
         if (!pass(e)) continue;

@@ -7,7 +7,6 @@ module.exports = {
   'cmd.rebuildIndex': 'Rebuild reference index',
   'cmd.insertLink': 'Insert reference link',
   'cmd.insertLinkAs': 'Insert reference link as…',
-  'cmd.switchPreset': 'Switch viewer preset',
   'cmd.openFile': 'Open referenced document',
   'cmd.copyLink': 'Copy reference link',
   'cmd.convertSelection': 'Convert selection to reference link',
@@ -28,7 +27,6 @@ module.exports = {
   'notice.indexed': 'Reference Linker: {entries} indexed',
   'notice.missingFolders': 'Reference Linker: scan folder not found — {folders}',
   'notice.copied': 'Reference Linker: link copied',
-  'notice.editorSet': 'Reference Linker: links now open in {name}',
   'notice.noSelection': 'Reference Linker: select a name or path first',
   'notice.noMatch': 'Reference Linker: no document matches “{query}”',
   'notice.watchUnsupported': 'Reference Linker: auto-refresh is unavailable on this platform — rebuild manually',
@@ -49,12 +47,9 @@ module.exports = {
 
   // Status bar
   'status.indexing': 'Reference Linker: indexing… {n}',
-  'status.editor': 'Reference: {name}',
-  'status.editorTooltip': 'Reference Linker: click to switch how links open',
 
   // Command-palette modal
   'modal.searchPlaceholder': 'Search documents…',
-  'modal.switchPlaceholder': 'Choose how links open…',
   'modal.formatPlaceholder': 'Choose a viewer format for this link…',
   'modal.embedPlaceholder': 'Choose an embed format…',
 
@@ -106,8 +101,6 @@ module.exports = {
   'set.editors.namePlaceholder': 'Name',
   'set.editors.remove': 'Remove',
   'set.editors.add': '+ Add viewer',
-  'set.statusBar.name': 'Show viewer in status bar',
-  'set.statusBar.desc': 'Show the active viewer preset in the status bar; click it to switch without opening settings.',
   'set.contextMenu.name': 'Editor context menu',
   'set.contextMenu.desc': 'Add “Find and convert to link” and “Find and open document” to the editor right-click menu — plus “Copy reference link” when you right-click a reference link.',
 

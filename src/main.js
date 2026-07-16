@@ -43,7 +43,6 @@ class ReferenceLinkerPlugin extends Plugin {
     initI18n({ en: require('./locales/en'), ru: require('./locales/ru') });
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
     this.setIndex([]);
-    this.languages = []; // unused in the file index; kept so dormant embed/hover helpers stay safe
     this.watchers = [];
     this.fileCache = new Map();
     this.cacheSignature = '';
@@ -54,7 +53,7 @@ class ReferenceLinkerPlugin extends Plugin {
     this.hover = new HoverPreview(this);
 
     this.registerEditorSuggest(new ReferenceSuggest(this.app, this));
-    // Links keep a portable {root} token in the note; the absolute code root is
+    // Links keep a portable {root} token in the note; the absolute reference root is
     // filled in only when the link is shown or opened, so notes stay portable.
     // Reading view: rewrite the rendered href so Obsidian opens the real file.
     this.registerMarkdownPostProcessor((el) => this.resolveRootLinks(el));
@@ -97,15 +96,9 @@ class ReferenceLinkerPlugin extends Plugin {
     this.registerDomEvent(document, 'auxclick', (evt) => this.onAnchorClick(evt), { capture: true });
     this.addSettingTab(new ReferenceLinkerSettingTab(this.app, this));
     this.statusEl = this.addStatusBarItem();
-    this.editorStatusEl = this.addStatusBarItem();
-    this.editorStatusEl.addClass('mod-clickable');
-    this.editorStatusEl.setAttribute('aria-label', t('status.editorTooltip'));
-    this.registerDomEvent(this.editorStatusEl, 'click', () => this.switchPreset());
-    this.updateStatusBar();
     this.addCommand({ id: 'rebuild-reference-index', name: t('cmd.rebuildIndex'), callback: () => this.rebuildIndex(true) });
     this.addCommand({ id: 'insert-reference-link', name: t('cmd.insertLink'), editorCallback: (editor) => this.pickEntry((e) => this.withFormat(this.settings.askOnInsert, (tpl) => this.insertLink(editor, e, tpl))) });
     this.addCommand({ id: 'insert-reference-link-as', name: t('cmd.insertLinkAs'), editorCallback: (editor) => this.pickEntry((e) => this.withFormat(true, (tpl) => this.insertLink(editor, e, tpl))) });
-    this.addCommand({ id: 'switch-viewer-preset', name: t('cmd.switchPreset'), callback: () => this.switchPreset() });
     this.addCommand({ id: 'open-reference-file', name: t('cmd.openFile'), callback: () => this.pickEntry((e) => this.withFormat(this.settings.askOnInsert, (tpl) => this.openEntry(e, tpl))) });
     this.addCommand({ id: 'copy-reference-link', name: t('cmd.copyLink'), callback: () => this.pickEntry((e) => this.withFormat(this.settings.askOnInsert, (tpl) => this.copyLink(e, tpl))) });
     this.addCommand({ id: 'convert-selection-to-link', name: t('cmd.convertSelection'), editorCallback: (editor) => this.convertSelection(editor) });
@@ -125,10 +118,10 @@ class ReferenceLinkerPlugin extends Plugin {
         if (this.selectionTarget(editor, false)) {
           menu.addItem((item) => item.setTitle(t('cmd.openSelection')).setIcon('file-search').onClick(() => this.openSelection(editor)));
         }
-        // Right-clicking one of our code links: copy its resolved target, and — if the
+        // Right-clicking one of our reference links: copy its resolved target, and — if the
         // stored line has drifted — offer to fix just that link.
-        const link = this.codeLinkAtCursor(editor);
-        if (link && this.isCodeLink(link.name, link.target)) {
+        const link = this.linkAtCursor(editor);
+        if (link && this.isReferenceLink(link.name, link.target)) {
           menu.addItem((item) => item.setTitle(t('menu.copyLink')).setIcon('copy').onClick(() => this.copyLinkAtCursor(link)));
           if (this.isLinkStale(link.name, link.target)) {
             menu.addItem((item) => item.setTitle(t('menu.fixLink')).setIcon('wrench').onClick(() => this.fixLinkAtCursor(editor, link)));
@@ -243,7 +236,7 @@ class ReferenceLinkerPlugin extends Plugin {
     if (hit) this.hover.schedule(hit.entry, this.lastX, this.lastY);
   }
 
-  // The code entry under a screen point as { entry, requireMod }, across both render
+  // The document under a screen point as { entry, requireMod }, across both render
   // modes, or null. Reading view carries the URL on a rendered anchor and previews on
   // plain hover; Live Preview's CM6 link span has no href (recovered from the editor at
   // those coordinates) and requires the modifier, like a link in the editor natively.
@@ -273,7 +266,7 @@ class ReferenceLinkerPlugin extends Plugin {
   }
 
   // Resolve a hovered link's display name + target to an index entry, or null
-  // (so non-code links — a wiki link, a web link, a custom Unity-scene link —
+  // (so non-reference links — a wiki link, a web link, a custom Unity-scene link —
   // simply show nothing). The entry's relative path must appear in the target,
   // which every preset embeds via {path}/{abs}; that rejects unrelated links even
   // when their text matches a symbol name. Ties are broken by the line in the
@@ -399,12 +392,14 @@ class ReferenceLinkerPlugin extends Plugin {
   setIndex(entries) {
     this.index = entries;
     this.byName = new Map();
-    this.kinds = new Set(); // kind labels present, for inline `kind:`/bare-token filters
+    this.kinds = new Set(); // kind labels present, for inline "sec:" filters
+    this.exts = new Set();  // extensions present, for inline "pdf:" filters
     for (const e of entries) {
       const k = e.name.toLowerCase();
       const a = this.byName.get(k);
       if (a) a.push(e); else this.byName.set(k, [e]);
       this.kinds.add(e.kind);
+      this.exts.add(e.lang);
     }
   }
 
@@ -414,26 +409,17 @@ class ReferenceLinkerPlugin extends Plugin {
     return this.byName.get(String(name).toLowerCase()) || [];
   }
 
-  // There's no language filter in the file index; an inline "x:" token is a kind filter
-  // or part of the name. "sec:" is accepted as a shorthand for the "section" kind.
+  // An inline prefix filters by extension ("pdf:") or kind ("sec:", a shorthand for
+  // "section"); the rest is the name to match.
   parseQuery(raw) {
     const kinds = this.kinds && this.kinds.has('section') ? new Set([...this.kinds, 'sec']) : this.kinds;
-    const f = filter.parseQuery(raw, () => null, kinds);
+    const f = filter.parseQuery(raw, kinds, this.exts);
     if (f.kind === 'sec') f.kind = 'section';
     return f;
   }
 
-  // Whether an entry passes a parsed inline filter (the caller matches the name). A
-  // container must be declared in the same file — its class name stands in for the path.
   entryPassesFilter(e, f) {
-    if (f.lang && e.lang !== f.lang) return false;
-    if (f.kind && e.kind !== f.kind) return false;
-    if (f.container) {
-      const v = this.fileCache.get(e.path);
-      const lc = f.container.toLowerCase();
-      if (!v || !v.entries.some((x) => x !== e && x.name.toLowerCase() === lc)) return false;
-    }
-    return true;
+    return (!f.kind || e.kind === f.kind) && (!f.ext || e.lang === f.ext);
   }
 
   // Decode a link target and return { dec, cand }: the decoded string and the entries
@@ -505,7 +491,7 @@ class ReferenceLinkerPlugin extends Plugin {
 
   // Debounce a background rebuild on file changes. Skip-dir noise (node_modules)
   // and files we don't index are dropped cheaply before scheduling. `r` is the scan
-  // root the event came from, so the path can be resolved relative to the code root.
+  // root the event came from, so the path can be resolved relative to the reference root.
   onWatchEvent(r, filename) {
     if (filename) {
       const base = (r || '').split('\\').join('/').replace(/\/+$/, '');
@@ -619,7 +605,7 @@ class ReferenceLinkerPlugin extends Plugin {
     scan.next.set(rel, { mtimeMs: stat.mtimeMs, entries });
   }
 
-  // An entry's absolute path on disk: the code root joined with its stored relative path.
+  // An entry's absolute path on disk: the reference root joined with its stored relative path.
   entryPath(e) {
     const root = this.codeRoot();
     return root ? nodePath.join(root, e.path) : e.path;
@@ -677,80 +663,22 @@ class ReferenceLinkerPlugin extends Plugin {
     }, t('modal.embedPlaceholder')).open();
   }
 
-  // The selectable presets — built-ins then the user's own — as { key, label, template },
-  // where key is the value the settings dropdown stores ('u:<i>' for a user editor).
+  // The selectable viewer presets — the built-in file:// then the user's own. 'u:<i>' is a
+  // user viewer's key in the settings dropdown.
   editorPresets() {
-    const out = [
-      { key: 'file', label: t('set.preset.file'), template: PRESETS.file, builtin: true },
-    ];
+    const out = [{ key: 'file', label: t('set.preset.file'), template: PRESETS.file }];
     (this.settings.editors || []).forEach((e, i) =>
-      out.push({ key: 'u:' + i, label: e.name || `Editor ${i + 1}`, template: e.template, builtin: false }));
+      out.push({ key: 'u:' + i, label: e.name || `Viewer ${i + 1}`, template: e.template }));
     return out;
   }
 
-  // Presets offered in the pickers: the visible ones (hiding everything falls back to all),
-  // most-recently-used first. Custom editors are always shown.
-  visiblePresets() {
-    const hidden = new Set(this.settings.hiddenPresets || []);
-    const all = this.editorPresets();
-    const shown = all.filter((p) => !hidden.has(p.key));
-    const mru = this.settings.recentPresets || [];
-    const rank = (p) => { const i = mru.indexOf(p.key); return i === -1 ? Infinity : i; };
-    return (shown.length ? shown : all)
-      .map((p, i) => ({ p, i }))
-      .sort((a, b) => (rank(a.p) - rank(b.p)) || (a.i - b.i))
-      .map((x) => x.p);
-  }
-
-  recordRecentPreset(key) {
-    const mru = (this.settings.recentPresets || []).filter((k) => k !== key);
-    mru.unshift(key);
-    this.settings.recentPresets = mru.slice(0, 8);
-    this.saveSettings();
-  }
-
-  updateStatusBar() {
-    const el = this.editorStatusEl;
-    if (!el) return;
-    if (!this.settings.showStatusBar) { el.hide(); return; }
-    const p = this.editorPresets().find((x) => x.template === this.settings.uriTemplate);
-    const name = this.settings.askOnInsert ? t('set.preset.ask') : (p ? p.label : this.settings.uriTemplate);
-    el.show();
-    el.setText(t('status.editor', { name }));
-  }
-
-  // Pick a viewer preset, then done(preset).
-  pickPreset(items, placeholder, done) {
-    new PresetPickerModal(this.app, items, (p) => done(p), placeholder).open();
-  }
-
-  // Always-ask mode picks the viewer format per insert; otherwise the fixed preset is used.
+  // Ask-on-insert picks the viewer format per insert; otherwise the default preset is used.
   withFormat(ask, run) {
-    if (ask) {
-      this.pickPreset(this.visiblePresets(), t('modal.formatPlaceholder'), (p) => {
-        this.recordRecentPreset(p.key);
-        run(p.template);
-      });
-      return;
-    }
-    run(undefined);
+    if (ask) new PresetPickerModal(this.app, this.editorPresets(), (p) => run(p.template), t('modal.formatPlaceholder')).open();
+    else run(undefined);
   }
 
-  // Switch the default preset (or "Always ask") without opening settings.
-  switchPreset() {
-    const items = this.visiblePresets().concat({ key: 'ask', label: t('set.preset.ask') });
-    this.pickPreset(items, t('modal.switchPlaceholder'), async (p) => {
-      this.settings.askOnInsert = p.key === 'ask';
-      if (p.key !== 'ask') {
-        this.settings.uriTemplate = p.template;
-        this.recordRecentPreset(p.key);
-      }
-      await this.saveSettings();
-      new Notice(t('notice.editorSet', { name: p.label }));
-    });
-  }
-
-  // Resolve {root} to the absolute code root: a copied link is usually pasted outside
+  // Resolve {root} to the absolute reference root: a copied link is usually pasted outside
   // the vault (a browser, a terminal), where the portable {root} token wouldn't resolve.
   // Inserted links keep {root} for note portability.
   copyLink(e, template) {
@@ -807,7 +735,7 @@ class ReferenceLinkerPlugin extends Plugin {
   // The markdown link spanning the editor cursor, as { name, target, line, from, to }
   // (character offsets within the line), or null. Right-click puts the cursor on the
   // click, so this reads the link that was clicked.
-  codeLinkAtCursor(editor) {
+  linkAtCursor(editor) {
     const cur = editor.getCursor();
     const line = editor.getLine(cur.line);
     const re = linkRegex();
@@ -827,10 +755,10 @@ class ReferenceLinkerPlugin extends Plugin {
     new Notice(t('notice.linksUpdated', { n: 1 }));
   }
 
-  // Whether a markdown link is one of ours (points at indexed code) rather than a wiki
-  // or web link — true for current, drifted and broken code links alike, so the
+  // Whether a markdown link is one of ours (points at an indexed document) rather than a
+  // wiki or web link — true for current, stale and broken reference links alike, so the
   // right-click copy/fix items only show on links this plugin owns.
-  isCodeLink(name, target) {
+  isReferenceLink(name, target) {
     return !!this.entryUnderPointer(name, target) || !!this.linkState(name, target);
   }
 
@@ -865,7 +793,7 @@ class ReferenceLinkerPlugin extends Plugin {
     this.resolveSelection(editor, (e) => this.withFormat(this.settings.askOnInsert, (template) => this.openEntry(e, template)), false);
   }
 
-  // Folders to scan, relative to the code root; empty means the whole code root.
+  // Folders to scan, relative to the reference root; empty means the whole reference root.
   scanFolders() {
     const roots = splitLines(this.settings.scanRoots);
     return roots.length ? roots : ['.'];
@@ -881,7 +809,6 @@ class ReferenceLinkerPlugin extends Plugin {
 
   async saveSettings() {
     await this.saveData(this.settings);
-    this.updateStatusBar();
   }
 }
 

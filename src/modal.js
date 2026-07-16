@@ -23,8 +23,7 @@ class ReferenceLinkModal extends FuzzySuggestModal {
   }
 
   getItems() {
-    const hidden = new Set(this.plugin.settings.disabledKinds || []);
-    return this.plugin.index.filter((e) => !hidden.has(e.lang + ':' + e.kind));
+    return this.plugin.index;
   }
 
   // Path keeps same-named entries distinct in the modal's own fuzzy search.

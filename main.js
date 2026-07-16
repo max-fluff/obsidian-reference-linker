@@ -103,25 +103,14 @@ var require_constants = __commonJS({
       // one folder name per line
       editors: [],
       // user-defined viewer presets, each { name, template }
-      hiddenPresets: [],
-      // presets kept out of the pickers
-      presetsInitialized: false,
-      recentPresets: [],
-      // preset keys, most-recent first, to float recent picks up the picker
       askOnInsert: true,
-      // ask which viewer format to use on every insert (vs. a fixed preset)
-      showStatusBar: false,
-      // show the active viewer preset in the status bar, click to switch
-      disabledKinds: [],
-      // "<ext>:<kind>" keys hidden from suggestions (query-time filter)
+      // ask which viewer format to use on every insert (vs. the default)
       autoRefresh: true,
       // watch scan folders and rebuild the index when files change
       hoverPreview: true,
       // show the preview popover when hovering a reference link
-      hoverBefore: 3,
-      hoverAfter: 20,
       markStaleLinks: true,
-      // underline links whose target file is gone
+      // underline links whose target document moved or is gone
       minChars: 1,
       maxResults: 12,
       contextMenu: true
@@ -211,9 +200,8 @@ var require_suggest = __commonJS({
         if (!idx || !idx.length)
           return [];
         const max = this.plugin.settings.maxResults;
-        const hidden = new Set(this.plugin.settings.disabledKinds || []);
         const f = this.plugin.parseQuery(ctx.query);
-        const pass = (e) => !hidden.has(e.lang + ":" + e.kind) && this.plugin.entryPassesFilter(e, f);
+        const pass = (e) => this.plugin.entryPassesFilter(e, f);
         if (!f.name) {
           const out = [];
           for (const e of idx) {
@@ -265,23 +253,20 @@ var require_suggest = __commonJS({
 var require_filter = __commonJS({
   "src/filter.js"(exports2, module2) {
     "use strict";
-    function parseQuery(raw, resolveLang, kinds) {
-      const f = { lang: null, kind: null, container: null, name: "" };
+    function parseQuery(raw, kinds, exts) {
+      const f = { kind: null, ext: null, name: "" };
       const parts = String(raw == null ? "" : raw).split(":");
       let i = 0;
       for (; i < parts.length - 1; i++) {
-        const id = resolveLang(parts[i]);
-        if (id)
-          f.lang = id;
-        else if (kinds.has(parts[i]))
-          f.kind = parts[i];
+        const p = parts[i];
+        if (kinds && kinds.has(p))
+          f.kind = p;
+        else if (exts && exts.has(p))
+          f.ext = p;
         else
           break;
       }
-      const segs = parts.slice(i).join(":").split(".");
-      f.name = segs[segs.length - 1];
-      if (segs.length > 1 && segs[segs.length - 2])
-        f.container = segs[segs.length - 2];
+      f.name = parts.slice(i).join(":");
       return f;
     }
     module2.exports = { parseQuery };
@@ -820,7 +805,6 @@ var require_actualize = __commonJS({
     var { syntaxTree } = require("@codemirror/language");
     var { linkRegex: linkRegex2, isFenceLine, inInlineCode } = require_markdown();
     var { t: t2 } = require_i18n();
-    var LINE_RE = /:(\d+)(?=\D*$)/;
     var SKIP_NODE = /code|comment|frontmatter/i;
     function updateLinksInText(plugin, text) {
       const lines = text.split("\n");
@@ -896,58 +880,70 @@ var require_actualize = __commonJS({
       );
     }
     var methods = {
-      // A stored link resolved to its live entry, or null when it can't be safely
-      // actualized (no line, not a code link, or an ambiguous name in the file). Unlike
-      // entryUnderPointer it never uses the stored line to disambiguate — that would hide
-      // the very drift we're detecting.
-      resolveStoredLink(name, target) {
+      // The current index entry a reference link points at — matched by its display name and
+      // disambiguated by the still-valid path/page in the target — or null.
+      resolveReferenceLink(name, target) {
         if (!name || !target)
           return null;
-        const m = LINE_RE.exec(target);
-        if (!m)
-          return null;
-        const storedLine = parseInt(m[1], 10);
         const { cand } = this.linkCandidates(name, target);
-        const decls = cand.filter((e) => e.kind !== "file");
-        let entry;
-        if (decls.length === 1)
-          entry = decls[0];
-        else if (!decls.length && cand.length === 1)
-          entry = cand[0];
-        else
-          return null;
-        return { entry, storedLine, currentLine: entry.line };
+        if (cand.length === 1)
+          return cand[0];
+        if (cand.length > 1) {
+          const pm = /#page=(\d+)/i.exec(target);
+          const page = pm ? parseInt(pm[1], 10) : 1;
+          return cand.find((e) => (e.page || 1) === page) || cand.find((e) => e.kind === "section") || cand[0];
+        }
+        const named = this.entriesByName(name).filter((e) => e.name === name);
+        return named.length === 1 ? named[0] : null;
       },
-      isLinkStale(name, target) {
-        const r = this.resolveStoredLink(name, target);
-        return !!r && r.currentLine !== r.storedLine;
+      // Whether the target's extension is one we index — so a missing target reads as a broken
+      // reference, not an unrelated file:// link we should leave alone.
+      targetLooksIndexable(target) {
+        const ext = (/(\.[a-z0-9]+)(?:[#?].*)?$/i.exec(target.split("#")[0]) || [])[1];
+        return !!ext && this.watchedExts().has(ext.toLowerCase());
       },
-      // Freshness of a code link for the visual marks: 'stale' (line drifted, fixable),
-      // 'broken' (its file is still indexed but the symbol is gone — renamed or removed),
-      // or null (current, ambiguous, not a code link, or unrelated — nothing to mark).
+      // Two link targets are the same document location, ignoring {root}-vs-absolute form and
+      // %-encoding differences.
+      sameReferenceTarget(a, b) {
+        const norm = (s) => {
+          let x = this.fillRoot(s);
+          try {
+            x = decodeURI(x);
+          } catch (e) {
+          }
+          return x.split("\\").join("/");
+        };
+        return norm(a) === norm(b);
+      },
+      // Freshness of a reference link for the visual marks: 'stale' (target moved or its page
+      // drifted — fixable), 'broken' (a document that's gone), or null (current, or not one of
+      // our file:// reference links).
       linkState(name, target) {
         if (!name || !target)
           return null;
-        if (!LINE_RE.test(target))
+        if (!/file:\/\//i.test(target))
           return null;
-        const r = this.resolveStoredLink(name, target);
-        if (r)
-          return r.currentLine === r.storedLine ? null : "stale";
-        const { dec, cand } = this.linkCandidates(name, target);
-        if (cand.length)
-          return null;
-        return this.targetIndexedFile(dec) ? "broken" : null;
+        const entry = this.resolveReferenceLink(name, target);
+        if (entry)
+          return this.sameReferenceTarget(this.buildUri(entry), target) ? null : "stale";
+        return this.targetLooksIndexable(target) ? "broken" : null;
       },
-      // The link target with its line corrected to the current declaration, or null when
-      // there's nothing to fix. Shared by the vault/note commands and the right-click fix.
+      isLinkStale(name, target) {
+        return this.linkState(name, target) === "stale";
+      },
+      // The corrected {root}-portable target for a stale link, or null when there's nothing to
+      // fix. Shared by the vault/note commands and the right-click fix.
       actualizedTarget(name, target) {
-        const r = this.resolveStoredLink(name, target);
-        if (!r || r.currentLine === r.storedLine)
+        if (!/file:\/\//i.test(target))
           return null;
-        return target.replace(LINE_RE, ":" + r.currentLine);
+        const entry = this.resolveReferenceLink(name, target);
+        if (!entry)
+          return null;
+        const current = this.buildUri(entry);
+        return this.sameReferenceTarget(current, target) ? null : current;
       },
-      // Works in both edit and reading view: an open editor keeps cursor/undo, otherwise
-      // the active file is rewritten through the vault.
+      // Works in both edit and reading view: an open editor keeps cursor/undo, otherwise the
+      // active file is rewritten through the vault.
       async updateLinksInActiveNote() {
         const view = this.app.workspace.getActiveViewOfType(MarkdownView2);
         const editor = view && view.editor;
@@ -1012,8 +1008,7 @@ var require_modal = __commonJS({
         }
       }
       getItems() {
-        const hidden = new Set(this.plugin.settings.disabledKinds || []);
-        return this.plugin.index.filter((e) => !hidden.has(e.lang + ":" + e.kind));
+        return this.plugin.index;
       }
       // Path keeps same-named entries distinct in the modal's own fuzzy search.
       getItemText(e) {
@@ -1351,10 +1346,6 @@ var require_settings_tab = __commonJS({
             this.display();
           }));
         }
-        new Setting(containerEl).setName(t2("set.statusBar.name")).setDesc(t2("set.statusBar.desc")).addToggle((c) => c.setValue(s.showStatusBar).onChange(async (v) => {
-          s.showStatusBar = v;
-          await save(false);
-        }));
         new Setting(containerEl).setName(t2("set.contextMenu.name")).setDesc(t2("set.contextMenu.desc")).addToggle((c) => c.setValue(s.contextMenu).onChange(async (v) => {
           s.contextMenu = v;
           await save(false);
@@ -1381,17 +1372,18 @@ var require_settings_tab = __commonJS({
 var require_api = __commonJS({
   "src/api.js"(exports2, module2) {
     "use strict";
-    var pick = (e) => ({ name: e.name, kind: e.kind, lang: e.lang, path: e.path, line: e.line });
+    var pick = (e) => ({ name: e.name, kind: e.kind, ext: e.lang, path: e.path, page: e.page || 1 });
     module2.exports = {
       buildApi() {
         return {
           version: this.manifest.version,
-          codeRoot: () => this.codeRoot(),
-          // Every indexed entry: { name, kind, lang, path, line }.
+          // The absolute reference root the scan paths resolve against.
+          root: () => this.codeRoot(),
+          // Every indexed entry: { name, kind, ext, path, page } (kind is 'file' or 'section').
           getEntries: () => this.index.map(pick),
-          // One row per indexed file: { name, path, lang, entries }.
+          // One row per indexed file: { name, path, ext, entries }.
           getFiles: () => this.apiFiles(),
-          // Totals: { files, entries, byLang, byKind }.
+          // Totals: { files, entries, byExt, byKind }.
           getStats: () => this.apiStats(),
           // Entries matching a name or path tail (the same lookup the commands use).
           find: (text) => this.lookup(String(text || "")).map(pick),
@@ -1407,18 +1399,18 @@ var require_api = __commonJS({
         for (const v of this.fileCache.values()) {
           const f = v.entries[0];
           if (f)
-            out.push({ name: f.name, path: f.path, lang: f.lang, entries: v.entries.length });
+            out.push({ name: f.name, path: f.path, ext: f.lang, entries: v.entries.length });
         }
         out.sort((a, b) => a.path.localeCompare(b.path));
         return out;
       },
       apiStats() {
-        const byLang = {}, byKind = {};
+        const byExt = {}, byKind = {};
         for (const e of this.index) {
-          byLang[e.lang] = (byLang[e.lang] || 0) + 1;
+          byExt[e.lang] = (byExt[e.lang] || 0) + 1;
           byKind[e.kind] = (byKind[e.kind] || 0) + 1;
         }
-        return { files: this.fileCache.size, entries: this.index.length, byLang, byKind };
+        return { files: this.fileCache.size, entries: this.index.length, byExt, byKind };
       },
       onIndexChange(cb) {
         if (typeof cb !== "function")
@@ -1450,7 +1442,6 @@ var require_en = __commonJS({
       "cmd.rebuildIndex": "Rebuild reference index",
       "cmd.insertLink": "Insert reference link",
       "cmd.insertLinkAs": "Insert reference link as\u2026",
-      "cmd.switchPreset": "Switch viewer preset",
       "cmd.openFile": "Open referenced document",
       "cmd.copyLink": "Copy reference link",
       "cmd.convertSelection": "Convert selection to reference link",
@@ -1469,7 +1460,6 @@ var require_en = __commonJS({
       "notice.indexed": "Reference Linker: {entries} indexed",
       "notice.missingFolders": "Reference Linker: scan folder not found \u2014 {folders}",
       "notice.copied": "Reference Linker: link copied",
-      "notice.editorSet": "Reference Linker: links now open in {name}",
       "notice.noSelection": "Reference Linker: select a name or path first",
       "notice.noMatch": "Reference Linker: no document matches \u201C{query}\u201D",
       "notice.watchUnsupported": "Reference Linker: auto-refresh is unavailable on this platform \u2014 rebuild manually",
@@ -1488,11 +1478,8 @@ var require_en = __commonJS({
       "embed.truncated": "Reference Linker: showing the first {max} lines",
       // Status bar
       "status.indexing": "Reference Linker: indexing\u2026 {n}",
-      "status.editor": "Reference: {name}",
-      "status.editorTooltip": "Reference Linker: click to switch how links open",
       // Command-palette modal
       "modal.searchPlaceholder": "Search documents\u2026",
-      "modal.switchPlaceholder": "Choose how links open\u2026",
       "modal.formatPlaceholder": "Choose a viewer format for this link\u2026",
       "modal.embedPlaceholder": "Choose an embed format\u2026",
       // Settings — headings
@@ -1541,8 +1528,6 @@ var require_en = __commonJS({
       "set.editors.namePlaceholder": "Name",
       "set.editors.remove": "Remove",
       "set.editors.add": "+ Add viewer",
-      "set.statusBar.name": "Show viewer in status bar",
-      "set.statusBar.desc": "Show the active viewer preset in the status bar; click it to switch without opening settings.",
       "set.contextMenu.name": "Editor context menu",
       "set.contextMenu.desc": "Add \u201CFind and convert to link\u201D and \u201CFind and open document\u201D to the editor right-click menu \u2014 plus \u201CCopy reference link\u201D when you right-click a reference link.",
       // Settings — hover preview
@@ -1566,7 +1551,6 @@ var require_ru = __commonJS({
       "cmd.rebuildIndex": "\u041F\u0435\u0440\u0435\u0441\u0442\u0440\u043E\u0438\u0442\u044C \u0438\u043D\u0434\u0435\u043A\u0441 \u0441\u0441\u044B\u043B\u043E\u043A",
       "cmd.insertLink": "\u0412\u0441\u0442\u0430\u0432\u0438\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442",
       "cmd.insertLinkAs": "\u0412\u0441\u0442\u0430\u0432\u0438\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442 \u043A\u0430\u043A\u2026",
-      "cmd.switchPreset": "\u0421\u043C\u0435\u043D\u0438\u0442\u044C \u043F\u0440\u0435\u0441\u0435\u0442 \u043F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0449\u0438\u043A\u0430",
       "cmd.openFile": "\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442",
       "cmd.copyLink": "\u0421\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442",
       "cmd.convertSelection": "\u041F\u0440\u0435\u0432\u0440\u0430\u0442\u0438\u0442\u044C \u0432\u044B\u0434\u0435\u043B\u0435\u043D\u0438\u0435 \u0432 \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442",
@@ -1585,7 +1569,6 @@ var require_ru = __commonJS({
       "notice.indexed": "Reference Linker: \u043F\u0440\u043E\u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043E {entries}",
       "notice.missingFolders": "Reference Linker: \u043F\u0430\u043F\u043A\u0430 \u0441\u043A\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u0430 \u2014 {folders}",
       "notice.copied": "Reference Linker: \u0441\u0441\u044B\u043B\u043A\u0430 \u0441\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u043D\u0430",
-      "notice.editorSet": "Reference Linker: \u0441\u0441\u044B\u043B\u043A\u0438 \u0442\u0435\u043F\u0435\u0440\u044C \u043E\u0442\u043A\u0440\u044B\u0432\u0430\u044E\u0442\u0441\u044F \u0432 {name}",
       "notice.noSelection": "Reference Linker: \u0441\u043D\u0430\u0447\u0430\u043B\u0430 \u0432\u044B\u0434\u0435\u043B\u0438\u0442\u0435 \u0438\u043C\u044F \u0438\u043B\u0438 \u043F\u0443\u0442\u044C",
       "notice.noMatch": "Reference Linker: \u043D\u0435\u0442 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430 \u0434\u043B\u044F \xAB{query}\xBB",
       "notice.watchUnsupported": "Reference Linker: \u0430\u0432\u0442\u043E\u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0435 \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u043D\u043E \u043D\u0430 \u044D\u0442\u043E\u0439 \u043F\u043B\u0430\u0442\u0444\u043E\u0440\u043C\u0435 \u2014 \u043F\u0435\u0440\u0435\u0441\u0442\u0440\u0430\u0438\u0432\u0430\u0439\u0442\u0435 \u0432\u0440\u0443\u0447\u043D\u0443\u044E",
@@ -1604,11 +1587,8 @@ var require_ru = __commonJS({
       "embed.truncated": "Reference Linker: \u043F\u043E\u043A\u0430\u0437\u0430\u043D\u044B \u043F\u0435\u0440\u0432\u044B\u0435 {max} \u0441\u0442\u0440\u043E\u043A",
       // Status bar
       "status.indexing": "Reference Linker: \u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435\u2026 {n}",
-      "status.editor": "\u0414\u043E\u043A\u0443\u043C\u0435\u043D\u0442: {name}",
-      "status.editorTooltip": "Reference Linker: \u043A\u043B\u0438\u043A \u2014 \u0441\u043C\u0435\u043D\u0438\u0442\u044C \u0441\u043F\u043E\u0441\u043E\u0431 \u043E\u0442\u043A\u0440\u044B\u0442\u0438\u044F \u0441\u0441\u044B\u043B\u043E\u043A",
       // Command-palette modal
       "modal.searchPlaceholder": "\u041F\u043E\u0438\u0441\u043A \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u043E\u0432\u2026",
-      "modal.switchPlaceholder": "\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0441\u043F\u043E\u0441\u043E\u0431 \u043E\u0442\u043A\u0440\u044B\u0442\u0438\u044F \u0441\u0441\u044B\u043B\u043E\u043A\u2026",
       "modal.formatPlaceholder": "\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0444\u043E\u0440\u043C\u0430\u0442 \u043F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0449\u0438\u043A\u0430 \u0434\u043B\u044F \u044D\u0442\u043E\u0439 \u0441\u0441\u044B\u043B\u043A\u0438\u2026",
       "modal.embedPlaceholder": "\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0444\u043E\u0440\u043C\u0430\u0442 embed\u2026",
       // Settings — headings
@@ -1657,8 +1637,6 @@ var require_ru = __commonJS({
       "set.editors.namePlaceholder": "\u041D\u0430\u0437\u0432\u0430\u043D\u0438\u0435",
       "set.editors.remove": "\u0423\u0434\u0430\u043B\u0438\u0442\u044C",
       "set.editors.add": "+ \u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u043F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0449\u0438\u043A",
-      "set.statusBar.name": "\u041F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0442\u044C \u043F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0449\u0438\u043A \u0432 \u0441\u0442\u0430\u0442\u0443\u0441-\u0431\u0430\u0440\u0435",
-      "set.statusBar.desc": "\u041F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0442\u044C \u0430\u043A\u0442\u0438\u0432\u043D\u044B\u0439 \u043F\u0440\u0435\u0441\u0435\u0442 \u0432 \u0441\u0442\u0430\u0442\u0443\u0441-\u0431\u0430\u0440\u0435; \u043A\u043B\u0438\u043A \u043F\u043E \u043D\u0435\u043C\u0443 \u043C\u0435\u043D\u044F\u0435\u0442 \u0441\u043F\u043E\u0441\u043E\u0431 \u043E\u0442\u043A\u0440\u044B\u0442\u0438\u044F \u0431\u0435\u0437 \u0432\u0445\u043E\u0434\u0430 \u0432 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438.",
       "set.contextMenu.name": "\u041A\u043E\u043D\u0442\u0435\u043A\u0441\u0442\u043D\u043E\u0435 \u043C\u0435\u043D\u044E \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440\u0430",
       "set.contextMenu.desc": "\u0414\u043E\u0431\u0430\u0432\u043B\u044F\u0442\u044C \xAB\u041D\u0430\u0439\u0442\u0438 \u0438 \u043F\u0440\u0435\u0432\u0440\u0430\u0442\u0438\u0442\u044C \u0432 \u0441\u0441\u044B\u043B\u043A\u0443\xBB \u0438 \xAB\u041D\u0430\u0439\u0442\u0438 \u0438 \u043E\u0442\u043A\u0440\u044B\u0442\u044C \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\xBB \u0432 \u043C\u0435\u043D\u044E \u043F\u043E \u043F\u0440\u0430\u0432\u043E\u043C\u0443 \u043A\u043B\u0438\u043A\u0443 \u2014 \u043F\u043B\u044E\u0441 \xAB\u0421\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\xBB \u043F\u0440\u0438 \u043A\u043B\u0438\u043A\u0435 \u043F\u043E \u0441\u0441\u044B\u043B\u043A\u0435.",
       // Settings — hover preview
@@ -1705,7 +1683,6 @@ var ReferenceLinkerPlugin = class extends Plugin {
     initI18n({ en: require_en(), ru: require_ru() });
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
     this.setIndex([]);
-    this.languages = [];
     this.watchers = [];
     this.fileCache = /* @__PURE__ */ new Map();
     this.cacheSignature = "";
@@ -1748,15 +1725,9 @@ var ReferenceLinkerPlugin = class extends Plugin {
     this.registerDomEvent(document, "auxclick", (evt) => this.onAnchorClick(evt), { capture: true });
     this.addSettingTab(new ReferenceLinkerSettingTab(this.app, this));
     this.statusEl = this.addStatusBarItem();
-    this.editorStatusEl = this.addStatusBarItem();
-    this.editorStatusEl.addClass("mod-clickable");
-    this.editorStatusEl.setAttribute("aria-label", t("status.editorTooltip"));
-    this.registerDomEvent(this.editorStatusEl, "click", () => this.switchPreset());
-    this.updateStatusBar();
     this.addCommand({ id: "rebuild-reference-index", name: t("cmd.rebuildIndex"), callback: () => this.rebuildIndex(true) });
     this.addCommand({ id: "insert-reference-link", name: t("cmd.insertLink"), editorCallback: (editor) => this.pickEntry((e) => this.withFormat(this.settings.askOnInsert, (tpl) => this.insertLink(editor, e, tpl))) });
     this.addCommand({ id: "insert-reference-link-as", name: t("cmd.insertLinkAs"), editorCallback: (editor) => this.pickEntry((e) => this.withFormat(true, (tpl) => this.insertLink(editor, e, tpl))) });
-    this.addCommand({ id: "switch-viewer-preset", name: t("cmd.switchPreset"), callback: () => this.switchPreset() });
     this.addCommand({ id: "open-reference-file", name: t("cmd.openFile"), callback: () => this.pickEntry((e) => this.withFormat(this.settings.askOnInsert, (tpl) => this.openEntry(e, tpl))) });
     this.addCommand({ id: "copy-reference-link", name: t("cmd.copyLink"), callback: () => this.pickEntry((e) => this.withFormat(this.settings.askOnInsert, (tpl) => this.copyLink(e, tpl))) });
     this.addCommand({ id: "convert-selection-to-link", name: t("cmd.convertSelection"), editorCallback: (editor) => this.convertSelection(editor) });
@@ -1774,8 +1745,8 @@ var ReferenceLinkerPlugin = class extends Plugin {
         if (this.selectionTarget(editor, false)) {
           menu.addItem((item) => item.setTitle(t("cmd.openSelection")).setIcon("file-search").onClick(() => this.openSelection(editor)));
         }
-        const link = this.codeLinkAtCursor(editor);
-        if (link && this.isCodeLink(link.name, link.target)) {
+        const link = this.linkAtCursor(editor);
+        if (link && this.isReferenceLink(link.name, link.target)) {
           menu.addItem((item) => item.setTitle(t("menu.copyLink")).setIcon("copy").onClick(() => this.copyLinkAtCursor(link)));
           if (this.isLinkStale(link.name, link.target)) {
             menu.addItem((item) => item.setTitle(t("menu.fixLink")).setIcon("wrench").onClick(() => this.fixLinkAtCursor(editor, link)));
@@ -1884,7 +1855,7 @@ var ReferenceLinkerPlugin = class extends Plugin {
     if (hit)
       this.hover.schedule(hit.entry, this.lastX, this.lastY);
   }
-  // The code entry under a screen point as { entry, requireMod }, across both render
+  // The document under a screen point as { entry, requireMod }, across both render
   // modes, or null. Reading view carries the URL on a rendered anchor and previews on
   // plain hover; Live Preview's CM6 link span has no href (recovered from the editor at
   // those coordinates) and requires the modifier, like a link in the editor natively.
@@ -1915,7 +1886,7 @@ var ReferenceLinkerPlugin = class extends Plugin {
     return mv && mv.editor && mv.editor.cm;
   }
   // Resolve a hovered link's display name + target to an index entry, or null
-  // (so non-code links — a wiki link, a web link, a custom Unity-scene link —
+  // (so non-reference links — a wiki link, a web link, a custom Unity-scene link —
   // simply show nothing). The entry's relative path must appear in the target,
   // which every preset embeds via {path}/{abs}; that rejects unrelated links even
   // when their text matches a symbol name. Ties are broken by the line in the
@@ -2046,6 +2017,7 @@ var ReferenceLinkerPlugin = class extends Plugin {
     this.index = entries;
     this.byName = /* @__PURE__ */ new Map();
     this.kinds = /* @__PURE__ */ new Set();
+    this.exts = /* @__PURE__ */ new Set();
     for (const e of entries) {
       const k = e.name.toLowerCase();
       const a = this.byName.get(k);
@@ -2054,6 +2026,7 @@ var ReferenceLinkerPlugin = class extends Plugin {
       else
         this.byName.set(k, [e]);
       this.kinds.add(e.kind);
+      this.exts.add(e.lang);
     }
   }
   // Index entries whose (lowercased) name equals `name` — the candidate set a bare
@@ -2061,29 +2034,17 @@ var ReferenceLinkerPlugin = class extends Plugin {
   entriesByName(name) {
     return this.byName.get(String(name).toLowerCase()) || [];
   }
-  // There's no language filter in the file index; an inline "x:" token is a kind filter
-  // or part of the name. "sec:" is accepted as a shorthand for the "section" kind.
+  // An inline prefix filters by extension ("pdf:") or kind ("sec:", a shorthand for
+  // "section"); the rest is the name to match.
   parseQuery(raw) {
     const kinds = this.kinds && this.kinds.has("section") ? /* @__PURE__ */ new Set([...this.kinds, "sec"]) : this.kinds;
-    const f = filter.parseQuery(raw, () => null, kinds);
+    const f = filter.parseQuery(raw, kinds, this.exts);
     if (f.kind === "sec")
       f.kind = "section";
     return f;
   }
-  // Whether an entry passes a parsed inline filter (the caller matches the name). A
-  // container must be declared in the same file — its class name stands in for the path.
   entryPassesFilter(e, f) {
-    if (f.lang && e.lang !== f.lang)
-      return false;
-    if (f.kind && e.kind !== f.kind)
-      return false;
-    if (f.container) {
-      const v = this.fileCache.get(e.path);
-      const lc = f.container.toLowerCase();
-      if (!v || !v.entries.some((x) => x !== e && x.name.toLowerCase() === lc))
-        return false;
-    }
-    return true;
+    return (!f.kind || e.kind === f.kind) && (!f.ext || e.lang === f.ext);
   }
   // Decode a link target and return { dec, cand }: the decoded string and the entries
   // whose display name matches and whose path appears in it — the shared first step of
@@ -2152,7 +2113,7 @@ var ReferenceLinkerPlugin = class extends Plugin {
   }
   // Debounce a background rebuild on file changes. Skip-dir noise (node_modules)
   // and files we don't index are dropped cheaply before scheduling. `r` is the scan
-  // root the event came from, so the path can be resolved relative to the code root.
+  // root the event came from, so the path can be resolved relative to the reference root.
   onWatchEvent(r, filename) {
     if (filename) {
       const base = (r || "").split("\\").join("/").replace(/\/+$/, "");
@@ -2266,7 +2227,7 @@ var ReferenceLinkerPlugin = class extends Plugin {
     }
     scan.next.set(rel, { mtimeMs: stat.mtimeMs, entries });
   }
-  // An entry's absolute path on disk: the code root joined with its stored relative path.
+  // An entry's absolute path on disk: the reference root joined with its stored relative path.
   entryPath(e) {
     const root = this.codeRoot();
     return root ? nodePath.join(root, e.path) : e.path;
@@ -2311,76 +2272,21 @@ var ReferenceLinkerPlugin = class extends Plugin {
       editor.replaceSelection("```reference-link\n" + f.body + "\n```\n");
     }, t("modal.embedPlaceholder")).open();
   }
-  // The selectable presets — built-ins then the user's own — as { key, label, template },
-  // where key is the value the settings dropdown stores ('u:<i>' for a user editor).
+  // The selectable viewer presets — the built-in file:// then the user's own. 'u:<i>' is a
+  // user viewer's key in the settings dropdown.
   editorPresets() {
-    const out = [
-      { key: "file", label: t("set.preset.file"), template: PRESETS.file, builtin: true }
-    ];
-    (this.settings.editors || []).forEach((e, i) => out.push({ key: "u:" + i, label: e.name || `Editor ${i + 1}`, template: e.template, builtin: false }));
+    const out = [{ key: "file", label: t("set.preset.file"), template: PRESETS.file }];
+    (this.settings.editors || []).forEach((e, i) => out.push({ key: "u:" + i, label: e.name || `Viewer ${i + 1}`, template: e.template }));
     return out;
   }
-  // Presets offered in the pickers: the visible ones (hiding everything falls back to all),
-  // most-recently-used first. Custom editors are always shown.
-  visiblePresets() {
-    const hidden = new Set(this.settings.hiddenPresets || []);
-    const all = this.editorPresets();
-    const shown = all.filter((p) => !hidden.has(p.key));
-    const mru = this.settings.recentPresets || [];
-    const rank = (p) => {
-      const i = mru.indexOf(p.key);
-      return i === -1 ? Infinity : i;
-    };
-    return (shown.length ? shown : all).map((p, i) => ({ p, i })).sort((a, b) => rank(a.p) - rank(b.p) || a.i - b.i).map((x) => x.p);
-  }
-  recordRecentPreset(key) {
-    const mru = (this.settings.recentPresets || []).filter((k) => k !== key);
-    mru.unshift(key);
-    this.settings.recentPresets = mru.slice(0, 8);
-    this.saveSettings();
-  }
-  updateStatusBar() {
-    const el = this.editorStatusEl;
-    if (!el)
-      return;
-    if (!this.settings.showStatusBar) {
-      el.hide();
-      return;
-    }
-    const p = this.editorPresets().find((x) => x.template === this.settings.uriTemplate);
-    const name = this.settings.askOnInsert ? t("set.preset.ask") : p ? p.label : this.settings.uriTemplate;
-    el.show();
-    el.setText(t("status.editor", { name }));
-  }
-  // Pick a viewer preset, then done(preset).
-  pickPreset(items, placeholder, done) {
-    new PresetPickerModal(this.app, items, (p) => done(p), placeholder).open();
-  }
-  // Always-ask mode picks the viewer format per insert; otherwise the fixed preset is used.
+  // Ask-on-insert picks the viewer format per insert; otherwise the default preset is used.
   withFormat(ask, run) {
-    if (ask) {
-      this.pickPreset(this.visiblePresets(), t("modal.formatPlaceholder"), (p) => {
-        this.recordRecentPreset(p.key);
-        run(p.template);
-      });
-      return;
-    }
-    run(void 0);
+    if (ask)
+      new PresetPickerModal(this.app, this.editorPresets(), (p) => run(p.template), t("modal.formatPlaceholder")).open();
+    else
+      run(void 0);
   }
-  // Switch the default preset (or "Always ask") without opening settings.
-  switchPreset() {
-    const items = this.visiblePresets().concat({ key: "ask", label: t("set.preset.ask") });
-    this.pickPreset(items, t("modal.switchPlaceholder"), async (p) => {
-      this.settings.askOnInsert = p.key === "ask";
-      if (p.key !== "ask") {
-        this.settings.uriTemplate = p.template;
-        this.recordRecentPreset(p.key);
-      }
-      await this.saveSettings();
-      new Notice(t("notice.editorSet", { name: p.label }));
-    });
-  }
-  // Resolve {root} to the absolute code root: a copied link is usually pasted outside
+  // Resolve {root} to the absolute reference root: a copied link is usually pasted outside
   // the vault (a browser, a terminal), where the portable {root} token wouldn't resolve.
   // Inserted links keep {root} for note portability.
   copyLink(e, template) {
@@ -2440,7 +2346,7 @@ var ReferenceLinkerPlugin = class extends Plugin {
   // The markdown link spanning the editor cursor, as { name, target, line, from, to }
   // (character offsets within the line), or null. Right-click puts the cursor on the
   // click, so this reads the link that was clicked.
-  codeLinkAtCursor(editor) {
+  linkAtCursor(editor) {
     const cur = editor.getCursor();
     const line = editor.getLine(cur.line);
     const re = linkRegex();
@@ -2461,10 +2367,10 @@ var ReferenceLinkerPlugin = class extends Plugin {
     editor.replaceRange("[" + link.name + "](" + target + ")", { line: link.line, ch: link.from }, { line: link.line, ch: link.to });
     new Notice(t("notice.linksUpdated", { n: 1 }));
   }
-  // Whether a markdown link is one of ours (points at indexed code) rather than a wiki
-  // or web link — true for current, drifted and broken code links alike, so the
+  // Whether a markdown link is one of ours (points at an indexed document) rather than a
+  // wiki or web link — true for current, stale and broken reference links alike, so the
   // right-click copy/fix items only show on links this plugin owns.
-  isCodeLink(name, target) {
+  isReferenceLink(name, target) {
     return !!this.entryUnderPointer(name, target) || !!this.linkState(name, target);
   }
   // Copy the clicked link's own target ({root} filled in), keeping the scheme it was
@@ -2502,7 +2408,7 @@ var ReferenceLinkerPlugin = class extends Plugin {
   openSelection(editor) {
     this.resolveSelection(editor, (e) => this.withFormat(this.settings.askOnInsert, (template) => this.openEntry(e, template)), false);
   }
-  // Folders to scan, relative to the code root; empty means the whole code root.
+  // Folders to scan, relative to the reference root; empty means the whole reference root.
   scanFolders() {
     const roots = splitLines(this.settings.scanRoots);
     return roots.length ? roots : ["."];
@@ -2516,7 +2422,6 @@ var ReferenceLinkerPlugin = class extends Plugin {
   }
   async saveSettings() {
     await this.saveData(this.settings);
-    this.updateStatusBar();
   }
 };
 Object.assign(ReferenceLinkerPlugin.prototype, api);

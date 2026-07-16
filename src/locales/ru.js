@@ -7,7 +7,6 @@ module.exports = {
   'cmd.rebuildIndex': 'Перестроить индекс ссылок',
   'cmd.insertLink': 'Вставить ссылку на документ',
   'cmd.insertLinkAs': 'Вставить ссылку на документ как…',
-  'cmd.switchPreset': 'Сменить пресет просмотрщика',
   'cmd.openFile': 'Открыть документ',
   'cmd.copyLink': 'Скопировать ссылку на документ',
   'cmd.convertSelection': 'Превратить выделение в ссылку на документ',
@@ -28,7 +27,6 @@ module.exports = {
   'notice.indexed': 'Reference Linker: проиндексировано {entries}',
   'notice.missingFolders': 'Reference Linker: папка сканирования не найдена — {folders}',
   'notice.copied': 'Reference Linker: ссылка скопирована',
-  'notice.editorSet': 'Reference Linker: ссылки теперь открываются в {name}',
   'notice.noSelection': 'Reference Linker: сначала выделите имя или путь',
   'notice.noMatch': 'Reference Linker: нет документа для «{query}»',
   'notice.watchUnsupported': 'Reference Linker: автообновление недоступно на этой платформе — перестраивайте вручную',
@@ -49,12 +47,9 @@ module.exports = {
 
   // Status bar
   'status.indexing': 'Reference Linker: индексирование… {n}',
-  'status.editor': 'Документ: {name}',
-  'status.editorTooltip': 'Reference Linker: клик — сменить способ открытия ссылок',
 
   // Command-palette modal
   'modal.searchPlaceholder': 'Поиск документов…',
-  'modal.switchPlaceholder': 'Выберите способ открытия ссылок…',
   'modal.formatPlaceholder': 'Выберите формат просмотрщика для этой ссылки…',
   'modal.embedPlaceholder': 'Выберите формат embed…',
 
@@ -106,8 +101,6 @@ module.exports = {
   'set.editors.namePlaceholder': 'Название',
   'set.editors.remove': 'Удалить',
   'set.editors.add': '+ Добавить просмотрщик',
-  'set.statusBar.name': 'Показывать просмотрщик в статус-баре',
-  'set.statusBar.desc': 'Показывать активный пресет в статус-баре; клик по нему меняет способ открытия без входа в настройки.',
   'set.contextMenu.name': 'Контекстное меню редактора',
   'set.contextMenu.desc': 'Добавлять «Найти и превратить в ссылку» и «Найти и открыть документ» в меню по правому клику — плюс «Скопировать ссылку на документ» при клике по ссылке.',
 

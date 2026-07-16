@@ -39,7 +39,7 @@ class FolderSuggest extends AbstractInputSuggest {
 
     let scanDir, prefix;
     if (base) {
-      // Relative to the code root; an empty query lists the root's own folders.
+      // Relative to the reference root; an empty query lists the root's own folders.
       scanDir = nodePath.join(base, head);
       prefix = head;
     } else if (slash === -1) {

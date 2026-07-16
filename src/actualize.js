@@ -1,9 +1,10 @@
 'use strict';
 
-// Keeping stored links current with the code. A link freezes the declaration's line
-// at insert time; as code moves, that line drifts. These helpers re-resolve a link by
-// its symbol name + path against the live index, mark the drifted ones, and (on an
-// explicit command) rewrite the stale line number. Nothing is rewritten automatically.
+// Keeping reference links current with the documents on disk. A link freezes a document's
+// path (and, for a section, its page) at insert time; if the file moves or a PDF's outline
+// shifts, that drifts. These helpers re-resolve a link by its display name against the live
+// index, mark the drifted/broken ones, and (on an explicit command) rewrite the target.
+// Nothing is rewritten automatically.
 
 const { Notice, MarkdownView } = require('obsidian');
 const { ViewPlugin, Decoration } = require('@codemirror/view');
@@ -12,14 +13,11 @@ const { syntaxTree } = require('@codemirror/language');
 const { linkRegex, isFenceLine, inInlineCode } = require('./shared/markdown');
 const { t } = require('./shared/i18n');
 
-// The line lives as the last :<digits> before the end; relative code paths carry no
-// colon, so it's unambiguous. Not global, so replace() only touches that one number.
-const LINE_RE = /:(\d+)(?=\D*$)/;
 // CM6 syntax-node names for contexts where a link is example text, not a live link.
 const SKIP_NODE = /code|comment|frontmatter/i;
 
-// Rewrite stale line numbers in `text`, skipping links inside code (fenced or inline)
-// where they're example text, not live links. Returns { text, count }.
+// Rewrite stale targets in `text`, skipping links inside code (fenced or inline) where
+// they're example text, not live links. Returns { text, count }.
 function updateLinksInText(plugin, text) {
   const lines = text.split('\n');
   let fenced = false, count = 0;
@@ -37,8 +35,8 @@ function updateLinksInText(plugin, text) {
   return { text: lines.join('\n'), count };
 }
 
-// A CM6 refresh signal, dispatched when the index changes so Live Preview re-scans
-// stale marks without waiting for the next edit or scroll.
+// A CM6 refresh signal, dispatched when the index changes so Live Preview re-scans stale
+// marks without waiting for the next edit or scroll.
 const refreshEffect = StateEffect.define();
 
 function refreshStaleLinks(app) {
@@ -48,9 +46,8 @@ function refreshStaleLinks(app) {
   });
 }
 
-// Live Preview underline for links whose line has drifted. Links inside code (fenced or
-// inline) are skipped via the syntax tree — they're example text, not live links, so the
-// note/vault commands won't touch them and marking them would mislead.
+// Live Preview underline for stale/broken links. Links inside code (fenced or inline) are
+// skipped via the syntax tree — they're example text, not live links.
 function staleLinksExtension(plugin) {
   const marks = {
     stale: Decoration.mark({ class: 'reference-linker-stale' }),
@@ -90,54 +87,62 @@ function staleLinksExtension(plugin) {
 
 // Mixed into the plugin prototype (like api.js); `this` is the plugin.
 const methods = {
-  // A stored link resolved to its live entry, or null when it can't be safely
-  // actualized (no line, not a code link, or an ambiguous name in the file). Unlike
-  // entryUnderPointer it never uses the stored line to disambiguate — that would hide
-  // the very drift we're detecting.
-  resolveStoredLink(name, target) {
+  // The current index entry a reference link points at — matched by its display name and
+  // disambiguated by the still-valid path/page in the target — or null.
+  resolveReferenceLink(name, target) {
     if (!name || !target) return null;
-    const m = LINE_RE.exec(target);
-    if (!m) return null;
-    const storedLine = parseInt(m[1], 10);
-    const { cand } = this.linkCandidates(name, target);
-    const decls = cand.filter((e) => e.kind !== 'file');
-    let entry;
-    if (decls.length === 1) entry = decls[0];
-    else if (!decls.length && cand.length === 1) entry = cand[0];
-    else return null;
-    return { entry, storedLine, currentLine: entry.line };
+    const { cand } = this.linkCandidates(name, target); // same-named entries whose path is in the target
+    if (cand.length === 1) return cand[0];
+    if (cand.length > 1) {
+      const pm = /#page=(\d+)/i.exec(target);
+      const page = pm ? parseInt(pm[1], 10) : 1;
+      return cand.find((e) => (e.page || 1) === page) || cand.find((e) => e.kind === 'section') || cand[0];
+    }
+    // The target's path isn't indexed (the file moved or is gone) — fall back to a unique
+    // name match, which finds a moved file by its (unchanged) name.
+    const named = this.entriesByName(name).filter((e) => e.name === name);
+    return named.length === 1 ? named[0] : null;
   },
 
-  isLinkStale(name, target) {
-    const r = this.resolveStoredLink(name, target);
-    return !!r && r.currentLine !== r.storedLine;
+  // Whether the target's extension is one we index — so a missing target reads as a broken
+  // reference, not an unrelated file:// link we should leave alone.
+  targetLooksIndexable(target) {
+    const ext = (/(\.[a-z0-9]+)(?:[#?].*)?$/i.exec(target.split('#')[0]) || [])[1];
+    return !!ext && this.watchedExts().has(ext.toLowerCase());
   },
 
-  // Freshness of a code link for the visual marks: 'stale' (line drifted, fixable),
-  // 'broken' (its file is still indexed but the symbol is gone — renamed or removed),
-  // or null (current, ambiguous, not a code link, or unrelated — nothing to mark).
+  // Two link targets are the same document location, ignoring {root}-vs-absolute form and
+  // %-encoding differences.
+  sameReferenceTarget(a, b) {
+    const norm = (s) => { let x = this.fillRoot(s); try { x = decodeURI(x); } catch { /* keep raw */ } return x.split('\\').join('/'); };
+    return norm(a) === norm(b);
+  },
+
+  // Freshness of a reference link for the visual marks: 'stale' (target moved or its page
+  // drifted — fixable), 'broken' (a document that's gone), or null (current, or not one of
+  // our file:// reference links).
   linkState(name, target) {
     if (!name || !target) return null;
-    if (!LINE_RE.test(target)) return null; // no line: not a tracked code link
-    const r = this.resolveStoredLink(name, target);
-    if (r) return r.currentLine === r.storedLine ? null : 'stale';
-    // Didn't resolve. If the target still points at an indexed file, the symbol was
-    // renamed or removed → broken; otherwise it's an unrelated link → leave it alone.
-    const { dec, cand } = this.linkCandidates(name, target);
-    if (cand.length) return null; // name matched but ambiguous in the file — don't guess
-    return this.targetIndexedFile(dec) ? 'broken' : null;
+    if (!/file:\/\//i.test(target)) return null;
+    const entry = this.resolveReferenceLink(name, target);
+    if (entry) return this.sameReferenceTarget(this.buildUri(entry), target) ? null : 'stale';
+    return this.targetLooksIndexable(target) ? 'broken' : null;
   },
 
-  // The link target with its line corrected to the current declaration, or null when
-  // there's nothing to fix. Shared by the vault/note commands and the right-click fix.
+  isLinkStale(name, target) { return this.linkState(name, target) === 'stale'; },
+
+  // The corrected {root}-portable target for a stale link, or null when there's nothing to
+  // fix. Shared by the vault/note commands and the right-click fix.
   actualizedTarget(name, target) {
-    const r = this.resolveStoredLink(name, target);
-    if (!r || r.currentLine === r.storedLine) return null;
-    return target.replace(LINE_RE, ':' + r.currentLine);
+    if (!/file:\/\//i.test(target)) return null;
+    const entry = this.resolveReferenceLink(name, target);
+    if (!entry) return null;
+    const current = this.buildUri(entry);
+    return this.sameReferenceTarget(current, target) ? null : current;
   },
 
-  // Works in both edit and reading view: an open editor keeps cursor/undo, otherwise
-  // the active file is rewritten through the vault.
+  // Works in both edit and reading view: an open editor keeps cursor/undo, otherwise the
+  // active file is rewritten through the vault.
   async updateLinksInActiveNote() {
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
     const editor = view && view.editor;

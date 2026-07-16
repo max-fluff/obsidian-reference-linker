@@ -156,11 +156,6 @@ class ReferenceLinkerSettingTab extends PluginSettingTab {
     }
 
     new Setting(containerEl)
-      .setName(t('set.statusBar.name'))
-      .setDesc(t('set.statusBar.desc'))
-      .addToggle((c) => c.setValue(s.showStatusBar).onChange(async (v) => { s.showStatusBar = v; await save(false); }));
-
-    new Setting(containerEl)
       .setName(t('set.contextMenu.name'))
       .setDesc(t('set.contextMenu.desc'))
       .addToggle((c) => c.setValue(s.contextMenu).onChange(async (v) => { s.contextMenu = v; await save(false); }));

@@ -17,7 +17,7 @@ npm run build    # bundle src/ -> main.js
 
 ## Adding a viewer preset
 
-Built-in viewer presets live in `src/constants.js` (`PRESETS`) with their labels in `src/locales/`. A preset is a URL/command template using the placeholders `{root}` `{path}` `{abs}` `{page}` `{name}`. Command presets that spawn an external viewer must pass arguments as an array with `shell: false` — never string-concatenate a path into a shell command. Document the exact CLI flags you rely on, and verify them on the target platform before submitting.
+Built-in viewer presets live in `src/constants.js` (`PRESETS`) with their labels in `src/locales/`. A preset is a **URL template** built from the placeholders `{root}` `{path}` `{abs}` `{page}` `{name}`; links are opened by handing that URL to the OS (`shell.openExternal`), which is what keeps a PDF's `#page=` fragment intact. The plugin deliberately doesn't spawn viewer processes — if you need a specific app, add a named template under *Your viewers* with a URL scheme it registers.
 
 ## Pull requests
 

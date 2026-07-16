@@ -17,17 +17,10 @@ const DEFAULT_SETTINGS = {
   extensions: '', // e.g. ".pdf .docx .png"; empty => nothing indexed
   skipDirs: '.git\nnode_modules\n.obsidian', // one folder name per line
   editors: [], // user-defined viewer presets, each { name, template }
-  hiddenPresets: [], // presets kept out of the pickers
-  presetsInitialized: false,
-  recentPresets: [], // preset keys, most-recent first, to float recent picks up the picker
-  askOnInsert: true, // ask which viewer format to use on every insert (vs. a fixed preset)
-  showStatusBar: false, // show the active viewer preset in the status bar, click to switch
-  disabledKinds: [], // "<ext>:<kind>" keys hidden from suggestions (query-time filter)
+  askOnInsert: true, // ask which viewer format to use on every insert (vs. the default)
   autoRefresh: true, // watch scan folders and rebuild the index when files change
   hoverPreview: true, // show the preview popover when hovering a reference link
-  hoverBefore: 3,
-  hoverAfter: 20,
-  markStaleLinks: true, // underline links whose target file is gone
+  markStaleLinks: true, // underline links whose target document moved or is gone
   minChars: 1,
   maxResults: 12,
   contextMenu: true, // the "Convert"/"Find and open" items in the editor right-click menu
