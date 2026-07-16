@@ -87,21 +87,31 @@ function staleLinksExtension(plugin) {
 
 // Mixed into the plugin prototype (like api.js); `this` is the plugin.
 const methods = {
-  // The current index entry a reference link points at — matched by its display name and
-  // disambiguated by the still-valid path/page in the target — or null.
-  resolveReferenceLink(name, target) {
-    if (!name || !target) return null;
-    const { cand } = this.linkCandidates(name, target); // same-named entries whose path is in the target
-    if (cand.length === 1) return cand[0];
+  // Resolving a reference link, as { entry, indexedTarget }: the current index entry it
+  // points at (matched by display name, disambiguated by the still-valid path/page in the
+  // target) or null; and whether the target's own path is still an indexed document.
+  resolveReferenceLinkInfo(name, target) {
+    if (!name || !target) return { entry: null, indexedTarget: false };
+    const { dec, cand } = this.linkCandidates(name, target); // same-named entries whose path is in the target
+    if (cand.length === 1) return { entry: cand[0], indexedTarget: true };
     if (cand.length > 1) {
       const pm = /#page=(\d+)/i.exec(target);
       const page = pm ? parseInt(pm[1], 10) : 1;
-      return cand.find((e) => (e.page || 1) === page) || cand.find((e) => e.kind === 'section') || cand[0];
+      const entry = cand.find((e) => (e.page || 1) === page) || cand.find((e) => e.kind === 'section') || cand[0];
+      return { entry, indexedTarget: true };
     }
-    // The target's path isn't indexed (the file moved or is gone) — fall back to a unique
-    // name match, which finds a moved file by its (unchanged) name.
+    // Nothing named `name` sits at the target's path. If that path is still an indexed
+    // document, the link points where it says it points — a hand-retargeted link or a
+    // hand-edited display name, which we take at its word rather than re-resolve.
+    if (this.targetIndexedFile(dec)) return { entry: null, indexedTarget: true };
+    // The target's document isn't indexed at all (it moved or is gone) — fall back to a
+    // unique name match, which finds a moved file by its (unchanged) name.
     const named = this.entriesByName(name).filter((e) => e.name === name);
-    return named.length === 1 ? named[0] : null;
+    return { entry: named.length === 1 ? named[0] : null, indexedTarget: false };
+  },
+
+  resolveReferenceLink(name, target) {
+    return this.resolveReferenceLinkInfo(name, target).entry;
   },
 
   // Whether the target's extension is one we index — so a missing target reads as a broken
@@ -119,13 +129,16 @@ const methods = {
   },
 
   // Freshness of a reference link for the visual marks: 'stale' (target moved or its page
-  // drifted — fixable), 'broken' (a document that's gone), or null (current, or not one of
-  // our file:// reference links).
+  // drifted — fixable), 'broken' (a document that's gone), or null (current, hand-edited,
+  // or not one of our file:// reference links).
   linkState(name, target) {
     if (!name || !target) return null;
     if (!/file:\/\//i.test(target)) return null;
-    const entry = this.resolveReferenceLink(name, target);
+    const { entry, indexedTarget } = this.resolveReferenceLinkInfo(name, target);
     if (entry) return this.sameReferenceTarget(this.buildUri(entry), target) ? null : 'stale';
+    // Didn't resolve, but the target is a document we index — the link opens fine and only
+    // its display name is off-index. Nothing to mark.
+    if (indexedTarget) return null;
     return this.targetLooksIndexable(target) ? 'broken' : null;
   },
 
