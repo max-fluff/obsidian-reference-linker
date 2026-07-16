@@ -5,3 +5,4 @@ esbuild.local.mjs
 *.log
 .DS_Store
 data.json
+ROADMAP.md
