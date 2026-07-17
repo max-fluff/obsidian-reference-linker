@@ -1,4 +1,4 @@
-/* Reference Linker — bundled from src/ by esbuild. Do not edit directly; edit src/ and run "npm run build". */
+/* Reference Linker 1.0.0 — bundled from src/ by esbuild. Do not edit directly; edit src/ and run "npm run build". */
 "use strict";
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __commonJS = (cb, mod) => function __require() {
@@ -12,6 +12,15 @@ var require_markdown = __commonJS({
     var splitLines2 = (s) => (s || "").split("\n").map((x) => x.trim()).filter(Boolean);
     var LINK_PATTERN = "\\[([^\\]]*)\\]\\(([^)]+)\\)";
     var linkRegex2 = () => new RegExp(LINK_PATTERN, "g");
+    var LINK_TITLE = /^([\s\S]*?)\s+(?:"([^"]*)"|'([^']*)')$/;
+    function splitTarget2(raw) {
+      const s = String(raw == null ? "" : raw).trim();
+      const m = LINK_TITLE.exec(s);
+      if (!m)
+        return { url: s, title: "" };
+      return { url: m[1].trim(), title: m[2] != null ? m[2] : m[3] };
+    }
+    var withTitle2 = (url, title) => title ? url + ' "' + title + '"' : url;
     var isFenceLine = (line) => {
       const s = line.trimStart();
       return s.startsWith("```") || s.startsWith("~~~");
@@ -75,7 +84,51 @@ var require_markdown = __commonJS({
           return true;
       return false;
     }
-    module2.exports = { splitLines: splitLines2, linkRegex: linkRegex2, isFenceLine, inInlineCode, locate, inCode: inCode2, inLink: inLink2, isProtected, inTableCell: inTableCell2 };
+    function rewriteLinks(text, fn) {
+      const lines = text.split("\n");
+      let fenced = false, count = 0;
+      for (let i = 0; i < lines.length; i++) {
+        if (isFenceLine(lines[i])) {
+          fenced = !fenced;
+          continue;
+        }
+        if (fenced)
+          continue;
+        lines[i] = lines[i].replace(linkRegex2(), (whole, name, target, offset) => {
+          if (inInlineCode(lines[i], offset))
+            return whole;
+          const out = fn(name, target);
+          if (out == null)
+            return whole;
+          count++;
+          return out;
+        });
+      }
+      return { text: lines.join("\n"), count };
+    }
+    function rewriteFences(text, lang, fn) {
+      const lines = text.split("\n");
+      let count = 0;
+      for (let i = 0; i < lines.length; i++) {
+        const open = new RegExp("^\\s*(`{3,}|~{3,})\\s*" + lang + "\\s*$").exec(lines[i]);
+        if (!open)
+          continue;
+        const close = new RegExp("^\\s*" + open[1][0] + "{" + open[1].length + ",}\\s*$");
+        let j = i + 1;
+        while (j < lines.length && !close.test(lines[j]))
+          j++;
+        const body = lines.slice(i + 1, j);
+        const out = fn(body);
+        if (out) {
+          lines.splice(i + 1, body.length, ...out);
+          count++;
+          j = i + 1 + out.length;
+        }
+        i = j;
+      }
+      return { text: lines.join("\n"), count };
+    }
+    module2.exports = { splitLines: splitLines2, linkRegex: linkRegex2, splitTarget: splitTarget2, withTitle: withTitle2, rewriteLinks, rewriteFences, isFenceLine, inInlineCode, locate, inCode: inCode2, inLink: inLink2, isProtected, inTableCell: inTableCell2 };
   }
 });
 
@@ -155,16 +208,63 @@ var require_constants = __commonJS({
       }
       return false;
     }
-    function pathInTarget2(dec, p) {
-      let from = 0, i;
-      while ((i = dec.indexOf(p, from)) !== -1) {
-        if (i === 0 || dec[i - 1] === "/")
-          return true;
-        from = i + 1;
+    module2.exports = { PRESETS: PRESETS2, DEFAULT_SETTINGS: DEFAULT_SETTINGS2, parseExtensions: parseExtensions2, parseSkip: parseSkip2, underSkip: underSkip2 };
+  }
+});
+
+// src/shared/binding.js
+var require_binding = __commonJS({
+  "src/shared/binding.js"(exports2, module2) {
+    "use strict";
+    var ANCHORS = { sym: "sym", kind: "kind", sec: "sec", line: "hash" };
+    var TOKEN = /^(sym|kind|sec|line):(.+)$/;
+    var LINE_RE = /:(\d+)(?=\D*$)/;
+    var PAGE_RE = /#page=(\d+)/i;
+    var encodeValue = (v) => String(v).replace(/[%"()\s]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0"));
+    var decodeValue = (v) => v.replace(/%([0-9A-Fa-f]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
+    function hashLine(text) {
+      let h = 2166136261;
+      const s = String(text || "").trim();
+      for (let i = 0; i < s.length; i++) {
+        h ^= s.charCodeAt(i);
+        h = Math.imul(h, 16777619) >>> 0;
       }
-      return false;
+      return h.toString(36);
     }
-    module2.exports = { PRESETS: PRESETS2, DEFAULT_SETTINGS: DEFAULT_SETTINGS2, parseExtensions: parseExtensions2, parseSkip: parseSkip2, underSkip: underSkip2, pathInTarget: pathInTarget2 };
+    function parseBinding2(title) {
+      const s = String(title || "").trim();
+      if (!s)
+        return null;
+      const b = { sym: "", kind: "", sec: "", hash: "" };
+      for (const word of s.split(/\s+/)) {
+        const m = TOKEN.exec(word);
+        if (!m)
+          return null;
+        b[ANCHORS[m[1]]] = decodeValue(m[2]);
+      }
+      return b.sym || b.kind || b.sec || b.hash ? b : null;
+    }
+    function formatBinding2(b) {
+      const parts = [];
+      if (b.sym)
+        parts.push("sym:" + encodeValue(b.sym));
+      if (b.kind)
+        parts.push("kind:" + encodeValue(b.kind));
+      if (b.sec)
+        parts.push("sec:" + encodeValue(b.sec));
+      if (b.hash)
+        parts.push("line:" + b.hash);
+      return parts.join(" ");
+    }
+    function bindStateFrom2(hits, stored) {
+      if (hits.includes(stored))
+        return null;
+      if (!hits.length)
+        return { state: "broken" };
+      const line = hits.reduce((a, n) => Math.abs(n - stored) < Math.abs(a - stored) ? n : a);
+      return { state: "stale", line };
+    }
+    module2.exports = { LINE_RE, PAGE_RE, hashLine, parseBinding: parseBinding2, formatBinding: formatBinding2, bindStateFrom: bindStateFrom2 };
   }
 });
 
@@ -453,7 +553,9 @@ var require_hover = __commonJS({
         const token = ++this.token;
         const el = this.ensureEl();
         el.empty();
-        const header = entry.kind === "section" ? entry.name + "  \xB7  p." + (entry.page || 1) : entry.name;
+        const page = entry.page || 1;
+        const label = entry.title || entry.name;
+        const header = page > 1 ? label + "  \xB7  p." + page : label;
         el.createDiv({ cls: "reference-linker-hover-header", text: header });
         const body = el.createDiv({ cls: "reference-linker-hover-body" });
         if (ext === "pdf") {
@@ -803,31 +905,22 @@ var require_actualize = __commonJS({
     var { ViewPlugin, Decoration } = require("@codemirror/view");
     var { RangeSetBuilder, StateEffect } = require("@codemirror/state");
     var { syntaxTree } = require("@codemirror/language");
-    var { linkRegex: linkRegex2, isFenceLine, inInlineCode } = require_markdown();
+    var { linkRegex: linkRegex2, splitTarget: splitTarget2, withTitle: withTitle2, rewriteLinks } = require_markdown();
+    var { PAGE_RE, parseBinding: parseBinding2, formatBinding: formatBinding2 } = require_binding();
     var { t: t2 } = require_i18n();
     var SKIP_NODE = /code|comment|frontmatter/i;
-    function updateLinksInText(plugin, text) {
-      const lines = text.split("\n");
-      let fenced = false, count = 0;
-      for (let i = 0; i < lines.length; i++) {
-        if (isFenceLine(lines[i])) {
-          fenced = !fenced;
-          continue;
-        }
-        if (fenced)
-          continue;
-        lines[i] = lines[i].replace(linkRegex2(), (whole, name, target, offset) => {
-          if (inInlineCode(lines[i], offset))
-            return whole;
-          const fixed = plugin.actualizedTarget(name, target);
-          if (fixed == null)
-            return whole;
-          count++;
-          return "[" + name + "](" + fixed + ")";
-        });
-      }
-      return { text: lines.join("\n"), count };
-    }
+    var withPage = (url, page) => PAGE_RE.test(url) ? url.replace(PAGE_RE, "#page=" + page) : url + "#page=" + page;
+    var updateLinksInText = (plugin, text) => rewriteLinks(text, (name, target) => {
+      const fixed = plugin.actualizedTarget(target);
+      return fixed == null ? null : "[" + name + "](" + fixed + ")";
+    });
+    var pinLinksInText = (plugin, text) => rewriteLinks(text, (name, target) => {
+      const { url, title } = splitTarget2(target);
+      if (title)
+        return null;
+      const sec = plugin.sectionAtLinkPage(url);
+      return sec ? "[" + name + "](" + withTitle2(url, formatBinding2({ sec: sec.name })) + ")" : null;
+    });
     var refreshEffect = StateEffect.define();
     function refreshStaleLinks(app) {
       app.workspace.iterateAllLeaves((leaf) => {
@@ -852,12 +945,12 @@ var require_actualize = __commonJS({
             while (m = re.exec(text)) {
               const start = from + m.index;
               const end = start + m[0].length;
-              let inCodeNode = false;
+              let inCode2 = false;
               tree.iterate({ from: start, to: end, enter: (n) => {
                 if (SKIP_NODE.test(n.type.name))
-                  inCodeNode = true;
+                  inCode2 = true;
               } });
-              const state = inCodeNode ? null : plugin.linkState(m[1], m[2]);
+              const state = inCode2 ? null : plugin.linkState(m[2]);
               if (state)
                 builder.add(start, end, marks[state]);
             }
@@ -879,115 +972,78 @@ var require_actualize = __commonJS({
         { decorations: (v) => v.decorations }
       );
     }
+    function bindStateOf(plugin, target) {
+      const { url, title } = splitTarget2(target);
+      if (!url || !/^file:\/\//i.test(url))
+        return null;
+      const b = parseBinding2(title);
+      return b ? plugin.urlBindState(url, b, plugin.targetPage(url)) : null;
+    }
     var methods = {
-      // Resolving a reference link, as { entry, indexedTarget }: the current index entry it
-      // points at (matched by display name, disambiguated by the still-valid path/page in the
-      // target) or null; and whether the target's own path is still an indexed document.
-      resolveReferenceLinkInfo(name, target) {
-        if (!name || !target)
-          return { entry: null, indexedTarget: false };
-        const { dec, cand } = this.linkCandidates(name, target);
-        if (cand.length === 1)
-          return { entry: cand[0], indexedTarget: true };
-        if (cand.length > 1) {
-          const pm = /#page=(\d+)/i.exec(target);
-          const page = pm ? parseInt(pm[1], 10) : 1;
-          const entry = cand.find((e) => (e.page || 1) === page) || cand.find((e) => e.kind === "section") || cand[0];
-          return { entry, indexedTarget: true };
-        }
-        if (this.targetIndexedFile(dec))
-          return { entry: null, indexedTarget: true };
-        const named = this.entriesByName(name).filter((e) => e.name === name);
-        return { entry: named.length === 1 ? named[0] : null, indexedTarget: false };
+      linkState(target) {
+        const r = bindStateOf(this, target);
+        return r ? r.state : null;
       },
-      resolveReferenceLink(name, target) {
-        return this.resolveReferenceLinkInfo(name, target).entry;
+      isLinkStale(target) {
+        return this.linkState(target) === "stale";
       },
-      // Whether the target's extension is one we index — so a missing target reads as a broken
-      // reference, not an unrelated file:// link we should leave alone.
-      targetLooksIndexable(target) {
-        const ext = (/(\.[a-z0-9]+)(?:[#?].*)?$/i.exec(target.split("#")[0]) || [])[1];
-        return !!ext && this.watchedExts().has(ext.toLowerCase());
-      },
-      // Two link targets are the same document location, ignoring {root}-vs-absolute form and
-      // %-encoding differences.
-      sameReferenceTarget(a, b) {
-        const norm = (s) => {
-          let x = this.fillRoot(s);
-          try {
-            x = decodeURI(x);
-          } catch (e) {
-          }
-          return x.split("\\").join("/");
-        };
-        return norm(a) === norm(b);
-      },
-      // Freshness of a reference link for the visual marks: 'stale' (target moved or its page
-      // drifted — fixable), 'broken' (a document that's gone), or null (current, hand-edited,
-      // or not one of our file:// reference links).
-      linkState(name, target) {
-        if (!name || !target)
+      // The link with its page corrected, or null when there's nothing to fix. The binding
+      // rides along. bindStateFrom names the moved-to position `line`; here it's a page.
+      actualizedTarget(target) {
+        const r = bindStateOf(this, target);
+        if (!r || r.state !== "stale")
           return null;
-        if (!/file:\/\//i.test(target))
-          return null;
-        const { entry, indexedTarget } = this.resolveReferenceLinkInfo(name, target);
-        if (entry)
-          return this.sameReferenceTarget(this.buildUri(entry), target) ? null : "stale";
-        if (indexedTarget)
-          return null;
-        return this.targetLooksIndexable(target) ? "broken" : null;
+        const { url, title } = splitTarget2(target);
+        return withTitle2(withPage(url, r.line), title);
       },
-      isLinkStale(name, target) {
-        return this.linkState(name, target) === "stale";
-      },
-      // The corrected {root}-portable target for a stale link, or null when there's nothing to
-      // fix. Shared by the vault/note commands and the right-click fix.
-      actualizedTarget(name, target) {
-        if (!/file:\/\//i.test(target))
-          return null;
-        const entry = this.resolveReferenceLink(name, target);
-        if (!entry)
-          return null;
-        const current = this.buildUri(entry);
-        return this.sameReferenceTarget(current, target) ? null : current;
-      },
-      // Works in both edit and reading view: an open editor keeps cursor/undo, otherwise the
-      // active file is rewritten through the vault.
-      async updateLinksInActiveNote() {
+      // An open editor keeps cursor and undo; reading view has none, so the file is rewritten
+      // through the vault.
+      async rewriteActiveNote(transform, noticeKey) {
         const view = this.app.workspace.getActiveViewOfType(MarkdownView2);
         const editor = view && view.editor;
         if (editor) {
-          const { text: text2, count: count2 } = updateLinksInText(this, editor.getValue());
+          const { text: text2, count: count2 } = transform(this, editor.getValue());
           if (count2) {
             const cur = editor.getCursor();
             editor.setValue(text2);
             editor.setCursor(cur);
           }
-          new Notice2(t2("notice.linksUpdated", { n: count2 }));
+          new Notice2(t2(noticeKey, { n: count2 }));
           return;
         }
         const file = this.app.workspace.getActiveFile();
         if (!file) {
-          new Notice2(t2("notice.linksUpdated", { n: 0 }));
+          new Notice2(t2(noticeKey, { n: 0 }));
           return;
         }
-        const { text, count } = updateLinksInText(this, await this.app.vault.read(file));
+        const { text, count } = transform(this, await this.app.vault.read(file));
         if (count)
           await this.app.vault.modify(file, text);
-        new Notice2(t2("notice.linksUpdated", { n: count }));
+        new Notice2(t2(noticeKey, { n: count }));
       },
-      async updateLinksInVault() {
+      async rewriteVault(transform, noticeKey) {
         let files = 0, total = 0;
         for (const f of this.app.vault.getMarkdownFiles()) {
-          const src = await this.app.vault.read(f);
-          const { text, count } = updateLinksInText(this, src);
+          const { text, count } = transform(this, await this.app.vault.read(f));
           if (count) {
             await this.app.vault.modify(f, text);
             files++;
             total += count;
           }
         }
-        new Notice2(t2("notice.linksUpdatedVault", { n: total, files }));
+        new Notice2(t2(noticeKey, { n: total, files }));
+      },
+      updateLinksInActiveNote() {
+        return this.rewriteActiveNote(updateLinksInText, "notice.linksUpdated");
+      },
+      updateLinksInVault() {
+        return this.rewriteVault(updateLinksInText, "notice.linksUpdatedVault");
+      },
+      pinLinksInActiveNote() {
+        return this.rewriteActiveNote(pinLinksInText, "notice.linksPinned");
+      },
+      pinLinksInVault() {
+        return this.rewriteVault(pinLinksInText, "notice.linksPinnedVault");
       }
     };
     module2.exports = { methods, staleLinksExtension, refreshStaleLinks };
@@ -1458,10 +1514,14 @@ var require_en = __commonJS({
       "cmd.insertEmbed": "Insert reference embed",
       "cmd.updateLinksNote": "Update reference links in this note",
       "cmd.updateLinksVault": "Update reference links in the whole vault",
+      "cmd.pinLinksNote": "Pin unpinned reference links in this note",
+      "cmd.pinLinksVault": "Pin unpinned reference links in the whole vault",
       // Editor context menu
       "menu.convert": "Find and convert to link",
       "menu.copyLink": "Copy reference link",
       "menu.fixLink": "Update this reference link",
+      "menu.pin": "Pin to section \u201C{sec}\u201D",
+      "menu.unpin": "Unpin this reference link",
       // Notices
       "notice.noCodeRoot": "Reference Linker: could not determine the reference root",
       "notice.noExtensions": "Reference Linker: no file extensions configured",
@@ -1474,6 +1534,11 @@ var require_en = __commonJS({
       "notice.watchUnsupported": "Reference Linker: auto-refresh is unavailable on this platform \u2014 rebuild manually",
       "notice.linksUpdated": "Reference Linker: {n} link(s) updated",
       "notice.linksUpdatedVault": "Reference Linker: {n} link(s) updated across {files} note(s)",
+      "notice.linksPinned": "Reference Linker: {n} link(s) pinned",
+      "notice.linksPinnedVault": "Reference Linker: {n} link(s) pinned across {files} note(s)",
+      "notice.pinned": "Reference Linker: link pinned to section \u201C{sec}\u201D",
+      "notice.unpinned": "Reference Linker: link unpinned \u2014 it is no longer tracked",
+      "notice.cantPin": "Reference Linker: can't pin \u2014 no section begins on that page",
       // Inline embeds
       "embed.empty": "Reference Linker: empty embed \u2014 give a document path",
       "embed.fmt.file": "Document (first page)",
@@ -1544,7 +1609,7 @@ var require_en = __commonJS({
       "set.hoverPreview.desc": "Preview the referenced document when you hover a link. In live preview, hold Ctrl/Cmd; in reading view a plain hover is enough.",
       // Settings — links
       "set.markStaleLinks.name": "Mark stale links",
-      "set.markStaleLinks.desc": "Underline reference links whose target document is missing or renamed.",
+      "set.markStaleLinks.desc": "Underline a reference link when its document moved (warning colour, fixable with \u201CUpdate reference links\u201D) or is gone from disk (error colour). A link you edited by hand is left alone: the page you typed and the text you wrote are yours.",
       // Plural noun phrases
       "plural.entry": { one: "{n} entry", other: "{n} entries" }
     };
@@ -1567,10 +1632,14 @@ var require_ru = __commonJS({
       "cmd.insertEmbed": "\u0412\u0441\u0442\u0430\u0432\u0438\u0442\u044C embed \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430",
       "cmd.updateLinksNote": "\u0410\u043A\u0442\u0443\u0430\u043B\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0438 \u0432 \u044D\u0442\u043E\u0439 \u0437\u0430\u043C\u0435\u0442\u043A\u0435",
       "cmd.updateLinksVault": "\u0410\u043A\u0442\u0443\u0430\u043B\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0438 \u0432\u043E \u0432\u0441\u0451\u043C \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435",
+      "cmd.pinLinksNote": "\u0417\u0430\u043A\u0440\u0435\u043F\u0438\u0442\u044C \u043D\u0435\u0437\u0430\u043A\u0440\u0435\u043F\u043B\u0451\u043D\u043D\u044B\u0435 \u0441\u0441\u044B\u043B\u043A\u0438 \u0432 \u044D\u0442\u043E\u0439 \u0437\u0430\u043C\u0435\u0442\u043A\u0435",
+      "cmd.pinLinksVault": "\u0417\u0430\u043A\u0440\u0435\u043F\u0438\u0442\u044C \u043D\u0435\u0437\u0430\u043A\u0440\u0435\u043F\u043B\u0451\u043D\u043D\u044B\u0435 \u0441\u0441\u044B\u043B\u043A\u0438 \u0432\u043E \u0432\u0441\u0451\u043C \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435",
       // Editor context menu
       "menu.convert": "\u041D\u0430\u0439\u0442\u0438 \u0438 \u043F\u0440\u0435\u0432\u0440\u0430\u0442\u0438\u0442\u044C \u0432 \u0441\u0441\u044B\u043B\u043A\u0443",
       "menu.copyLink": "\u0421\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442",
       "menu.fixLink": "\u0410\u043A\u0442\u0443\u0430\u043B\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u044D\u0442\u0443 \u0441\u0441\u044B\u043B\u043A\u0443",
+      "menu.pin": "\u0417\u0430\u043A\u0440\u0435\u043F\u0438\u0442\u044C \u0437\u0430 \u0440\u0430\u0437\u0434\u0435\u043B\u043E\u043C \xAB{sec}\xBB",
+      "menu.unpin": "\u041E\u0442\u043A\u0440\u0435\u043F\u0438\u0442\u044C \u044D\u0442\u0443 \u0441\u0441\u044B\u043B\u043A\u0443",
       // Notices
       "notice.noCodeRoot": "Reference Linker: \u043D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043E\u043F\u0440\u0435\u0434\u0435\u043B\u0438\u0442\u044C \u043A\u043E\u0440\u0435\u043D\u044C \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u043E\u0432",
       "notice.noExtensions": "Reference Linker: \u043D\u0435 \u0437\u0430\u0434\u0430\u043D\u043E \u043D\u0438 \u043E\u0434\u043D\u043E\u0433\u043E \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u044F",
@@ -1583,6 +1652,11 @@ var require_ru = __commonJS({
       "notice.watchUnsupported": "Reference Linker: \u0430\u0432\u0442\u043E\u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0435 \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u043D\u043E \u043D\u0430 \u044D\u0442\u043E\u0439 \u043F\u043B\u0430\u0442\u0444\u043E\u0440\u043C\u0435 \u2014 \u043F\u0435\u0440\u0435\u0441\u0442\u0440\u0430\u0438\u0432\u0430\u0439\u0442\u0435 \u0432\u0440\u0443\u0447\u043D\u0443\u044E",
       "notice.linksUpdated": "Reference Linker: \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u043E \u0441\u0441\u044B\u043B\u043E\u043A \u2014 {n}",
       "notice.linksUpdatedVault": "Reference Linker: \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u043E \u0441\u0441\u044B\u043B\u043E\u043A \u2014 {n} \u0432 \u0437\u0430\u043C\u0435\u0442\u043A\u0430\u0445: {files}",
+      "notice.linksPinned": "Reference Linker: \u0437\u0430\u043A\u0440\u0435\u043F\u043B\u0435\u043D\u043E \u0441\u0441\u044B\u043B\u043E\u043A \u2014 {n}",
+      "notice.linksPinnedVault": "Reference Linker: \u0437\u0430\u043A\u0440\u0435\u043F\u043B\u0435\u043D\u043E \u0441\u0441\u044B\u043B\u043E\u043A \u2014 {n} \u0432 \u0437\u0430\u043C\u0435\u0442\u043A\u0430\u0445: {files}",
+      "notice.pinned": "Reference Linker: \u0441\u0441\u044B\u043B\u043A\u0430 \u0437\u0430\u043A\u0440\u0435\u043F\u043B\u0435\u043D\u0430 \u0437\u0430 \u0440\u0430\u0437\u0434\u0435\u043B\u043E\u043C \xAB{sec}\xBB",
+      "notice.unpinned": "Reference Linker: \u0441\u0441\u044B\u043B\u043A\u0430 \u043E\u0442\u043A\u0440\u0435\u043F\u043B\u0435\u043D\u0430 \u2014 \u0431\u043E\u043B\u044C\u0448\u0435 \u043D\u0435 \u043E\u0442\u0441\u043B\u0435\u0436\u0438\u0432\u0430\u0435\u0442\u0441\u044F",
+      "notice.cantPin": "Reference Linker: \u043D\u0435 \u0437\u0430 \u0447\u0442\u043E \u0437\u0430\u043A\u0440\u0435\u043F\u0438\u0442\u044C \u2014 \u043D\u0430 \u044D\u0442\u043E\u0439 \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0435 \u043D\u0435 \u043D\u0430\u0447\u0438\u043D\u0430\u0435\u0442\u0441\u044F \u0440\u0430\u0437\u0434\u0435\u043B",
       // Inline embeds
       "embed.empty": "Reference Linker: \u043F\u0443\u0441\u0442\u043E\u0439 embed \u2014 \u0443\u043A\u0430\u0436\u0438\u0442\u0435 \u043F\u0443\u0442\u044C \u043A \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0443",
       "embed.fmt.file": "\u0414\u043E\u043A\u0443\u043C\u0435\u043D\u0442 (\u043F\u0435\u0440\u0432\u0430\u044F \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0430)",
@@ -1653,7 +1727,7 @@ var require_ru = __commonJS({
       "set.hoverPreview.desc": "\u041F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0442\u044C \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442 \u043F\u0440\u0438 \u043D\u0430\u0432\u0435\u0434\u0435\u043D\u0438\u0438 \u043D\u0430 \u0441\u0441\u044B\u043B\u043A\u0443. \u0412 \u0440\u0435\u0436\u0438\u043C\u0435 live preview \u0443\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0439\u0442\u0435 Ctrl/Cmd; \u0432 \u0440\u0435\u0436\u0438\u043C\u0435 \u0447\u0442\u0435\u043D\u0438\u044F \u0434\u043E\u0441\u0442\u0430\u0442\u043E\u0447\u043D\u043E \u043F\u0440\u043E\u0441\u0442\u043E\u0433\u043E \u043D\u0430\u0432\u0435\u0434\u0435\u043D\u0438\u044F.",
       // Settings — links
       "set.markStaleLinks.name": "\u041E\u0442\u043C\u0435\u0447\u0430\u0442\u044C \u0443\u0441\u0442\u0430\u0440\u0435\u0432\u0448\u0438\u0435 \u0441\u0441\u044B\u043B\u043A\u0438",
-      "set.markStaleLinks.desc": "\u041F\u043E\u0434\u0447\u0451\u0440\u043A\u0438\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0438, \u0443 \u043A\u043E\u0442\u043E\u0440\u044B\u0445 \u0446\u0435\u043B\u0435\u0432\u043E\u0439 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442 \u043F\u0440\u043E\u043F\u0430\u043B \u0438\u043B\u0438 \u043F\u0435\u0440\u0435\u0438\u043C\u0435\u043D\u043E\u0432\u0430\u043D.",
+      "set.markStaleLinks.desc": "\u041F\u043E\u0434\u0447\u0451\u0440\u043A\u0438\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0443, \u0435\u0441\u043B\u0438 \u0435\u0451 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442 \u043F\u0435\u0440\u0435\u0435\u0445\u0430\u043B (\u0446\u0432\u0435\u0442 \u043F\u0440\u0435\u0434\u0443\u043F\u0440\u0435\u0436\u0434\u0435\u043D\u0438\u044F, \u0447\u0438\u043D\u0438\u0442\u0441\u044F \u043A\u043E\u043C\u0430\u043D\u0434\u043E\u0439 \xAB\u0410\u043A\u0442\u0443\u0430\u043B\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0438\xBB) \u0438\u043B\u0438 \u043F\u0440\u043E\u043F\u0430\u043B \u0441 \u0434\u0438\u0441\u043A\u0430 (\u0446\u0432\u0435\u0442 \u043E\u0448\u0438\u0431\u043A\u0438). \u0421\u0441\u044B\u043B\u043A\u0443, \u043F\u043E\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u043D\u0443\u044E \u0440\u0443\u043A\u0430\u043C\u0438, \u043F\u043B\u0430\u0433\u0438\u043D \u043D\u0435 \u0442\u0440\u043E\u0433\u0430\u0435\u0442: \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0430 \u0438 \u0442\u0435\u043A\u0441\u0442 \u2014 \u0442\u0432\u043E\u0438.",
       // Plural noun phrases
       "plural.entry": { one: "{n} \u0437\u0430\u043F\u0438\u0441\u044C", few: "{n} \u0437\u0430\u043F\u0438\u0441\u0438", many: "{n} \u0437\u0430\u043F\u0438\u0441\u0435\u0439", other: "{n} \u0437\u0430\u043F\u0438\u0441\u0435\u0439" }
     };
@@ -1667,8 +1741,9 @@ var { Prec } = require("@codemirror/state");
 var fs = require("fs");
 var fsp = fs.promises;
 var nodePath = require("path");
-var { PRESETS, DEFAULT_SETTINGS, parseExtensions, parseSkip, underSkip, pathInTarget } = require_constants();
-var { splitLines, inTableCell, inCode, inLink, linkRegex } = require_markdown();
+var { PRESETS, DEFAULT_SETTINGS, parseExtensions, parseSkip, underSkip } = require_constants();
+var { splitLines, inTableCell, inCode, inLink, linkRegex, splitTarget, withTitle } = require_markdown();
+var { parseBinding, formatBinding, bindStateFrom } = require_binding();
 var { ReferenceSuggest } = require_suggest();
 var filter = require_filter();
 var { HoverPreview } = require_hover();
@@ -1687,6 +1762,22 @@ function openExternal(uri) {
   }
 }
 var PAGE_LINK = /^file:\/\/\/.+#page=\d+/i;
+var ROOT_ATTR = "data-reference-root";
+var TITLE_ATTR = "data-reference-title";
+var anchorTitle = (a) => a.getAttribute(TITLE_ATTR) || a.getAttribute("title") || "";
+var pathPart = (dec) => dec.split("#")[0].split("?")[0];
+var normCase = (s) => process.platform === "win32" ? s.toLowerCase() : s;
+function namesPath(p, full) {
+  const a = normCase(p), b = normCase(full);
+  if (!b || !a.endsWith(b))
+    return false;
+  const i = a.length - b.length;
+  return i === 0 || a[i - 1] === "/";
+}
+var previewEntry = (ref, title) => {
+  const b = parseBinding(title);
+  return Object.assign({}, ref.entry, { page: ref.page, title: b && b.sec ? b.sec : "" });
+};
 var ReferenceLinkerPlugin = class extends Plugin {
   async onload() {
     initI18n({ en: require_en(), ru: require_ru() });
@@ -1744,6 +1835,8 @@ var ReferenceLinkerPlugin = class extends Plugin {
     this.addCommand({ id: "insert-reference-embed", name: t("cmd.insertEmbed"), editorCallback: (editor) => this.pickEntry((e) => this.insertEmbed(editor, e)) });
     this.addCommand({ id: "update-links-note", name: t("cmd.updateLinksNote"), callback: () => this.updateLinksInActiveNote() });
     this.addCommand({ id: "update-links-vault", name: t("cmd.updateLinksVault"), callback: () => this.updateLinksInVault() });
+    this.addCommand({ id: "pin-links-note", name: t("cmd.pinLinksNote"), callback: () => this.pinLinksInActiveNote() });
+    this.addCommand({ id: "pin-links-vault", name: t("cmd.pinLinksVault"), callback: () => this.pinLinksInVault() });
     this.registerEvent(
       this.app.workspace.on("editor-menu", (menu, editor) => {
         if (!this.settings.contextMenu)
@@ -1755,10 +1848,17 @@ var ReferenceLinkerPlugin = class extends Plugin {
           menu.addItem((item) => item.setTitle(t("cmd.openSelection")).setIcon("file-search").onClick(() => this.openSelection(editor)));
         }
         const link = this.linkAtCursor(editor);
-        if (link && this.isReferenceLink(link.name, link.target)) {
+        if (link && this.isReferenceLink(link.name, link.target, link.title)) {
           menu.addItem((item) => item.setTitle(t("menu.copyLink")).setIcon("copy").onClick(() => this.copyLinkAtCursor(link)));
-          if (this.isLinkStale(link.name, link.target)) {
+          if (this.isLinkStale(withTitle(link.target, link.title))) {
             menu.addItem((item) => item.setTitle(t("menu.fixLink")).setIcon("wrench").onClick(() => this.fixLinkAtCursor(editor, link)));
+          }
+          const bound = !!parseBinding(link.title);
+          const pin = bound ? null : this.linkPinOption(link);
+          if (bound) {
+            menu.addItem((item) => item.setTitle(t("menu.unpin")).setIcon("pin-off").onClick(() => this.unpinLinkAtCursor(editor, link)));
+          } else if (pin) {
+            menu.addItem((item) => item.setTitle(t("menu.pin", { sec: pin.value })).setIcon("pin").onClick(() => this.pinLinkAtCursor(editor, link)));
           }
         }
       })
@@ -1787,23 +1887,39 @@ var ReferenceLinkerPlugin = class extends Plugin {
   resolveRootLinks(el) {
     const links = el.querySelectorAll ? el.querySelectorAll("a") : [];
     for (const a of links) {
+      let ours = false;
       for (const attr of ["href", "data-href"]) {
         const v = a.getAttribute(attr);
         if (!v)
           continue;
         const out = this.fillRoot(v);
-        if (out !== v)
+        if (out !== v) {
           a.setAttribute(attr, out);
+          ours = true;
+        }
       }
+      if (ours)
+        a.setAttribute(ROOT_ATTR, "");
+      this.stashTitle(a);
     }
     this.markStaleAnchors(el);
+  }
+  // Park a binding title on a data attribute and drop the real one, so the binding string
+  // doesn't show as a native tooltip. A plain tooltip the reader wrote is left as-is.
+  stashTitle(a) {
+    const title = a.getAttribute("title");
+    if (!title || a.hasAttribute(TITLE_ATTR) || !parseBinding(title))
+      return;
+    a.setAttribute(TITLE_ATTR, title);
+    a.removeAttribute("title");
   }
   // Toggle the drifted/broken-link underline on every rendered anchor in `el`. toggle (not
   // add) so re-running after an index rebuild also clears links that are now current.
   markStaleAnchors(el) {
     const links = el.querySelectorAll ? el.querySelectorAll("a") : [];
     for (const a of links) {
-      const state = this.settings.markStaleLinks ? this.linkState(a.textContent, a.getAttribute("href") || "") : null;
+      const href = a.getAttribute("href") || a.getAttribute("data-href") || "";
+      const state = this.settings.markStaleLinks ? this.linkState(withTitle(href, anchorTitle(a))) : null;
       a.classList.toggle("reference-linker-stale", state === "stale");
       a.classList.toggle("reference-linker-broken", state === "broken");
     }
@@ -1873,18 +1989,16 @@ var ReferenceLinkerPlugin = class extends Plugin {
       return null;
     const a = el.closest("a");
     if (a && !(a.classList && a.classList.contains("internal-link"))) {
-      const entry = this.entryUnderPointer(a.textContent, a.getAttribute("href") || a.getAttribute("data-href") || "");
-      if (entry)
-        return { entry, requireMod: false };
+      const ref = this.refForTarget(a.getAttribute("href") || a.getAttribute("data-href") || "");
+      if (ref)
+        return { entry: previewEntry(ref, anchorTitle(a)), requireMod: false };
     }
     if (el.closest(".cm-link")) {
       const view = typeof EditorView.findFromDOM === "function" ? EditorView.findFromDOM(el) : this.activeCm();
-      const ref = view && this.codeRefAt(view, x, y);
-      if (ref) {
-        const entry = this.entryUnderPointer(ref.name, ref.target);
-        if (entry)
-          return { entry, requireMod: true };
-      }
+      const at = view && this.codeRefAt(view, x, y);
+      const ref = at && this.refForTarget(at.target);
+      if (ref)
+        return { entry: previewEntry(ref, at.title), requireMod: true };
     }
     return null;
   }
@@ -1894,20 +2008,61 @@ var ReferenceLinkerPlugin = class extends Plugin {
     const mv = this.app.workspace.getActiveViewOfType(MarkdownView);
     return mv && mv.editor && mv.editor.cm;
   }
-  // Resolve a hovered link's display name + target to an index entry, or null
-  // (so non-reference links — a wiki link, a web link, a custom Unity-scene link —
-  // simply show nothing). The entry's relative path must appear in the target,
-  // which every preset embeds via {path}/{abs}; that rejects unrelated links even
-  // when their text matches a symbol name. Ties are broken by the line in the
-  // target, preferring a declaration over the bare file entry.
-  entryUnderPointer(name, target) {
-    if (!name || !target)
+  // {root} filled in, %-escapes undone, backslashes normalised — the form links are matched on.
+  decodeTarget(target) {
+    let dec = this.fillRoot(target);
+    try {
+      dec = decodeURIComponent(dec);
+    } catch (e) {
+    }
+    return dec.split("\\").join("/");
+  }
+  // The page a link asks for — only ever read, never overridden. A #page fragment or a
+  // {page} query both count.
+  targetPage(dec) {
+    const m = /[#?&]page=(\d+)/i.exec(dec);
+    return m ? parseInt(m[1], 10) : 1;
+  }
+  // The document a link points at, from its target alone: { entry, page }, or null for a
+  // link into no indexed document. The label is never consulted.
+  refForTarget(target) {
+    if (!target)
       return null;
-    const { dec, cand } = this.linkCandidates(name, target);
-    if (cand.length <= 1)
-      return cand[0] || null;
-    const onLine = cand.find((e) => new RegExp("[:=]" + e.line + "(?:\\D|$)").test(dec));
-    return onLine || cand.find((e) => e.kind !== "file") || cand[0];
+    const dec = this.decodeTarget(target);
+    const cached = this.fileCache.get(this.targetIndexedFile(dec));
+    const entry = cached && cached.entries[0];
+    return entry ? { entry, page: this.targetPage(dec) } : null;
+  }
+  entriesIn(rel) {
+    return rel ? (this.fileCache.get(rel) || { entries: [] }).entries : [];
+  }
+  // What a section binding says about the page a link stores: null when the section still
+  // sits there, stale with the page it moved to, or broken when no such section resolves
+  // (renamed, or the document isn't indexed).
+  urlBindState(url, b, storedPage) {
+    if (!b.sec)
+      return null;
+    const rel = this.targetIndexedFile(this.decodeTarget(url));
+    const pages = this.entriesIn(rel).filter((e) => e.kind === "section" && e.name === b.sec).map((e) => e.page);
+    return bindStateFrom(pages, storedPage);
+  }
+  // The outline section beginning on a link's page — what it can be pinned to. Null when the
+  // page is mid-section or the document has no outline.
+  sectionAtLinkPage(url) {
+    const rel = url && this.targetIndexedFile(this.decodeTarget(url));
+    if (!rel)
+      return null;
+    const page = this.targetPage(url);
+    return this.entriesIn(rel).find((e) => e.kind === "section" && e.page === page) || null;
+  }
+  // The title pinning would produce and the section it pins to, or null when there's nothing
+  // to pin or it would change nothing.
+  linkPinOption(link) {
+    const sec = this.sectionAtLinkPage(link.target);
+    if (!sec)
+      return null;
+    const title = formatBinding({ sec: sec.name });
+    return title === (link.title || "") ? null : { title, value: sec.name };
   }
   // CM6 link handler for Live Preview. Suppresses Obsidian's open of the literal
   // {root} URL; opens the resolved one on click/auxclick. Returns true when handled.
@@ -1923,9 +2078,9 @@ var ReferenceLinkerPlugin = class extends Plugin {
       openExternal(uri);
     return true;
   }
-  // Reading view renders our links as real <a>. Obsidian's own click handler opens them
-  // via window.open, which doubles a #page= fragment — so for those links we intercept in
-  // the capture phase and open through the shell instead. Other links are left to Obsidian.
+  // Reading view renders our links as real <a>; Obsidian's opener corrupts a #page=
+  // fragment, so we intercept and open through the shell — for any {root} link, and any
+  // file:// link with a page. Everything else is left to Obsidian.
   onAnchorClick(evt) {
     if (evt.button !== 0 && evt.button !== 1)
       return;
@@ -1934,7 +2089,7 @@ var ReferenceLinkerPlugin = class extends Plugin {
       return;
     const href = a.getAttribute("href") || a.getAttribute("data-href") || "";
     const filled = /\{root\}|%7Broot%7D/i.test(href) ? this.fillRoot(href) : href;
-    if (!PAGE_LINK.test(filled))
+    if (!a.hasAttribute(ROOT_ATTR) && !PAGE_LINK.test(filled))
       return;
     evt.preventDefault();
     evt.stopPropagation();
@@ -1955,7 +2110,8 @@ var ReferenceLinkerPlugin = class extends Plugin {
     while (m = re.exec(line.text)) {
       if (ch < m.index || ch > m.index + m[0].length)
         continue;
-      return { name: m[1], target: m[2].trim() };
+      const { url, title } = splitTarget(m[2]);
+      return { name: m[1], target: url, title };
     }
     return null;
   }
@@ -2055,32 +2211,16 @@ var ReferenceLinkerPlugin = class extends Plugin {
   entryPassesFilter(e, f) {
     return (!f.kind || e.kind === f.kind) && (!f.ext || e.lang === f.ext);
   }
-  // Decode a link target and return { dec, cand }: the decoded string and the entries
-  // whose display name matches and whose path appears in it — the shared first step of
-  // resolving a link. Callers apply their own tie-break (hover uses the stored line,
-  // actualization must not).
-  linkCandidates(name, target) {
-    let dec = this.fillRoot(target);
-    try {
-      dec = decodeURIComponent(dec);
-    } catch (e) {
-    }
-    dec = dec.split("\\").join("/");
-    const named = this.entriesByName(name).filter((e) => e.name === name && pathInTarget(dec, e.path));
-    const bestLen = named.reduce((mx, e) => Math.max(mx, e.path.length), 0);
-    const cand = named.filter((e) => e.path.length === bestLen);
-    return { dec, cand };
-  }
-  // The longest indexed file path a link target points at, or null — lets linkState tell a
-  // broken link (file indexed, symbol gone) from an unrelated one. Only runs for links that
-  // don't resolve, so the file scan stays off the hot path.
+  // The indexed document a link target names, or null: the entry whose root-joined path the
+  // target ends with. Works whatever scheme the link was built with.
   targetIndexedFile(dec) {
-    let best = null;
+    const p = pathPart(dec);
+    const root = this.codeRoot().split(nodePath.sep).join("/").replace(/\/+$/, "");
     for (const rel of this.fileCache.keys()) {
-      if ((!best || rel.length > best.length) && pathInTarget(dec, rel))
-        best = rel;
+      if (namesPath(p, root ? root + "/" + rel : rel))
+        return rel;
     }
-    return best;
+    return null;
   }
   // The set of indexed extensions (".pdf" etc.), used for the scan and watch filtering.
   watchedExts() {
@@ -2254,9 +2394,12 @@ var ReferenceLinkerPlugin = class extends Plugin {
     }
     return uri;
   }
-  // The markdown link to insert. Inside a table cell a literal pipe splits the row.
+  // The markdown link to insert. A section link is pinned to its section by a title binding
+  // (see shared/binding), so it tracks without the label being read. A pipe would split a
+  // table row.
   buildLink(e, inTable, template) {
-    const link = `[${e.name}](${this.buildUri(e, template)})`;
+    const url = this.buildUri(e, template);
+    const link = `[${e.name}](${e.kind === "section" ? withTitle(url, formatBinding({ sec: e.name })) : url})`;
     return inTable ? link.replace(/\|/g, "\\|") : link;
   }
   pickEntry(onChoose, query) {
@@ -2362,25 +2505,41 @@ var ReferenceLinkerPlugin = class extends Plugin {
     let m;
     while (m = re.exec(line)) {
       if (cur.ch >= m.index && cur.ch <= m.index + m[0].length) {
-        return { name: m[1], target: m[2], line: cur.line, from: m.index, to: m.index + m[0].length };
+        const { url, title } = splitTarget(m[2]);
+        return { name: m[1], target: url, title, line: cur.line, from: m.index, to: m.index + m[0].length };
       }
     }
     return null;
   }
   fixLinkAtCursor(editor, link) {
-    const target = this.actualizedTarget(link.name, link.target);
-    if (target == null) {
+    const fixed = this.actualizedTarget(withTitle(link.target, link.title));
+    if (fixed == null) {
       new Notice(t("notice.linksUpdated", { n: 0 }));
       return;
     }
-    editor.replaceRange("[" + link.name + "](" + target + ")", { line: link.line, ch: link.from }, { line: link.line, ch: link.to });
+    editor.replaceRange("[" + link.name + "](" + fixed + ")", { line: link.line, ch: link.from }, { line: link.line, ch: link.to });
     new Notice(t("notice.linksUpdated", { n: 1 }));
   }
-  // Whether a markdown link is one of ours (points at an indexed document) rather than a
-  // wiki or web link — true for current, stale and broken reference links alike, so the
-  // right-click copy/fix items only show on links this plugin owns.
-  isReferenceLink(name, target) {
-    return !!this.entryUnderPointer(name, target) || !!this.linkState(name, target);
+  pinLinkAtCursor(editor, link) {
+    const opt = this.linkPinOption(link);
+    if (!opt) {
+      new Notice(t("notice.cantPin"));
+      return;
+    }
+    const pinned = withTitle(link.target, opt.title);
+    editor.replaceRange("[" + link.name + "](" + pinned + ")", { line: link.line, ch: link.from }, { line: link.line, ch: link.to });
+    new Notice(t("notice.pinned", { sec: opt.value }));
+  }
+  unpinLinkAtCursor(editor, link) {
+    if (!parseBinding(link.title))
+      return;
+    editor.replaceRange("[" + link.name + "](" + link.target + ")", { line: link.line, ch: link.from }, { line: link.line, ch: link.to });
+    new Notice(t("notice.unpinned"));
+  }
+  // One of ours — a link into an indexed document — so the copy/pin/fix items show only on
+  // our links.
+  isReferenceLink(name, target, title) {
+    return !!this.refForTarget(target) || !!this.linkState(withTitle(target, title));
   }
   // Copy the clicked link's own target ({root} filled in), keeping the scheme it was
   // saved with — unlike copyLink, which builds a fresh link from the default preset.

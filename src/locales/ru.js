@@ -14,11 +14,15 @@ module.exports = {
   'cmd.insertEmbed': 'Вставить embed документа',
   'cmd.updateLinksNote': 'Актуализировать ссылки в этой заметке',
   'cmd.updateLinksVault': 'Актуализировать ссылки во всём хранилище',
+  'cmd.pinLinksNote': 'Закрепить незакреплённые ссылки в этой заметке',
+  'cmd.pinLinksVault': 'Закрепить незакреплённые ссылки во всём хранилище',
 
   // Editor context menu
   'menu.convert': 'Найти и превратить в ссылку',
   'menu.copyLink': 'Скопировать ссылку на документ',
   'menu.fixLink': 'Актуализировать эту ссылку',
+  'menu.pin': 'Закрепить за разделом «{sec}»',
+  'menu.unpin': 'Открепить эту ссылку',
 
   // Notices
   'notice.noCodeRoot': 'Reference Linker: не удалось определить корень документов',
@@ -32,6 +36,11 @@ module.exports = {
   'notice.watchUnsupported': 'Reference Linker: автообновление недоступно на этой платформе — перестраивайте вручную',
   'notice.linksUpdated': 'Reference Linker: обновлено ссылок — {n}',
   'notice.linksUpdatedVault': 'Reference Linker: обновлено ссылок — {n} в заметках: {files}',
+  'notice.linksPinned': 'Reference Linker: закреплено ссылок — {n}',
+  'notice.linksPinnedVault': 'Reference Linker: закреплено ссылок — {n} в заметках: {files}',
+  'notice.pinned': 'Reference Linker: ссылка закреплена за разделом «{sec}»',
+  'notice.unpinned': 'Reference Linker: ссылка откреплена — больше не отслеживается',
+  'notice.cantPin': 'Reference Linker: не за что закрепить — на этой странице не начинается раздел',
 
   // Inline embeds
   'embed.empty': 'Reference Linker: пустой embed — укажите путь к документу',
@@ -110,7 +119,7 @@ module.exports = {
 
   // Settings — links
   'set.markStaleLinks.name': 'Отмечать устаревшие ссылки',
-  'set.markStaleLinks.desc': 'Подчёркивать ссылки, у которых целевой документ пропал или переименован.',
+  'set.markStaleLinks.desc': 'Подчёркивать ссылку, если её документ переехал (цвет предупреждения, чинится командой «Актуализировать ссылки») или пропал с диска (цвет ошибки). Ссылку, поправленную руками, плагин не трогает: страница и текст — твои.',
 
   // Plural noun phrases
   'plural.entry': { one: '{n} запись', few: '{n} записи', many: '{n} записей', other: '{n} записей' },

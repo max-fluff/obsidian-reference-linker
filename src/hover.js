@@ -83,7 +83,10 @@ class HoverPreview {
 
     const el = this.ensureEl();
     el.empty();
-    const header = entry.kind === 'section' ? entry.name + '  ·  p.' + (entry.page || 1) : entry.name;
+    // Label: the pinned section name when there is one, else the file. Page shown when > 1.
+    const page = entry.page || 1;
+    const label = entry.title || entry.name;
+    const header = page > 1 ? label + '  ·  p.' + page : label;
     el.createDiv({ cls: 'reference-linker-hover-header', text: header });
     const body = el.createDiv({ cls: 'reference-linker-hover-body' });
 

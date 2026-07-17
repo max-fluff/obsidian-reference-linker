@@ -53,10 +53,10 @@ Filter a common name by an inline prefix: an extension (`pdf:`, `png:`) or `sec:
 
 ### PDF sections
 
-For a PDF, the plugin reads its outline (bookmarks) and indexes each section with its page number. It's the same idea as Code Linker indexing a symbol on its line, with a section on its page instead. So `@!intro` finds the *Introduction* section of a paper, and the inserted link carries that page:
+For a PDF, the plugin reads its outline (bookmarks) and indexes each section with its page number. It's the same idea as Code Linker indexing a symbol on its line, with a section on its page instead. So `@!intro` finds the *Introduction* section of a paper, and the inserted link carries that page, plus a `sec:` binding in the title that pins it to the section (see [Keeping links current](#keeping-links-current)):
 
 ```markdown
-[Introduction](file:///{root}/papers/paper-with-outline.pdf#page=1)
+[Introduction](file:///{root}/papers/paper-with-outline.pdf#page=1 "sec:Introduction")
 ```
 
 A PDF with no outline is still indexed by file name. Other document types (Office, EPUB, images) are indexed by name too.
@@ -94,12 +94,23 @@ The header is clickable and opens the document at that page; right-click an embe
 
 ### Keeping links current
 
-A link stores the document's path (and, for a section, its page) at insert time. If the file moves or a PDF's outline shifts, the stored target drifts. There are two ways to deal with that:
+A note is text first. In `[label](url "title")` the address is the url and the label is your prose, so the plugin reads neither for tracking: rename the label or retarget the link and nothing is second-guessed. Tracking is opt-in and lives in the title, as a binding.
 
-- **Mark stale links** (on by default) underlines reference links in both reading view and live preview: a warning-coloured underline when the target has moved or its section page drifted, and an error-coloured one when the document is gone.
-- **Update reference links in this note** / **… in the whole vault** re-resolve each link by its name and rewrite the drifted path or page. Only links that resolve to a single index entry are touched; anything ambiguous or unrelated is left exactly as it was. Right-click a drifted link in the editor and choose **Update this reference link** to fix just that one.
+A section link is inserted already pinned to its section:
 
-A link you retarget or relabel by hand is left alone. As long as its target still points at a document in the index, the plugin takes the link at its word: no underline, and the update commands won't rewrite it.
+```markdown
+[whatever you like](file:///{root}/papers/paper-with-outline.pdf#page=2 "sec:Methods")
+```
+
+The `sec:` binding is what the plugin follows. If the PDF is reissued and *Methods* moves to another page, the link gets a warning-coloured underline and can be fixed to the new page. If the section is gone from the outline, or the document isn't indexed, the underline is error-coloured. A link with no binding, or a title that names no section (a plain tooltip), is left alone. **Mark stale links** (on by default) toggles the underlines; they show in reading view and live preview.
+
+To fix drift:
+
+- **Update reference links in this note** / **… in the whole vault** rewrite each drifted link's page, keeping its binding.
+- Right-click a link for **Update this reference link** (when drifted), **Pin to section** (an unpinned link whose page begins a section), or **Unpin**.
+- **Pin unpinned reference links in this note** / **… in the whole vault** retrofit notes written before pinning.
+
+Because the section is named in the title, not read from the label, the label stays yours to write however you like. A multi-word or non-ASCII section name is escaped in the binding (`sec:Chapter%201`) and shown in full again on hover.
 
 ## Commands (command palette, Ctrl+P)
 
@@ -110,9 +121,10 @@ A link you retarget or relabel by hand is left alone. As long as its target stil
 - **Insert reference embed** — insert a ` ```reference-link ` block.
 - **Convert selection to reference link** / **Find and open document** — resolve the selection against the index, then convert it or open the document (one match acts directly, several open the picker).
 - **Update reference links in this note** / **… in the whole vault**.
+- **Pin unpinned reference links in this note** / **… in the whole vault** — attach a `sec:` binding to links whose page begins a section.
 - **Rebuild reference index**.
 
-The selection commands are also in the editor's right-click menu. Right-clicking an existing reference link adds link-specific items: **Copy reference link**, and **Update this reference link** when its target has drifted.
+The selection commands are also in the editor's right-click menu. Right-clicking an existing reference link adds link-specific items: **Copy reference link**, **Pin to section** / **Unpin**, and **Update this reference link** when its section has drifted.
 
 ## Settings
 
@@ -206,7 +218,7 @@ In an existing clone without the submodule, run `git submodule update --init` fi
 - `modal.js` — the fuzzy pickers (index entries, viewer formats).
 - `settings-tab.js` — the settings UI.
 - `folder-suggest.js` — filesystem folder autocomplete for the root/scan/skip fields (feature-detected).
-- `shared/` — git submodule shared with the sibling linker plugins: markdown helpers, the i18n engine, the folder-list settings editor, and the family's branding generators (dev-only, nothing under `shared/branding/` is bundled).
+- `shared/` — git submodule shared with the sibling linker plugins: markdown helpers, the link-binding grammar, the i18n engine, the folder-list settings editor, and the family's branding generators (dev-only, nothing under `shared/branding/` is bundled).
 - `locales/` — interface strings (English and Russian), fed to the shared i18n engine.
 
 The header images are generated rather than hand-drawn. `docs/branding.config.mjs` holds this plugin's mark, motif and copy, and the shared generators turn it into the assets:
