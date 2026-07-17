@@ -14,11 +14,15 @@ module.exports = {
   'cmd.insertEmbed': 'Insert reference embed',
   'cmd.updateLinksNote': 'Update reference links in this note',
   'cmd.updateLinksVault': 'Update reference links in the whole vault',
+  'cmd.pinLinksNote': 'Pin unpinned reference links in this note',
+  'cmd.pinLinksVault': 'Pin unpinned reference links in the whole vault',
 
   // Editor context menu
   'menu.convert': 'Find and convert to link',
   'menu.copyLink': 'Copy reference link',
   'menu.fixLink': 'Update this reference link',
+  'menu.pin': 'Pin to section “{sec}”',
+  'menu.unpin': 'Unpin this reference link',
 
   // Notices
   'notice.noCodeRoot': 'Reference Linker: could not determine the reference root',
@@ -32,6 +36,11 @@ module.exports = {
   'notice.watchUnsupported': 'Reference Linker: auto-refresh is unavailable on this platform — rebuild manually',
   'notice.linksUpdated': 'Reference Linker: {n} link(s) updated',
   'notice.linksUpdatedVault': 'Reference Linker: {n} link(s) updated across {files} note(s)',
+  'notice.linksPinned': 'Reference Linker: {n} link(s) pinned',
+  'notice.linksPinnedVault': 'Reference Linker: {n} link(s) pinned across {files} note(s)',
+  'notice.pinned': 'Reference Linker: link pinned to section “{sec}”',
+  'notice.unpinned': 'Reference Linker: link unpinned — it is no longer tracked',
+  'notice.cantPin': "Reference Linker: can't pin — no section begins on that page",
 
   // Inline embeds
   'embed.empty': 'Reference Linker: empty embed — give a document path',
@@ -110,7 +119,7 @@ module.exports = {
 
   // Settings — links
   'set.markStaleLinks.name': 'Mark stale links',
-  'set.markStaleLinks.desc': 'Underline reference links whose target document is missing or renamed.',
+  'set.markStaleLinks.desc': 'Underline a reference link when its document moved (warning colour, fixable with “Update reference links”) or is gone from disk (error colour). A link you edited by hand is left alone: the page you typed and the text you wrote are yours.',
 
   // Plural noun phrases
   'plural.entry': { one: '{n} entry', other: '{n} entries' },

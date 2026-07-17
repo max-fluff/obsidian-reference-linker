@@ -1,42 +1,35 @@
 'use strict';
 
-// Keeping reference links current with the documents on disk. A link freezes a document's
-// path (and, for a section, its page) at insert time; if the file moves or a PDF's outline
-// shifts, that drifts. These helpers re-resolve a link by its display name against the live
-// index, mark the drifted/broken ones, and (on an explicit command) rewrite the target.
-// Nothing is rewritten automatically.
+// Keeping reference links current. Only a pinned link is tracked: its title says which
+// section it holds on to (see shared/binding). An unpinned link is left alone, and the
+// display text is never read. Nothing is rewritten automatically.
 
 const { Notice, MarkdownView } = require('obsidian');
 const { ViewPlugin, Decoration } = require('@codemirror/view');
 const { RangeSetBuilder, StateEffect } = require('@codemirror/state');
 const { syntaxTree } = require('@codemirror/language');
-const { linkRegex, isFenceLine, inInlineCode } = require('./shared/markdown');
+const { linkRegex, splitTarget, withTitle, rewriteLinks } = require('./shared/markdown');
+const { PAGE_RE, parseBinding, formatBinding } = require('./shared/binding');
 const { t } = require('./shared/i18n');
 
-// CM6 syntax-node names for contexts where a link is example text, not a live link.
 const SKIP_NODE = /code|comment|frontmatter/i;
 
-// Rewrite stale targets in `text`, skipping links inside code (fenced or inline) where
-// they're example text, not live links. Returns { text, count }.
-function updateLinksInText(plugin, text) {
-  const lines = text.split('\n');
-  let fenced = false, count = 0;
-  for (let i = 0; i < lines.length; i++) {
-    if (isFenceLine(lines[i])) { fenced = !fenced; continue; }
-    if (fenced) continue;
-    lines[i] = lines[i].replace(linkRegex(), (whole, name, target, offset) => {
-      if (inInlineCode(lines[i], offset)) return whole;
-      const fixed = plugin.actualizedTarget(name, target);
-      if (fixed == null) return whole;
-      count++;
-      return '[' + name + '](' + fixed + ')';
-    });
-  }
-  return { text: lines.join('\n'), count };
-}
+const withPage = (url, page) => (PAGE_RE.test(url) ? url.replace(PAGE_RE, '#page=' + page) : url + '#page=' + page);
 
-// A CM6 refresh signal, dispatched when the index changes so Live Preview re-scans stale
-// marks without waiting for the next edit or scroll.
+const updateLinksInText = (plugin, text) => rewriteLinks(text, (name, target) => {
+  const fixed = plugin.actualizedTarget(target);
+  return fixed == null ? null : '[' + name + '](' + fixed + ')';
+});
+
+// Pin every unpinned link to the section on its page — retrofits notes written before
+// pinning. A link with any title is left alone: pinned, or a tooltip that isn't ours.
+const pinLinksInText = (plugin, text) => rewriteLinks(text, (name, target) => {
+  const { url, title } = splitTarget(target);
+  if (title) return null;
+  const sec = plugin.sectionAtLinkPage(url);
+  return sec ? '[' + name + '](' + withTitle(url, formatBinding({ sec: sec.name })) + ')' : null;
+});
+
 const refreshEffect = StateEffect.define();
 
 function refreshStaleLinks(app) {
@@ -46,8 +39,8 @@ function refreshStaleLinks(app) {
   });
 }
 
-// Live Preview underline for stale/broken links. Links inside code (fenced or inline) are
-// skipped via the syntax tree — they're example text, not live links.
+// Live Preview underline for drifted links. Links inside code are skipped — there they're
+// example text.
 function staleLinksExtension(plugin) {
   const marks = {
     stale: Decoration.mark({ class: 'reference-linker-stale' }),
@@ -64,9 +57,9 @@ function staleLinksExtension(plugin) {
         while ((m = re.exec(text))) {
           const start = from + m.index;
           const end = start + m[0].length;
-          let inCodeNode = false;
-          tree.iterate({ from: start, to: end, enter: (n) => { if (SKIP_NODE.test(n.type.name)) inCodeNode = true; } });
-          const state = inCodeNode ? null : plugin.linkState(m[1], m[2]);
+          let inCode = false;
+          tree.iterate({ from: start, to: end, enter: (n) => { if (SKIP_NODE.test(n.type.name)) inCode = true; } });
+          const state = inCode ? null : plugin.linkState(m[2]);
           if (state) builder.add(start, end, marks[state]);
         }
       }
@@ -85,102 +78,67 @@ function staleLinksExtension(plugin) {
   );
 }
 
-// Mixed into the plugin prototype (like api.js); `this` is the plugin.
+// A link's binding against the live index, or null when there's nothing to judge: not a
+// file link, or no binding.
+function bindStateOf(plugin, target) {
+  const { url, title } = splitTarget(target);
+  if (!url || !/^file:\/\//i.test(url)) return null;
+  const b = parseBinding(title);
+  return b ? plugin.urlBindState(url, b, plugin.targetPage(url)) : null;
+}
+
+// Mixed into the plugin prototype; `this` is the plugin. `target` is the whole markdown
+// destination (url plus any title); reading view hands the two apart and recombines them.
 const methods = {
-  // Resolving a reference link, as { entry, indexedTarget }: the current index entry it
-  // points at (matched by display name, disambiguated by the still-valid path/page in the
-  // target) or null; and whether the target's own path is still an indexed document.
-  resolveReferenceLinkInfo(name, target) {
-    if (!name || !target) return { entry: null, indexedTarget: false };
-    const { dec, cand } = this.linkCandidates(name, target); // same-named entries whose path is in the target
-    if (cand.length === 1) return { entry: cand[0], indexedTarget: true };
-    if (cand.length > 1) {
-      const pm = /#page=(\d+)/i.exec(target);
-      const page = pm ? parseInt(pm[1], 10) : 1;
-      const entry = cand.find((e) => (e.page || 1) === page) || cand.find((e) => e.kind === 'section') || cand[0];
-      return { entry, indexedTarget: true };
-    }
-    // Nothing named `name` sits at the target's path. If that path is still an indexed
-    // document, the link points where it says it points — a hand-retargeted link or a
-    // hand-edited display name, which we take at its word rather than re-resolve.
-    if (this.targetIndexedFile(dec)) return { entry: null, indexedTarget: true };
-    // The target's document isn't indexed at all (it moved or is gone) — fall back to a
-    // unique name match, which finds a moved file by its (unchanged) name.
-    const named = this.entriesByName(name).filter((e) => e.name === name);
-    return { entry: named.length === 1 ? named[0] : null, indexedTarget: false };
+  linkState(target) {
+    const r = bindStateOf(this, target);
+    return r ? r.state : null;
   },
 
-  resolveReferenceLink(name, target) {
-    return this.resolveReferenceLinkInfo(name, target).entry;
+  isLinkStale(target) {
+    return this.linkState(target) === 'stale';
   },
 
-  // Whether the target's extension is one we index — so a missing target reads as a broken
-  // reference, not an unrelated file:// link we should leave alone.
-  targetLooksIndexable(target) {
-    const ext = (/(\.[a-z0-9]+)(?:[#?].*)?$/i.exec(target.split('#')[0]) || [])[1];
-    return !!ext && this.watchedExts().has(ext.toLowerCase());
+  // The link with its page corrected, or null when there's nothing to fix. The binding
+  // rides along. bindStateFrom names the moved-to position `line`; here it's a page.
+  actualizedTarget(target) {
+    const r = bindStateOf(this, target);
+    if (!r || r.state !== 'stale') return null;
+    const { url, title } = splitTarget(target);
+    return withTitle(withPage(url, r.line), title);
   },
 
-  // Two link targets are the same document location, ignoring {root}-vs-absolute form and
-  // %-encoding differences.
-  sameReferenceTarget(a, b) {
-    const norm = (s) => { let x = this.fillRoot(s); try { x = decodeURI(x); } catch { /* keep raw */ } return x.split('\\').join('/'); };
-    return norm(a) === norm(b);
-  },
-
-  // Freshness of a reference link for the visual marks: 'stale' (target moved or its page
-  // drifted — fixable), 'broken' (a document that's gone), or null (current, hand-edited,
-  // or not one of our file:// reference links).
-  linkState(name, target) {
-    if (!name || !target) return null;
-    if (!/file:\/\//i.test(target)) return null;
-    const { entry, indexedTarget } = this.resolveReferenceLinkInfo(name, target);
-    if (entry) return this.sameReferenceTarget(this.buildUri(entry), target) ? null : 'stale';
-    // Didn't resolve, but the target is a document we index — the link opens fine and only
-    // its display name is off-index. Nothing to mark.
-    if (indexedTarget) return null;
-    return this.targetLooksIndexable(target) ? 'broken' : null;
-  },
-
-  isLinkStale(name, target) { return this.linkState(name, target) === 'stale'; },
-
-  // The corrected {root}-portable target for a stale link, or null when there's nothing to
-  // fix. Shared by the vault/note commands and the right-click fix.
-  actualizedTarget(name, target) {
-    if (!/file:\/\//i.test(target)) return null;
-    const entry = this.resolveReferenceLink(name, target);
-    if (!entry) return null;
-    const current = this.buildUri(entry);
-    return this.sameReferenceTarget(current, target) ? null : current;
-  },
-
-  // Works in both edit and reading view: an open editor keeps cursor/undo, otherwise the
-  // active file is rewritten through the vault.
-  async updateLinksInActiveNote() {
+  // An open editor keeps cursor and undo; reading view has none, so the file is rewritten
+  // through the vault.
+  async rewriteActiveNote(transform, noticeKey) {
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
     const editor = view && view.editor;
     if (editor) {
-      const { text, count } = updateLinksInText(this, editor.getValue());
+      const { text, count } = transform(this, editor.getValue());
       if (count) { const cur = editor.getCursor(); editor.setValue(text); editor.setCursor(cur); }
-      new Notice(t('notice.linksUpdated', { n: count }));
+      new Notice(t(noticeKey, { n: count }));
       return;
     }
     const file = this.app.workspace.getActiveFile();
-    if (!file) { new Notice(t('notice.linksUpdated', { n: 0 })); return; }
-    const { text, count } = updateLinksInText(this, await this.app.vault.read(file));
+    if (!file) { new Notice(t(noticeKey, { n: 0 })); return; }
+    const { text, count } = transform(this, await this.app.vault.read(file));
     if (count) await this.app.vault.modify(file, text);
-    new Notice(t('notice.linksUpdated', { n: count }));
+    new Notice(t(noticeKey, { n: count }));
   },
 
-  async updateLinksInVault() {
+  async rewriteVault(transform, noticeKey) {
     let files = 0, total = 0;
     for (const f of this.app.vault.getMarkdownFiles()) {
-      const src = await this.app.vault.read(f);
-      const { text, count } = updateLinksInText(this, src);
+      const { text, count } = transform(this, await this.app.vault.read(f));
       if (count) { await this.app.vault.modify(f, text); files++; total += count; }
     }
-    new Notice(t('notice.linksUpdatedVault', { n: total, files }));
+    new Notice(t(noticeKey, { n: total, files }));
   },
+
+  updateLinksInActiveNote() { return this.rewriteActiveNote(updateLinksInText, 'notice.linksUpdated'); },
+  updateLinksInVault() { return this.rewriteVault(updateLinksInText, 'notice.linksUpdatedVault'); },
+  pinLinksInActiveNote() { return this.rewriteActiveNote(pinLinksInText, 'notice.linksPinned'); },
+  pinLinksInVault() { return this.rewriteVault(pinLinksInText, 'notice.linksPinnedVault'); },
 };
 
 module.exports = { methods, staleLinksExtension, refreshStaleLinks };

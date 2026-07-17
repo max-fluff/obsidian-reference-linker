@@ -63,15 +63,4 @@ function underSkip(rel, skip) {
   return false;
 }
 
-// Whether a relative path appears in a (decoded, forward-slashed) link target at a
-// segment boundary — so "a.pdf" doesn't falsely match the tail of "docs/a.pdf".
-function pathInTarget(dec, p) {
-  let from = 0, i;
-  while ((i = dec.indexOf(p, from)) !== -1) {
-    if (i === 0 || dec[i - 1] === '/') return true;
-    from = i + 1;
-  }
-  return false;
-}
-
-module.exports = { PRESETS, DEFAULT_SETTINGS, parseExtensions, parseSkip, underSkip, pathInTarget };
+module.exports = { PRESETS, DEFAULT_SETTINGS, parseExtensions, parseSkip, underSkip };

@@ -14,8 +14,9 @@ const fs = require('fs');
 const fsp = fs.promises;
 const nodePath = require('path');
 
-const { PRESETS, DEFAULT_SETTINGS, parseExtensions, parseSkip, underSkip, pathInTarget } = require('./constants');
-const { splitLines, inTableCell, inCode, inLink, linkRegex } = require('./shared/markdown');
+const { PRESETS, DEFAULT_SETTINGS, parseExtensions, parseSkip, underSkip } = require('./constants');
+const { splitLines, inTableCell, inCode, inLink, linkRegex, splitTarget, withTitle } = require('./shared/markdown');
+const { parseBinding, formatBinding, bindStateFrom } = require('./shared/binding');
 const { ReferenceSuggest } = require('./suggest');
 const filter = require('./filter');
 const { HoverPreview } = require('./hover');
@@ -37,6 +38,33 @@ function openExternal(uri) {
 
 // A file:// link carrying a #page= fragment — the case window.open would double.
 const PAGE_LINK = /^file:\/\/\/.+#page=\d+/i;
+
+// A rendered anchor built from our {root} token — recorded before resolveRootLinks fills
+// the token in, since it's gone from the href by click time.
+const ROOT_ATTR = 'data-reference-root';
+
+// A markdown title becomes a native tooltip that would cover our hover preview, so it's
+// parked here instead.
+const TITLE_ATTR = 'data-reference-title';
+const anchorTitle = (a) => a.getAttribute(TITLE_ATTR) || a.getAttribute('title') || '';
+
+const pathPart = (dec) => dec.split('#')[0].split('?')[0];
+const normCase = (s) => (process.platform === 'win32' ? s.toLowerCase() : s);
+
+// Whether `p` names the file at `full`: it ends with it on a path boundary (a target
+// prefixes scheme and slashes), and matches the whole of `full`, not a folder-over tail.
+function namesPath(p, full) {
+  const a = normCase(p), b = normCase(full);
+  if (!b || !a.endsWith(b)) return false;
+  const i = a.length - b.length;
+  return i === 0 || a[i - 1] === '/';
+}
+
+// The hover entry: the document, the link's page, and the pinned section's name if any.
+const previewEntry = (ref, title) => {
+  const b = parseBinding(title);
+  return Object.assign({}, ref.entry, { page: ref.page, title: b && b.sec ? b.sec : '' });
+};
 
 class ReferenceLinkerPlugin extends Plugin {
   async onload() {
@@ -106,6 +134,8 @@ class ReferenceLinkerPlugin extends Plugin {
     this.addCommand({ id: 'insert-reference-embed', name: t('cmd.insertEmbed'), editorCallback: (editor) => this.pickEntry((e) => this.insertEmbed(editor, e)) });
     this.addCommand({ id: 'update-links-note', name: t('cmd.updateLinksNote'), callback: () => this.updateLinksInActiveNote() });
     this.addCommand({ id: 'update-links-vault', name: t('cmd.updateLinksVault'), callback: () => this.updateLinksInVault() });
+    this.addCommand({ id: 'pin-links-note', name: t('cmd.pinLinksNote'), callback: () => this.pinLinksInActiveNote() });
+    this.addCommand({ id: 'pin-links-vault', name: t('cmd.pinLinksVault'), callback: () => this.pinLinksInVault() });
 
     this.registerEvent(
       this.app.workspace.on('editor-menu', (menu, editor) => {
@@ -118,13 +148,20 @@ class ReferenceLinkerPlugin extends Plugin {
         if (this.selectionTarget(editor, false)) {
           menu.addItem((item) => item.setTitle(t('cmd.openSelection')).setIcon('file-search').onClick(() => this.openSelection(editor)));
         }
-        // Right-clicking one of our reference links: copy its resolved target, and — if the
-        // stored line has drifted — offer to fix just that link.
+        // Right-clicking one of our reference links: copy its target; fix a drifted pinned
+        // section; pin an unpinned link or unpin a pinned one.
         const link = this.linkAtCursor(editor);
-        if (link && this.isReferenceLink(link.name, link.target)) {
+        if (link && this.isReferenceLink(link.name, link.target, link.title)) {
           menu.addItem((item) => item.setTitle(t('menu.copyLink')).setIcon('copy').onClick(() => this.copyLinkAtCursor(link)));
-          if (this.isLinkStale(link.name, link.target)) {
+          if (this.isLinkStale(withTitle(link.target, link.title))) {
             menu.addItem((item) => item.setTitle(t('menu.fixLink')).setIcon('wrench').onClick(() => this.fixLinkAtCursor(editor, link)));
+          }
+          const bound = !!parseBinding(link.title);
+          const pin = bound ? null : this.linkPinOption(link);
+          if (bound) {
+            menu.addItem((item) => item.setTitle(t('menu.unpin')).setIcon('pin-off').onClick(() => this.unpinLinkAtCursor(editor, link)));
+          } else if (pin) {
+            menu.addItem((item) => item.setTitle(t('menu.pin', { sec: pin.value })).setIcon('pin').onClick(() => this.pinLinkAtCursor(editor, link)));
           }
         }
       })
@@ -160,14 +197,27 @@ class ReferenceLinkerPlugin extends Plugin {
   resolveRootLinks(el) {
     const links = el.querySelectorAll ? el.querySelectorAll('a') : [];
     for (const a of links) {
+      let ours = false;
       for (const attr of ['href', 'data-href']) {
         const v = a.getAttribute(attr);
         if (!v) continue;
         const out = this.fillRoot(v);
-        if (out !== v) a.setAttribute(attr, out);
+        if (out !== v) { a.setAttribute(attr, out); ours = true; }
       }
+      // {root} is our own token, so a link carrying one is ours to open whatever it points at.
+      if (ours) a.setAttribute(ROOT_ATTR, '');
+      this.stashTitle(a);
     }
     this.markStaleAnchors(el);
+  }
+
+  // Park a binding title on a data attribute and drop the real one, so the binding string
+  // doesn't show as a native tooltip. A plain tooltip the reader wrote is left as-is.
+  stashTitle(a) {
+    const title = a.getAttribute('title');
+    if (!title || a.hasAttribute(TITLE_ATTR) || !parseBinding(title)) return;
+    a.setAttribute(TITLE_ATTR, title);
+    a.removeAttribute('title');
   }
 
   // Toggle the drifted/broken-link underline on every rendered anchor in `el`. toggle (not
@@ -175,7 +225,8 @@ class ReferenceLinkerPlugin extends Plugin {
   markStaleAnchors(el) {
     const links = el.querySelectorAll ? el.querySelectorAll('a') : [];
     for (const a of links) {
-      const state = this.settings.markStaleLinks ? this.linkState(a.textContent, a.getAttribute('href') || '') : null;
+      const href = a.getAttribute('href') || a.getAttribute('data-href') || '';
+      const state = this.settings.markStaleLinks ? this.linkState(withTitle(href, anchorTitle(a))) : null;
       a.classList.toggle('reference-linker-stale', state === 'stale');
       a.classList.toggle('reference-linker-broken', state === 'broken');
     }
@@ -244,16 +295,14 @@ class ReferenceLinkerPlugin extends Plugin {
     if (!el || !el.closest) return null;
     const a = el.closest('a');
     if (a && !(a.classList && a.classList.contains('internal-link'))) {
-      const entry = this.entryUnderPointer(a.textContent, a.getAttribute('href') || a.getAttribute('data-href') || '');
-      if (entry) return { entry, requireMod: false };
+      const ref = this.refForTarget(a.getAttribute('href') || a.getAttribute('data-href') || '');
+      if (ref) return { entry: previewEntry(ref, anchorTitle(a)), requireMod: false };
     }
     if (el.closest('.cm-link')) {
       const view = typeof EditorView.findFromDOM === 'function' ? EditorView.findFromDOM(el) : this.activeCm();
-      const ref = view && this.codeRefAt(view, x, y);
-      if (ref) {
-        const entry = this.entryUnderPointer(ref.name, ref.target);
-        if (entry) return { entry, requireMod: true };
-      }
+      const at = view && this.codeRefAt(view, x, y);
+      const ref = at && this.refForTarget(at.target);
+      if (ref) return { entry: previewEntry(ref, at.title), requireMod: true };
     }
     return null;
   }
@@ -265,18 +314,60 @@ class ReferenceLinkerPlugin extends Plugin {
     return mv && mv.editor && mv.editor.cm;
   }
 
-  // Resolve a hovered link's display name + target to an index entry, or null
-  // (so non-reference links — a wiki link, a web link, a custom Unity-scene link —
-  // simply show nothing). The entry's relative path must appear in the target,
-  // which every preset embeds via {path}/{abs}; that rejects unrelated links even
-  // when their text matches a symbol name. Ties are broken by the line in the
-  // target, preferring a declaration over the bare file entry.
-  entryUnderPointer(name, target) {
-    if (!name || !target) return null;
-    const { dec, cand } = this.linkCandidates(name, target);
-    if (cand.length <= 1) return cand[0] || null;
-    const onLine = cand.find((e) => new RegExp('[:=]' + e.line + '(?:\\D|$)').test(dec));
-    return onLine || cand.find((e) => e.kind !== 'file') || cand[0];
+  // {root} filled in, %-escapes undone, backslashes normalised — the form links are matched on.
+  decodeTarget(target) {
+    let dec = this.fillRoot(target);
+    try { dec = decodeURIComponent(dec); } catch { /* malformed escape: match on the raw form */ }
+    return dec.split('\\').join('/');
+  }
+
+  // The page a link asks for — only ever read, never overridden. A #page fragment or a
+  // {page} query both count.
+  targetPage(dec) {
+    const m = /[#?&]page=(\d+)/i.exec(dec);
+    return m ? parseInt(m[1], 10) : 1;
+  }
+
+  // The document a link points at, from its target alone: { entry, page }, or null for a
+  // link into no indexed document. The label is never consulted.
+  refForTarget(target) {
+    if (!target) return null;
+    const dec = this.decodeTarget(target);
+    const cached = this.fileCache.get(this.targetIndexedFile(dec));
+    const entry = cached && cached.entries[0];
+    return entry ? { entry, page: this.targetPage(dec) } : null;
+  }
+
+  entriesIn(rel) {
+    return rel ? (this.fileCache.get(rel) || { entries: [] }).entries : [];
+  }
+
+  // What a section binding says about the page a link stores: null when the section still
+  // sits there, stale with the page it moved to, or broken when no such section resolves
+  // (renamed, or the document isn't indexed).
+  urlBindState(url, b, storedPage) {
+    if (!b.sec) return null;
+    const rel = this.targetIndexedFile(this.decodeTarget(url));
+    const pages = this.entriesIn(rel).filter((e) => e.kind === 'section' && e.name === b.sec).map((e) => e.page);
+    return bindStateFrom(pages, storedPage);
+  }
+
+  // The outline section beginning on a link's page — what it can be pinned to. Null when the
+  // page is mid-section or the document has no outline.
+  sectionAtLinkPage(url) {
+    const rel = url && this.targetIndexedFile(this.decodeTarget(url));
+    if (!rel) return null;
+    const page = this.targetPage(url);
+    return this.entriesIn(rel).find((e) => e.kind === 'section' && e.page === page) || null;
+  }
+
+  // The title pinning would produce and the section it pins to, or null when there's nothing
+  // to pin or it would change nothing.
+  linkPinOption(link) {
+    const sec = this.sectionAtLinkPage(link.target);
+    if (!sec) return null;
+    const title = formatBinding({ sec: sec.name });
+    return title === (link.title || '') ? null : { title, value: sec.name };
   }
 
   // CM6 link handler for Live Preview. Suppresses Obsidian's open of the literal
@@ -293,16 +384,16 @@ class ReferenceLinkerPlugin extends Plugin {
     return true;
   }
 
-  // Reading view renders our links as real <a>. Obsidian's own click handler opens them
-  // via window.open, which doubles a #page= fragment — so for those links we intercept in
-  // the capture phase and open through the shell instead. Other links are left to Obsidian.
+  // Reading view renders our links as real <a>; Obsidian's opener corrupts a #page=
+  // fragment, so we intercept and open through the shell — for any {root} link, and any
+  // file:// link with a page. Everything else is left to Obsidian.
   onAnchorClick(evt) {
     if (evt.button !== 0 && evt.button !== 1) return;
     const a = evt.target && evt.target.closest && evt.target.closest('a');
     if (!a) return;
     const href = a.getAttribute('href') || a.getAttribute('data-href') || '';
     const filled = /\{root\}|%7Broot%7D/i.test(href) ? this.fillRoot(href) : href;
-    if (!PAGE_LINK.test(filled)) return;
+    if (!a.hasAttribute(ROOT_ATTR) && !PAGE_LINK.test(filled)) return;
     evt.preventDefault();
     evt.stopPropagation();
     openExternal(filled);
@@ -320,7 +411,8 @@ class ReferenceLinkerPlugin extends Plugin {
     let m;
     while ((m = re.exec(line.text))) {
       if (ch < m.index || ch > m.index + m[0].length) continue;
-      return { name: m[1], target: m[2].trim() };
+      const { url, title } = splitTarget(m[2]);
+      return { name: m[1], target: url, title };
     }
     return null;
   }
@@ -422,31 +514,15 @@ class ReferenceLinkerPlugin extends Plugin {
     return (!f.kind || e.kind === f.kind) && (!f.ext || e.lang === f.ext);
   }
 
-  // Decode a link target and return { dec, cand }: the decoded string and the entries
-  // whose display name matches and whose path appears in it — the shared first step of
-  // resolving a link. Callers apply their own tie-break (hover uses the stored line,
-  // actualization must not).
-  linkCandidates(name, target) {
-    let dec = this.fillRoot(target);
-    try { dec = decodeURIComponent(dec); } catch { /* malformed escape: match on the raw form */ }
-    dec = dec.split('\\').join('/');
-    const named = this.entriesByName(name).filter((e) => e.name === name && pathInTarget(dec, e.path));
-    // A shorter path can be a boundary-tail of the real one (Foo.cs inside src/Foo.cs);
-    // the longest matching path is the file the link actually points at.
-    const bestLen = named.reduce((mx, e) => Math.max(mx, e.path.length), 0);
-    const cand = named.filter((e) => e.path.length === bestLen);
-    return { dec, cand };
-  }
-
-  // The longest indexed file path a link target points at, or null — lets linkState tell a
-  // broken link (file indexed, symbol gone) from an unrelated one. Only runs for links that
-  // don't resolve, so the file scan stays off the hot path.
+  // The indexed document a link target names, or null: the entry whose root-joined path the
+  // target ends with. Works whatever scheme the link was built with.
   targetIndexedFile(dec) {
-    let best = null;
+    const p = pathPart(dec);
+    const root = this.codeRoot().split(nodePath.sep).join('/').replace(/\/+$/, '');
     for (const rel of this.fileCache.keys()) {
-      if ((!best || rel.length > best.length) && pathInTarget(dec, rel)) best = rel;
+      if (namesPath(p, root ? root + '/' + rel : rel)) return rel;
     }
-    return best;
+    return null;
   }
 
   // The set of indexed extensions (".pdf" etc.), used for the scan and watch filtering.
@@ -632,9 +708,12 @@ class ReferenceLinkerPlugin extends Plugin {
     return uri;
   }
 
-  // The markdown link to insert. Inside a table cell a literal pipe splits the row.
+  // The markdown link to insert. A section link is pinned to its section by a title binding
+  // (see shared/binding), so it tracks without the label being read. A pipe would split a
+  // table row.
   buildLink(e, inTable, template) {
-    const link = `[${e.name}](${this.buildUri(e, template)})`;
+    const url = this.buildUri(e, template);
+    const link = `[${e.name}](${e.kind === 'section' ? withTitle(url, formatBinding({ sec: e.name })) : url})`;
     return inTable ? link.replace(/\|/g, '\\|') : link;
   }
 
@@ -742,24 +821,38 @@ class ReferenceLinkerPlugin extends Plugin {
     let m;
     while ((m = re.exec(line))) {
       if (cur.ch >= m.index && cur.ch <= m.index + m[0].length) {
-        return { name: m[1], target: m[2], line: cur.line, from: m.index, to: m.index + m[0].length };
+        const { url, title } = splitTarget(m[2]);
+        return { name: m[1], target: url, title, line: cur.line, from: m.index, to: m.index + m[0].length };
       }
     }
     return null;
   }
 
   fixLinkAtCursor(editor, link) {
-    const target = this.actualizedTarget(link.name, link.target);
-    if (target == null) { new Notice(t('notice.linksUpdated', { n: 0 })); return; }
-    editor.replaceRange('[' + link.name + '](' + target + ')', { line: link.line, ch: link.from }, { line: link.line, ch: link.to });
+    const fixed = this.actualizedTarget(withTitle(link.target, link.title));
+    if (fixed == null) { new Notice(t('notice.linksUpdated', { n: 0 })); return; }
+    editor.replaceRange('[' + link.name + '](' + fixed + ')', { line: link.line, ch: link.from }, { line: link.line, ch: link.to });
     new Notice(t('notice.linksUpdated', { n: 1 }));
   }
 
-  // Whether a markdown link is one of ours (points at an indexed document) rather than a
-  // wiki or web link — true for current, stale and broken reference links alike, so the
-  // right-click copy/fix items only show on links this plugin owns.
-  isReferenceLink(name, target) {
-    return !!this.entryUnderPointer(name, target) || !!this.linkState(name, target);
+  pinLinkAtCursor(editor, link) {
+    const opt = this.linkPinOption(link);
+    if (!opt) { new Notice(t('notice.cantPin')); return; }
+    const pinned = withTitle(link.target, opt.title);
+    editor.replaceRange('[' + link.name + '](' + pinned + ')', { line: link.line, ch: link.from }, { line: link.line, ch: link.to });
+    new Notice(t('notice.pinned', { sec: opt.value }));
+  }
+
+  unpinLinkAtCursor(editor, link) {
+    if (!parseBinding(link.title)) return;
+    editor.replaceRange('[' + link.name + '](' + link.target + ')', { line: link.line, ch: link.from }, { line: link.line, ch: link.to });
+    new Notice(t('notice.unpinned'));
+  }
+
+  // One of ours — a link into an indexed document — so the copy/pin/fix items show only on
+  // our links.
+  isReferenceLink(name, target, title) {
+    return !!this.refForTarget(target) || !!this.linkState(withTitle(target, title));
   }
 
   // Copy the clicked link's own target ({root} filled in), keeping the scheme it was
