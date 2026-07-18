@@ -218,6 +218,15 @@ var require_binding = __commonJS({
     "use strict";
     var ANCHORS = { sym: "sym", kind: "kind", sec: "sec", line: "hash" };
     var TOKEN = /^(sym|kind|sec|line):(.+)$/;
+    var OWNERS = { code: ["sym", "kind", "hash"], reference: ["sec"] };
+    function ownerOf(binding) {
+      if (!binding)
+        return null;
+      const claimed = Object.keys(OWNERS).filter((owner) => OWNERS[owner].some((anchor) => binding[anchor]));
+      return claimed.length === 1 ? claimed[0] : null;
+    }
+    var bindingOwner2 = (title) => ownerOf(parseBinding2(title));
+    var ownsBinding2 = (title, owner) => bindingOwner2(title) === owner;
     var LINE_RE = /:(\d+)(?=\D*$)/;
     var PAGE_RE = /#page=(\d+)/i;
     var encodeValue = (v) => String(v).replace(/[%"()\s]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0"));
@@ -264,7 +273,49 @@ var require_binding = __commonJS({
       const line = hits.reduce((a, n) => Math.abs(n - stored) < Math.abs(a - stored) ? n : a);
       return { state: "stale", line };
     }
-    module2.exports = { LINE_RE, PAGE_RE, hashLine, parseBinding: parseBinding2, formatBinding: formatBinding2, bindStateFrom: bindStateFrom2 };
+    module2.exports = { LINE_RE, PAGE_RE, OWNERS, hashLine, parseBinding: parseBinding2, formatBinding: formatBinding2, bindStateFrom: bindStateFrom2, ownerOf, bindingOwner: bindingOwner2, ownsBinding: ownsBinding2 };
+  }
+});
+
+// src/shared/root-token.js
+var require_root_token = __commonJS({
+  "src/shared/root-token.js"(exports2, module2) {
+    "use strict";
+    var OWNER_TOKENS = { code: "code-root", reference: "ref-root" };
+    var LEGACY_TOKEN = "root";
+    var tokenRe = (name) => new RegExp("\\{" + name + "\\}|%7B" + name + "%7D", "gi");
+    function rootTokenIn(url) {
+      const s = String(url == null ? "" : url);
+      for (const owner of Object.keys(OWNER_TOKENS)) {
+        if (tokenRe(OWNER_TOKENS[owner]).test(s))
+          return owner;
+      }
+      return tokenRe(LEGACY_TOKEN).test(s) ? "legacy" : null;
+    }
+    function ownsRootToken2(url, owner, claimLegacy) {
+      const found = rootTokenIn(url);
+      if (found === owner)
+        return true;
+      return found === "legacy" && !!claimLegacy;
+    }
+    function fillRoot(url, { owner, root, claimLegacy = false } = {}) {
+      const s = String(url == null ? "" : url);
+      if (!owner || !OWNER_TOKENS[owner])
+        return s;
+      let out = s.replace(tokenRe(OWNER_TOKENS[owner]), root);
+      if (claimLegacy)
+        out = out.replace(tokenRe(LEGACY_TOKEN), root);
+      return out;
+    }
+    function namespaceRoot(url, owner) {
+      const s = String(url == null ? "" : url);
+      if (!owner || !OWNER_TOKENS[owner])
+        return s;
+      if (rootTokenIn(s) !== "legacy")
+        return s;
+      return s.replace(tokenRe(LEGACY_TOKEN), "{" + OWNER_TOKENS[owner] + "}");
+    }
+    module2.exports = { OWNER_TOKENS, LEGACY_TOKEN, rootTokenIn, ownsRootToken: ownsRootToken2, fillRoot, namespaceRoot };
   }
 });
 
@@ -897,30 +948,17 @@ var require_embed = __commonJS({
   }
 });
 
-// src/actualize.js
+// src/shared/actualize.js
 var require_actualize = __commonJS({
-  "src/actualize.js"(exports2, module2) {
+  "src/shared/actualize.js"(exports2, module2) {
     "use strict";
     var { Notice: Notice2, MarkdownView: MarkdownView2 } = require("obsidian");
     var { ViewPlugin, Decoration } = require("@codemirror/view");
     var { RangeSetBuilder, StateEffect } = require("@codemirror/state");
     var { syntaxTree } = require("@codemirror/language");
-    var { linkRegex: linkRegex2, splitTarget: splitTarget2, withTitle: withTitle2, rewriteLinks } = require_markdown();
-    var { PAGE_RE, parseBinding: parseBinding2, formatBinding: formatBinding2 } = require_binding();
+    var { linkRegex: linkRegex2 } = require_markdown();
     var { t: t2 } = require_i18n();
     var SKIP_NODE = /code|comment|frontmatter/i;
-    var withPage = (url, page) => PAGE_RE.test(url) ? url.replace(PAGE_RE, "#page=" + page) : url + "#page=" + page;
-    var updateLinksInText = (plugin, text) => rewriteLinks(text, (name, target) => {
-      const fixed = plugin.actualizedTarget(target);
-      return fixed == null ? null : "[" + name + "](" + fixed + ")";
-    });
-    var pinLinksInText = (plugin, text) => rewriteLinks(text, (name, target) => {
-      const { url, title } = splitTarget2(target);
-      if (title)
-        return null;
-      const sec = plugin.sectionAtLinkPage(url);
-      return sec ? "[" + name + "](" + withTitle2(url, formatBinding2({ sec: sec.name })) + ")" : null;
-    });
     var refreshEffect = StateEffect.define();
     function refreshStaleLinks(app) {
       app.workspace.iterateAllLeaves((leaf) => {
@@ -929,10 +967,10 @@ var require_actualize = __commonJS({
           cm.dispatch({ effects: refreshEffect.of(null) });
       });
     }
-    function staleLinksExtension(plugin) {
+    function staleLinksExtension(plugin, classes) {
       const marks = {
-        stale: Decoration.mark({ class: "reference-linker-stale" }),
-        broken: Decoration.mark({ class: "reference-linker-broken" })
+        stale: Decoration.mark({ class: classes.stale }),
+        broken: Decoration.mark({ class: classes.broken })
       };
       const build = (view) => {
         const builder = new RangeSetBuilder();
@@ -945,12 +983,12 @@ var require_actualize = __commonJS({
             while (m = re.exec(text)) {
               const start = from + m.index;
               const end = start + m[0].length;
-              let inCode2 = false;
+              let inCodeNode = false;
               tree.iterate({ from: start, to: end, enter: (n) => {
                 if (SKIP_NODE.test(n.type.name))
-                  inCode2 = true;
+                  inCodeNode = true;
               } });
-              const state = inCode2 ? null : plugin.linkState(m[2]);
+              const state = inCodeNode ? null : plugin.linkState(m[2]);
               if (state)
                 builder.add(start, end, marks[state]);
             }
@@ -972,11 +1010,264 @@ var require_actualize = __commonJS({
         { decorations: (v) => v.decorations }
       );
     }
+    async function rewriteActiveNote(plugin, transform, noticeKey) {
+      const view = plugin.app.workspace.getActiveViewOfType(MarkdownView2);
+      const editor = view && view.editor;
+      if (editor) {
+        const { text: text2, count: count2 } = transform(plugin, editor.getValue());
+        if (count2) {
+          const cur = editor.getCursor();
+          editor.setValue(text2);
+          editor.setCursor(cur);
+        }
+        new Notice2(t2(noticeKey, { n: count2 }));
+        return;
+      }
+      const file = plugin.app.workspace.getActiveFile();
+      if (!file) {
+        new Notice2(t2(noticeKey, { n: 0 }));
+        return;
+      }
+      const { text, count } = transform(plugin, await plugin.app.vault.read(file));
+      if (count)
+        await plugin.app.vault.modify(file, text);
+      new Notice2(t2(noticeKey, { n: count }));
+    }
+    async function rewriteVault(plugin, transform, noticeKey) {
+      let files = 0, total = 0;
+      for (const f of plugin.app.vault.getMarkdownFiles()) {
+        const { text, count } = transform(plugin, await plugin.app.vault.read(f));
+        if (count) {
+          await plugin.app.vault.modify(f, text);
+          files++;
+          total += count;
+        }
+      }
+      new Notice2(t2(noticeKey, { n: total, files }));
+    }
+    module2.exports = { SKIP_NODE, refreshEffect, refreshStaleLinks, staleLinksExtension, rewriteActiveNote, rewriteVault };
+  }
+});
+
+// src/shared/update-preview.js
+var require_update_preview = __commonJS({
+  "src/shared/update-preview.js"(exports2, module2) {
+    "use strict";
+    var { Notice: Notice2, Modal, MarkdownView: MarkdownView2 } = require("obsidian");
+    var { t: t2 } = require_i18n();
+    var MAX_ROWS = 50;
+    var UpdatePreviewModal = class extends Modal {
+      constructor(app, entries, onApply, prefix) {
+        super(app);
+        this.entries = entries;
+        this.onApply = onApply;
+        this.prefix = prefix;
+        for (const e of entries)
+          for (const c of e.changes)
+            c.selected = true;
+      }
+      cls(suffix) {
+        return suffix ? this.prefix + "-" + suffix : this.prefix;
+      }
+      onOpen() {
+        const { contentEl } = this;
+        contentEl.addClass(this.cls());
+        contentEl.createEl("h3", { text: t2("modal.update.title") });
+        const changed = this.entries.filter((e) => e.changes.length);
+        const total = changed.reduce((n, e) => n + e.changes.length, 0);
+        const brokenTotal = this.entries.reduce((n, e) => n + e.broken.length, 0);
+        if (!total && !brokenTotal) {
+          contentEl.createEl("p", { cls: this.cls("empty"), text: t2("modal.update.upToDate") });
+        } else {
+          if (total)
+            contentEl.createEl("p", { text: t2("modal.update.summary", { links: total, files: changed.length }) });
+          if (brokenTotal)
+            contentEl.createEl("p", { cls: this.cls("attention"), text: t2("modal.update.attention", { n: brokenTotal }) });
+          this.entries.forEach((e) => this.renderEntry(contentEl, e));
+        }
+        const bar = contentEl.createDiv({ cls: this.cls("buttons") });
+        if (total) {
+          bar.createEl("button", { text: t2("btn.apply"), cls: "mod-cta" }).onclick = async () => {
+            this.close();
+            await this.onApply(this.entries);
+          };
+          bar.createEl("button", { text: t2("btn.cancel") }).onclick = () => this.close();
+        } else {
+          bar.createEl("button", { text: t2("btn.close"), cls: "mod-cta" }).onclick = () => this.close();
+        }
+      }
+      renderEntry(contentEl, e) {
+        if (!e.changes.length && !e.broken.length)
+          return;
+        const head = contentEl.createDiv({ cls: this.cls("file") });
+        if (e.changes.length) {
+          const rowBoxes = [];
+          const label = head.createEl("label", { cls: this.cls("check") });
+          const master = label.createEl("input", { type: "checkbox" });
+          master.checked = true;
+          master.onchange = () => {
+            e.changes.forEach((c, i) => {
+              c.selected = master.checked;
+              if (rowBoxes[i])
+                rowBoxes[i].checked = master.checked;
+            });
+            master.indeterminate = false;
+          };
+          label.createSpan({ text: e.label });
+          const syncMaster = () => {
+            const on = e.changes.filter((c) => c.selected).length;
+            master.checked = on > 0;
+            master.indeterminate = on > 0 && on < e.changes.length;
+          };
+          const table = contentEl.createEl("table", { cls: this.cls("table") });
+          e.changes.slice(0, MAX_ROWS).forEach((c) => {
+            const tr = table.createEl("tr");
+            const cb = tr.createEl("td", { cls: this.cls("pick") }).createEl("input", { type: "checkbox" });
+            cb.checked = c.selected;
+            cb.onchange = () => {
+              c.selected = cb.checked;
+              syncMaster();
+            };
+            rowBoxes.push(cb);
+            tr.createEl("td", { text: c.label });
+            if (c.toPath) {
+              tr.addClass(this.cls("moved"));
+              tr.createEl("td", { cls: this.cls("move"), text: c.fromPath + ":" + c.from + " \u2192 " + c.toPath + ":" + c.to });
+            } else {
+              tr.createEl("td", { cls: this.cls("move"), text: c.from + " \u2192 " + c.to });
+            }
+          });
+          if (e.changes.length > MAX_ROWS)
+            contentEl.createEl("div", { cls: this.cls("more"), text: t2("modal.andMore", { n: e.changes.length - MAX_ROWS }) });
+        } else {
+          head.setText(e.label);
+        }
+        e.broken.forEach((label) => contentEl.createDiv({ cls: this.cls("broken"), text: t2("modal.update.brokenRow", { label }) }));
+      }
+      onClose() {
+        this.contentEl.empty();
+      }
+    };
+    async function applyUpdates(plugin, entries, rewrite) {
+      let files = 0, total = 0, skipped = 0;
+      for (const e of entries) {
+        const keys = new Set(e.changes.filter((c) => c.selected).map((c) => c.key));
+        if (!keys.size)
+          continue;
+        if (e.editor) {
+          if (e.editor.getValue() !== e.original) {
+            skipped++;
+            continue;
+          }
+          const { newText, count } = rewrite(plugin, e.original, keys);
+          const cur = e.editor.getCursor();
+          e.editor.setValue(newText);
+          e.editor.setCursor(cur);
+          files++;
+          total += count;
+        } else {
+          let count = 0;
+          await plugin.app.vault.process(e.file, (data) => {
+            if (data !== e.original)
+              return data;
+            const out = rewrite(plugin, data, keys);
+            count = out.count;
+            return out.newText;
+          });
+          if (count) {
+            files++;
+            total += count;
+          } else
+            skipped++;
+        }
+      }
+      let msg = t2("notice.linksUpdatedVault", { n: total, files });
+      if (skipped)
+        msg += " " + t2("notice.updateSkipped", { n: skipped });
+      new Notice2(msg);
+    }
+    function openUpdatePreview(plugin, entries, rewrite, prefix) {
+      new UpdatePreviewModal(plugin.app, entries, (chosen) => applyUpdates(plugin, chosen, rewrite), prefix).open();
+    }
+    async function updateInActiveNote(plugin, rewrite, prefix) {
+      const view = plugin.app.workspace.getActiveViewOfType(MarkdownView2);
+      const editor = view && view.editor;
+      const file = plugin.app.workspace.getActiveFile();
+      if (editor) {
+        const original2 = editor.getValue();
+        const c2 = rewrite(plugin, original2, null);
+        openUpdatePreview(plugin, [{ editor, label: file && file.path || t2("label.thisNote"), original: original2, changes: c2.changes, broken: c2.broken }], rewrite, prefix);
+        return;
+      }
+      if (!file) {
+        new Notice2(t2("notice.linksUpdated", { n: 0 }));
+        return;
+      }
+      const original = await plugin.app.vault.read(file);
+      const c = rewrite(plugin, original, null);
+      openUpdatePreview(plugin, [{ file, label: file.path, original, changes: c.changes, broken: c.broken }], rewrite, prefix);
+    }
+    async function updateInVault(plugin, rewrite, prefix) {
+      const entries = [];
+      for (const f of plugin.app.vault.getMarkdownFiles()) {
+        const original = await plugin.app.vault.read(f);
+        const c = rewrite(plugin, original, null);
+        if (c.changes.length || c.broken.length)
+          entries.push({ file: f, label: f.path, original, changes: c.changes, broken: c.broken });
+      }
+      openUpdatePreview(plugin, entries, rewrite, prefix);
+    }
+    module2.exports = { UpdatePreviewModal, applyUpdates, openUpdatePreview, updateInActiveNote, updateInVault };
+  }
+});
+
+// src/actualize.js
+var require_actualize2 = __commonJS({
+  "src/actualize.js"(exports2, module2) {
+    "use strict";
+    var { splitTarget: splitTarget2, withTitle: withTitle2, rewriteLinks } = require_markdown();
+    var { PAGE_RE, parseBinding: parseBinding2, formatBinding: formatBinding2, ownsBinding: ownsBinding2 } = require_binding();
+    var shared = require_actualize();
+    var preview = require_update_preview();
+    var OWNER2 = "reference";
+    var PREVIEW_CLASS = "reference-linker-preview";
+    var withPage = (url, page) => PAGE_RE.test(url) ? url.replace(PAGE_RE, "#page=" + page) : url + "#page=" + page;
+    var rewriteUpdates = (plugin, text, selected) => {
+      const collect = selected == null;
+      const changes = [];
+      const broken = [];
+      let key = 0;
+      const links = rewriteLinks(text, (name, target) => {
+        const r = bindStateOf(plugin, target);
+        if (r && r.state === "stale") {
+          const k = key++;
+          const { url, title } = splitTarget2(target);
+          if (collect)
+            changes.push({ key: k, label: name, from: String(plugin.targetPage(url)), to: String(r.line) });
+          if (!collect && !selected.has(k))
+            return null;
+          return "[" + name + "](" + withTitle2(withPage(url, r.line), title) + ")";
+        }
+        if (collect && r && r.state === "broken")
+          broken.push(name);
+        return null;
+      });
+      return { newText: links.text, count: links.count, changes, broken };
+    };
+    var pinLinksInText = (plugin, text) => rewriteLinks(text, (name, target) => {
+      const { url, title } = splitTarget2(target);
+      if (title)
+        return null;
+      const sec = plugin.sectionAtLinkPage(url);
+      return sec ? "[" + name + "](" + withTitle2(url, formatBinding2({ sec: sec.name })) + ")" : null;
+    });
+    var { refreshStaleLinks } = shared;
+    var staleLinksExtension = (plugin) => shared.staleLinksExtension(plugin, { stale: "reference-linker-stale", broken: "reference-linker-broken" });
     function bindStateOf(plugin, target) {
       const { url, title } = splitTarget2(target);
       if (!url || !/^file:\/\//i.test(url))
         return null;
-      const b = parseBinding2(title);
+      const b = ownsBinding2(title, OWNER2) ? parseBinding2(title) : null;
       return b ? plugin.urlBindState(url, b, plugin.targetPage(url)) : null;
     }
     var methods = {
@@ -996,48 +1287,17 @@ var require_actualize = __commonJS({
         const { url, title } = splitTarget2(target);
         return withTitle2(withPage(url, r.line), title);
       },
-      // An open editor keeps cursor and undo; reading view has none, so the file is rewritten
-      // through the vault.
-      async rewriteActiveNote(transform, noticeKey) {
-        const view = this.app.workspace.getActiveViewOfType(MarkdownView2);
-        const editor = view && view.editor;
-        if (editor) {
-          const { text: text2, count: count2 } = transform(this, editor.getValue());
-          if (count2) {
-            const cur = editor.getCursor();
-            editor.setValue(text2);
-            editor.setCursor(cur);
-          }
-          new Notice2(t2(noticeKey, { n: count2 }));
-          return;
-        }
-        const file = this.app.workspace.getActiveFile();
-        if (!file) {
-          new Notice2(t2(noticeKey, { n: 0 }));
-          return;
-        }
-        const { text, count } = transform(this, await this.app.vault.read(file));
-        if (count)
-          await this.app.vault.modify(file, text);
-        new Notice2(t2(noticeKey, { n: count }));
+      rewriteActiveNote(transform, noticeKey) {
+        return shared.rewriteActiveNote(this, transform, noticeKey);
       },
-      async rewriteVault(transform, noticeKey) {
-        let files = 0, total = 0;
-        for (const f of this.app.vault.getMarkdownFiles()) {
-          const { text, count } = transform(this, await this.app.vault.read(f));
-          if (count) {
-            await this.app.vault.modify(f, text);
-            files++;
-            total += count;
-          }
-        }
-        new Notice2(t2(noticeKey, { n: total, files }));
+      rewriteVault(transform, noticeKey) {
+        return shared.rewriteVault(this, transform, noticeKey);
       },
       updateLinksInActiveNote() {
-        return this.rewriteActiveNote(updateLinksInText, "notice.linksUpdated");
+        return preview.updateInActiveNote(this, rewriteUpdates, PREVIEW_CLASS);
       },
       updateLinksInVault() {
-        return this.rewriteVault(updateLinksInText, "notice.linksUpdatedVault");
+        return preview.updateInVault(this, rewriteUpdates, PREVIEW_CLASS);
       },
       pinLinksInActiveNote() {
         return this.rewriteActiveNote(pinLinksInText, "notice.linksPinned");
@@ -1534,6 +1794,17 @@ var require_en = __commonJS({
       "notice.watchUnsupported": "Reference Linker: auto-refresh is unavailable on this platform \u2014 rebuild manually",
       "notice.linksUpdated": "Reference Linker: {n} link(s) updated",
       "notice.linksUpdatedVault": "Reference Linker: {n} link(s) updated across {files} note(s)",
+      "notice.updateSkipped": "({n} note(s) skipped \u2014 changed since the preview)",
+      "label.thisNote": "This note",
+      "modal.update.title": "Update reference links",
+      "modal.update.summary": "{links} change(s) across {files} note(s). Uncheck any change to skip it, or a note to skip all of its changes.",
+      "modal.update.upToDate": "Everything is up to date \u2014 nothing to update.",
+      "modal.update.attention": "{n} link(s) need attention: their section is gone (renamed, or the outline changed), so there\u2019s no page to fix.",
+      "modal.update.brokenRow": "{label} \u2014 no fix (section renamed or removed)",
+      "modal.andMore": "\u2026and {n} more",
+      "btn.apply": "Apply",
+      "btn.cancel": "Cancel",
+      "btn.close": "Close",
       "notice.linksPinned": "Reference Linker: {n} link(s) pinned",
       "notice.linksPinnedVault": "Reference Linker: {n} link(s) pinned across {files} note(s)",
       "notice.pinned": "Reference Linker: link pinned to section \u201C{sec}\u201D",
@@ -1652,6 +1923,17 @@ var require_ru = __commonJS({
       "notice.watchUnsupported": "Reference Linker: \u0430\u0432\u0442\u043E\u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0435 \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u043D\u043E \u043D\u0430 \u044D\u0442\u043E\u0439 \u043F\u043B\u0430\u0442\u0444\u043E\u0440\u043C\u0435 \u2014 \u043F\u0435\u0440\u0435\u0441\u0442\u0440\u0430\u0438\u0432\u0430\u0439\u0442\u0435 \u0432\u0440\u0443\u0447\u043D\u0443\u044E",
       "notice.linksUpdated": "Reference Linker: \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u043E \u0441\u0441\u044B\u043B\u043E\u043A \u2014 {n}",
       "notice.linksUpdatedVault": "Reference Linker: \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u043E \u0441\u0441\u044B\u043B\u043E\u043A \u2014 {n} \u0432 \u0437\u0430\u043C\u0435\u0442\u043A\u0430\u0445: {files}",
+      "notice.updateSkipped": "(\u043F\u0440\u043E\u043F\u0443\u0449\u0435\u043D\u043E \u0437\u0430\u043C\u0435\u0442\u043E\u043A \u2014 {n}: \u0438\u0437\u043C\u0435\u043D\u0438\u043B\u0438\u0441\u044C \u043F\u043E\u0441\u043B\u0435 \u043F\u0440\u0435\u0434\u043F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0430)",
+      "label.thisNote": "\u042D\u0442\u0430 \u0437\u0430\u043C\u0435\u0442\u043A\u0430",
+      "modal.update.title": "\u0410\u043A\u0442\u0443\u0430\u043B\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0438 \u043D\u0430 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u044B",
+      "modal.update.summary": "\u041F\u0440\u0430\u0432\u043E\u043A \u2014 {links} \u0432 \u0437\u0430\u043C\u0435\u0442\u043A\u0430\u0445: {files}. \u0421\u043D\u0438\u043C\u0438\u0442\u0435 \u0433\u0430\u043B\u043E\u0447\u043A\u0443 \u0441 \u043F\u0440\u0430\u0432\u043A\u0438, \u0447\u0442\u043E\u0431\u044B \u043F\u0440\u043E\u043F\u0443\u0441\u0442\u0438\u0442\u044C \u0435\u0451, \u0438\u043B\u0438 \u0441 \u0437\u0430\u043C\u0435\u0442\u043A\u0438 \u2014 \u0447\u0442\u043E\u0431\u044B \u043F\u0440\u043E\u043F\u0443\u0441\u0442\u0438\u0442\u044C \u0432\u0441\u0435 \u0435\u0451 \u043F\u0440\u0430\u0432\u043A\u0438.",
+      "modal.update.upToDate": "\u0412\u0441\u0451 \u0430\u043A\u0442\u0443\u0430\u043B\u044C\u043D\u043E \u2014 \u043E\u0431\u043D\u043E\u0432\u043B\u044F\u0442\u044C \u043D\u0435\u0447\u0435\u0433\u043E.",
+      "modal.update.attention": "\u0422\u0440\u0435\u0431\u0443\u044E\u0442 \u0432\u043D\u0438\u043C\u0430\u043D\u0438\u044F \u2014 {n}: \u0438\u0445 \u0440\u0430\u0437\u0434\u0435\u043B \u043F\u0440\u043E\u043F\u0430\u043B (\u043F\u0435\u0440\u0435\u0438\u043C\u0435\u043D\u043E\u0432\u0430\u043D, \u0438\u043B\u0438 \u0438\u0437\u043C\u0435\u043D\u0438\u043B\u043E\u0441\u044C \u043E\u0433\u043B\u0430\u0432\u043B\u0435\u043D\u0438\u0435), \u043F\u043E\u044D\u0442\u043E\u043C\u0443 \u0447\u0438\u043D\u0438\u0442\u044C \u043D\u0435\u0447\u0435\u0433\u043E.",
+      "modal.update.brokenRow": "{label} \u2014 \u043D\u0435 \u043F\u043E\u0447\u0438\u043D\u0438\u0442\u044C (\u0440\u0430\u0437\u0434\u0435\u043B \u043F\u0435\u0440\u0435\u0438\u043C\u0435\u043D\u043E\u0432\u0430\u043D \u0438\u043B\u0438 \u0443\u0434\u0430\u043B\u0451\u043D)",
+      "modal.andMore": "\u2026\u0438 \u0435\u0449\u0451 {n}",
+      "btn.apply": "\u041F\u0440\u0438\u043C\u0435\u043D\u0438\u0442\u044C",
+      "btn.cancel": "\u041E\u0442\u043C\u0435\u043D\u0430",
+      "btn.close": "\u0417\u0430\u043A\u0440\u044B\u0442\u044C",
       "notice.linksPinned": "Reference Linker: \u0437\u0430\u043A\u0440\u0435\u043F\u043B\u0435\u043D\u043E \u0441\u0441\u044B\u043B\u043E\u043A \u2014 {n}",
       "notice.linksPinnedVault": "Reference Linker: \u0437\u0430\u043A\u0440\u0435\u043F\u043B\u0435\u043D\u043E \u0441\u0441\u044B\u043B\u043E\u043A \u2014 {n} \u0432 \u0437\u0430\u043C\u0435\u0442\u043A\u0430\u0445: {files}",
       "notice.pinned": "Reference Linker: \u0441\u0441\u044B\u043B\u043A\u0430 \u0437\u0430\u043A\u0440\u0435\u043F\u043B\u0435\u043D\u0430 \u0437\u0430 \u0440\u0430\u0437\u0434\u0435\u043B\u043E\u043C \xAB{sec}\xBB",
@@ -1743,12 +2025,13 @@ var fsp = fs.promises;
 var nodePath = require("path");
 var { PRESETS, DEFAULT_SETTINGS, parseExtensions, parseSkip, underSkip } = require_constants();
 var { splitLines, inTableCell, inCode, inLink, linkRegex, splitTarget, withTitle } = require_markdown();
-var { parseBinding, formatBinding, bindStateFrom } = require_binding();
+var { parseBinding, formatBinding, bindStateFrom, bindingOwner, ownsBinding } = require_binding();
+var { fillRoot: fillRootToken, ownsRootToken } = require_root_token();
 var { ReferenceSuggest } = require_suggest();
 var filter = require_filter();
 var { HoverPreview } = require_hover();
 var { registerEmbed } = require_embed();
-var actualize = require_actualize();
+var actualize = require_actualize2();
 var { ReferenceLinkModal, PresetPickerModal } = require_modal();
 var { ReferenceLinkerSettingTab } = require_settings_tab();
 var { readOutline } = require_pdf();
@@ -1763,6 +2046,8 @@ function openExternal(uri) {
 }
 var PAGE_LINK = /^file:\/\/\/.+#page=\d+/i;
 var ROOT_ATTR = "data-reference-root";
+var OWNER = "reference";
+var SIBLING_ID = "code-linker";
 var TITLE_ATTR = "data-reference-title";
 var anchorTitle = (a) => a.getAttribute(TITLE_ATTR) || a.getAttribute("title") || "";
 var pathPart = (dec) => dec.split("#")[0].split("?")[0];
@@ -1879,20 +2164,40 @@ var ReferenceLinkerPlugin = class extends Plugin {
     if (!known)
       editors.push({ name: "Custom", template: tpl });
   }
-  // Obsidian URL-encodes the braces in a rendered href, so match both forms.
-  fillRoot(v) {
+  // Our own {ref-root} is always ours to fill. A bare {root} predates the namespacing and
+  // Code Linker used to fill it too, so it takes a verdict — see legacyRootIsOurs. The
+  // default claims it, which is what every call about our own links wants; only the render
+  // path, where another plugin's links go past, asks first.
+  fillRoot(v, claimLegacy = true) {
     const root = encodeURI(this.codeRoot().split(nodePath.sep).join("/"));
-    return v.replace(/\{root\}|%7Broot%7D/gi, root);
+    return fillRootToken(v, { owner: OWNER, root, claimLegacy });
+  }
+  siblingLinkerInstalled() {
+    const plugins = this.app.plugins && this.app.plugins.plugins;
+    return !!(plugins && plugins[SIBLING_ID]);
+  }
+  // Whether a bare {root} in a rendered link is ours to resolve. The binding settles it
+  // when there is one. Failing that, being the only linker installed makes every legacy
+  // link ours, which keeps a solo vault behaving exactly as it always did. Otherwise the
+  // link has to point at something inside our root to count as ours.
+  legacyRootIsOurs(url, title) {
+    const owner = bindingOwner(title);
+    if (owner)
+      return owner === OWNER;
+    if (!this.siblingLinkerInstalled())
+      return true;
+    return !!this.targetIndexedFile(this.decodeTarget(url));
   }
   resolveRootLinks(el) {
     const links = el.querySelectorAll ? el.querySelectorAll("a") : [];
     for (const a of links) {
+      const title = a.getAttribute("title") || "";
       let ours = false;
       for (const attr of ["href", "data-href"]) {
         const v = a.getAttribute(attr);
         if (!v)
           continue;
-        const out = this.fillRoot(v);
+        const out = this.fillRoot(v, this.legacyRootIsOurs(v, title));
         if (out !== v) {
           a.setAttribute(attr, out);
           ours = true;
@@ -1905,10 +2210,12 @@ var ReferenceLinkerPlugin = class extends Plugin {
     this.markStaleAnchors(el);
   }
   // Park a binding title on a data attribute and drop the real one, so the binding string
-  // doesn't show as a native tooltip. A plain tooltip the reader wrote is left as-is.
+  // doesn't show as a native tooltip. A plain tooltip the reader wrote is left as-is, and
+  // so is Code Linker's binding: taking its title away left it unable to read its own
+  // pin and marking its links wrongly.
   stashTitle(a) {
     const title = a.getAttribute("title");
-    if (!title || a.hasAttribute(TITLE_ATTR) || !parseBinding(title))
+    if (!title || a.hasAttribute(TITLE_ATTR) || !ownsBinding(title, OWNER))
       return;
     a.setAttribute(TITLE_ATTR, title);
     a.removeAttribute("title");
@@ -2037,12 +2344,19 @@ var ReferenceLinkerPlugin = class extends Plugin {
     return rel ? (this.fileCache.get(rel) || { entries: [] }).entries : [];
   }
   // What a section binding says about the page a link stores: null when the section still
-  // sits there, stale with the page it moved to, or broken when no such section resolves
-  // (renamed, or the document isn't indexed).
+  // sits there, stale with the page it moved to, or broken when the document is indexed but
+  // no such section resolves any more (renamed, or the outline changed).
+  //
+  // Broken is reserved for a document the index *has*, never for one it doesn't know — a
+  // reference root pointed at the wrong folder, or a document not scanned yet, would
+  // otherwise turn every link red at once. An unknown document gets no verdict rather than
+  // a guess. Code Linker already worked this way; this is the two brought into line.
   urlBindState(url, b, storedPage) {
     if (!b.sec)
       return null;
     const rel = this.targetIndexedFile(this.decodeTarget(url));
+    if (!rel)
+      return null;
     const pages = this.entriesIn(rel).filter((e) => e.kind === "section" && e.name === b.sec).map((e) => e.page);
     return bindStateFrom(pages, storedPage);
   }
@@ -2079,8 +2393,12 @@ var ReferenceLinkerPlugin = class extends Plugin {
     return true;
   }
   // Reading view renders our links as real <a>; Obsidian's opener corrupts a #page=
-  // fragment, so we intercept and open through the shell — for any {root} link, and any
-  // file:// link with a page. Everything else is left to Obsidian.
+  // fragment, so we intercept and open through the shell — for a link resolveRootLinks
+  // marked ours, and any file:// link with a page. Everything else is left to Obsidian.
+  //
+  // This runs in the capture phase, ahead of every other handler, so it has to be sure the
+  // link is ours before swallowing the click: claiming a Code Linker link here sent it to
+  // the OS viewer instead of the editor.
   onAnchorClick(evt) {
     if (evt.button !== 0 && evt.button !== 1)
       return;
@@ -2088,7 +2406,7 @@ var ReferenceLinkerPlugin = class extends Plugin {
     if (!a)
       return;
     const href = a.getAttribute("href") || a.getAttribute("data-href") || "";
-    const filled = /\{root\}|%7Broot%7D/i.test(href) ? this.fillRoot(href) : href;
+    const filled = this.fillRoot(href, this.legacyRootIsOurs(href, anchorTitle(a)));
     if (!a.hasAttribute(ROOT_ATTR) && !PAGE_LINK.test(filled))
       return;
     evt.preventDefault();
@@ -2115,8 +2433,11 @@ var ReferenceLinkerPlugin = class extends Plugin {
     }
     return null;
   }
-  // The link under the click resolved, if it carries a {root} token (else null,
-  // so a plain link falls through to Obsidian's own opener).
+  // The link under the click resolved, if the token it carries is ours — else null, so a
+  // plain link falls through to Obsidian's own opener and the other linker's link falls
+  // through to that plugin. Both register a highest-precedence handler, so each has to
+  // claim only its own; otherwise the winner comes down to which plugin loaded first.
+  // codeRefAt has already split the title off the target.
   rootUriAt(evt, view) {
     const el = evt.target;
     if (!el || !el.closest || !el.closest(".cm-link"))
@@ -2124,7 +2445,8 @@ var ReferenceLinkerPlugin = class extends Plugin {
     const ref = this.codeRefAt(view, evt.clientX, evt.clientY);
     if (!ref)
       return null;
-    return /\{root\}|%7Broot%7D/i.test(ref.target) ? this.fillRoot(ref.target) : null;
+    const claimLegacy = this.legacyRootIsOurs(ref.target, ref.title);
+    return ownsRootToken(ref.target, OWNER, claimLegacy) ? this.fillRoot(ref.target, claimLegacy) : null;
   }
   // Absolute base folder the scan paths are resolved against.
   codeRoot() {

@@ -16,7 +16,8 @@ const nodePath = require('path');
 
 const { PRESETS, DEFAULT_SETTINGS, parseExtensions, parseSkip, underSkip } = require('./constants');
 const { splitLines, inTableCell, inCode, inLink, linkRegex, splitTarget, withTitle } = require('./shared/markdown');
-const { parseBinding, formatBinding, bindStateFrom } = require('./shared/binding');
+const { parseBinding, formatBinding, bindStateFrom, bindingOwner, ownsBinding } = require('./shared/binding');
+const { fillRoot: fillRootToken, ownsRootToken } = require('./shared/root-token');
 const { ReferenceSuggest } = require('./suggest');
 const filter = require('./filter');
 const { HoverPreview } = require('./hover');
@@ -42,6 +43,12 @@ const PAGE_LINK = /^file:\/\/\/.+#page=\d+/i;
 // A rendered anchor built from our {root} token — recorded before resolveRootLinks fills
 // the token in, since it's gone from the href by click time.
 const ROOT_ATTR = 'data-reference-root';
+
+// Which root token and which bindings are this plugin's, as the shared modules name them.
+const OWNER = 'reference';
+// The other sigil linker. Its presence is what turns a bare {root} from "obviously ours"
+// into a question, so it's worth asking about rather than assuming.
+const SIBLING_ID = 'code-linker';
 
 // A markdown title becomes a native tooltip that would cover our hover preview, so it's
 // parked here instead.
@@ -188,23 +195,45 @@ class ReferenceLinkerPlugin extends Plugin {
     if (!known) editors.push({ name: 'Custom', template: tpl });
   }
 
-  // Obsidian URL-encodes the braces in a rendered href, so match both forms.
-  fillRoot(v) {
+  // Our own {ref-root} is always ours to fill. A bare {root} predates the namespacing and
+  // Code Linker used to fill it too, so it takes a verdict — see legacyRootIsOurs. The
+  // default claims it, which is what every call about our own links wants; only the render
+  // path, where another plugin's links go past, asks first.
+  fillRoot(v, claimLegacy = true) {
     const root = encodeURI(this.codeRoot().split(nodePath.sep).join('/'));
-    return v.replace(/\{root\}|%7Broot%7D/gi, root);
+    return fillRootToken(v, { owner: OWNER, root, claimLegacy });
+  }
+
+  siblingLinkerInstalled() {
+    const plugins = this.app.plugins && this.app.plugins.plugins;
+    return !!(plugins && plugins[SIBLING_ID]);
+  }
+
+  // Whether a bare {root} in a rendered link is ours to resolve. The binding settles it
+  // when there is one. Failing that, being the only linker installed makes every legacy
+  // link ours, which keeps a solo vault behaving exactly as it always did. Otherwise the
+  // link has to point at something inside our root to count as ours.
+  legacyRootIsOurs(url, title) {
+    const owner = bindingOwner(title);
+    if (owner) return owner === OWNER;
+    if (!this.siblingLinkerInstalled()) return true;
+    return !!this.targetIndexedFile(this.decodeTarget(url));
   }
 
   resolveRootLinks(el) {
     const links = el.querySelectorAll ? el.querySelectorAll('a') : [];
     for (const a of links) {
+      const title = a.getAttribute('title') || '';
       let ours = false;
       for (const attr of ['href', 'data-href']) {
         const v = a.getAttribute(attr);
         if (!v) continue;
-        const out = this.fillRoot(v);
+        const out = this.fillRoot(v, this.legacyRootIsOurs(v, title));
         if (out !== v) { a.setAttribute(attr, out); ours = true; }
       }
-      // {root} is our own token, so a link carrying one is ours to open whatever it points at.
+      // Only a token we were entitled to fill marks the link ours to open — the other
+      // plugin's links now go past untouched instead of being claimed by whoever rendered
+      // first.
       if (ours) a.setAttribute(ROOT_ATTR, '');
       this.stashTitle(a);
     }
@@ -212,10 +241,12 @@ class ReferenceLinkerPlugin extends Plugin {
   }
 
   // Park a binding title on a data attribute and drop the real one, so the binding string
-  // doesn't show as a native tooltip. A plain tooltip the reader wrote is left as-is.
+  // doesn't show as a native tooltip. A plain tooltip the reader wrote is left as-is, and
+  // so is Code Linker's binding: taking its title away left it unable to read its own
+  // pin and marking its links wrongly.
   stashTitle(a) {
     const title = a.getAttribute('title');
-    if (!title || a.hasAttribute(TITLE_ATTR) || !parseBinding(title)) return;
+    if (!title || a.hasAttribute(TITLE_ATTR) || !ownsBinding(title, OWNER)) return;
     a.setAttribute(TITLE_ATTR, title);
     a.removeAttribute('title');
   }
@@ -343,11 +374,17 @@ class ReferenceLinkerPlugin extends Plugin {
   }
 
   // What a section binding says about the page a link stores: null when the section still
-  // sits there, stale with the page it moved to, or broken when no such section resolves
-  // (renamed, or the document isn't indexed).
+  // sits there, stale with the page it moved to, or broken when the document is indexed but
+  // no such section resolves any more (renamed, or the outline changed).
+  //
+  // Broken is reserved for a document the index *has*, never for one it doesn't know — a
+  // reference root pointed at the wrong folder, or a document not scanned yet, would
+  // otherwise turn every link red at once. An unknown document gets no verdict rather than
+  // a guess. Code Linker already worked this way; this is the two brought into line.
   urlBindState(url, b, storedPage) {
     if (!b.sec) return null;
     const rel = this.targetIndexedFile(this.decodeTarget(url));
+    if (!rel) return null;
     const pages = this.entriesIn(rel).filter((e) => e.kind === 'section' && e.name === b.sec).map((e) => e.page);
     return bindStateFrom(pages, storedPage);
   }
@@ -385,14 +422,18 @@ class ReferenceLinkerPlugin extends Plugin {
   }
 
   // Reading view renders our links as real <a>; Obsidian's opener corrupts a #page=
-  // fragment, so we intercept and open through the shell — for any {root} link, and any
-  // file:// link with a page. Everything else is left to Obsidian.
+  // fragment, so we intercept and open through the shell — for a link resolveRootLinks
+  // marked ours, and any file:// link with a page. Everything else is left to Obsidian.
+  //
+  // This runs in the capture phase, ahead of every other handler, so it has to be sure the
+  // link is ours before swallowing the click: claiming a Code Linker link here sent it to
+  // the OS viewer instead of the editor.
   onAnchorClick(evt) {
     if (evt.button !== 0 && evt.button !== 1) return;
     const a = evt.target && evt.target.closest && evt.target.closest('a');
     if (!a) return;
     const href = a.getAttribute('href') || a.getAttribute('data-href') || '';
-    const filled = /\{root\}|%7Broot%7D/i.test(href) ? this.fillRoot(href) : href;
+    const filled = this.fillRoot(href, this.legacyRootIsOurs(href, anchorTitle(a)));
     if (!a.hasAttribute(ROOT_ATTR) && !PAGE_LINK.test(filled)) return;
     evt.preventDefault();
     evt.stopPropagation();
@@ -417,14 +458,18 @@ class ReferenceLinkerPlugin extends Plugin {
     return null;
   }
 
-  // The link under the click resolved, if it carries a {root} token (else null,
-  // so a plain link falls through to Obsidian's own opener).
+  // The link under the click resolved, if the token it carries is ours — else null, so a
+  // plain link falls through to Obsidian's own opener and the other linker's link falls
+  // through to that plugin. Both register a highest-precedence handler, so each has to
+  // claim only its own; otherwise the winner comes down to which plugin loaded first.
+  // codeRefAt has already split the title off the target.
   rootUriAt(evt, view) {
     const el = evt.target;
     if (!el || !el.closest || !el.closest('.cm-link')) return null;
     const ref = this.codeRefAt(view, evt.clientX, evt.clientY);
     if (!ref) return null;
-    return /\{root\}|%7Broot%7D/i.test(ref.target) ? this.fillRoot(ref.target) : null;
+    const claimLegacy = this.legacyRootIsOurs(ref.target, ref.title);
+    return ownsRootToken(ref.target, OWNER, claimLegacy) ? this.fillRoot(ref.target, claimLegacy) : null;
   }
 
   // Absolute base folder the scan paths are resolved against.

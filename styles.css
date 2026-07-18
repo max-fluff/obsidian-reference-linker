@@ -207,4 +207,66 @@ settings:
   height: 16px;
 }
 
+/* Update preview: each note is a checkable group, its link changes a compact table, and
+   the section that's gone is listed apart in the warning colour — so an update is something
+   you look over and confirm, not a blind sweep. */
+.reference-linker-preview-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.reference-linker-preview-file {
+  font-weight: var(--font-semibold);
+  margin: 12px 0 4px;
+  overflow-wrap: anywhere;
+}
+.reference-linker-preview-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-ui-small);
+}
+.reference-linker-preview-table td {
+  border-bottom: 1px solid var(--background-modifier-border);
+  padding: 3px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+.reference-linker-preview-pick {
+  width: 1%;
+  padding-right: 0;
+  vertical-align: middle;
+}
+.reference-linker-preview-move {
+  font-family: var(--font-monospace);
+  white-space: nowrap;
+  width: 1%;
+  color: var(--text-muted);
+}
+/* A guessed move (file matched by symbol or basename), not a plain line drift — tinted so
+   it stands out for a closer look before applying. */
+.reference-linker-preview-moved .reference-linker-preview-move {
+  color: var(--reference-linker-stale-color, var(--text-warning));
+  white-space: normal;
+}
+.reference-linker-preview-more,
+.reference-linker-preview-empty {
+  color: var(--text-muted);
+  padding: 8px 0;
+}
+.reference-linker-preview-attention {
+  color: var(--reference-linker-broken-color, var(--text-error));
+}
+.reference-linker-preview-broken {
+  font-size: var(--font-ui-small);
+  color: var(--reference-linker-broken-color, var(--text-error));
+  padding: 2px 8px;
+  overflow-wrap: anywhere;
+}
+.reference-linker-preview-buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
 /* Reference Linker 1.0.0 */

@@ -4,22 +4,45 @@
 // section it holds on to (see shared/binding). An unpinned link is left alone, and the
 // display text is never read. Nothing is rewritten automatically.
 
-const { Notice, MarkdownView } = require('obsidian');
-const { ViewPlugin, Decoration } = require('@codemirror/view');
-const { RangeSetBuilder, StateEffect } = require('@codemirror/state');
-const { syntaxTree } = require('@codemirror/language');
-const { linkRegex, splitTarget, withTitle, rewriteLinks } = require('./shared/markdown');
-const { PAGE_RE, parseBinding, formatBinding } = require('./shared/binding');
-const { t } = require('./shared/i18n');
+const { splitTarget, withTitle, rewriteLinks } = require('./shared/markdown');
+const { PAGE_RE, parseBinding, formatBinding, ownsBinding } = require('./shared/binding');
+const shared = require('./shared/actualize');
+const preview = require('./shared/update-preview');
 
-const SKIP_NODE = /code|comment|frontmatter/i;
+// Which bindings are this plugin's, as the shared module names them.
+const OWNER = 'reference';
+
+// Prefix for the preview modal's own classes, kept per plugin so two installed linkers
+// never style each other's dialog.
+const PREVIEW_CLASS = 'reference-linker-preview';
 
 const withPage = (url, page) => (PAGE_RE.test(url) ? url.replace(PAGE_RE, '#page=' + page) : url + '#page=' + page);
 
-const updateLinksInText = (plugin, text) => rewriteLinks(text, (name, target) => {
-  const fixed = plugin.actualizedTarget(target);
-  return fixed == null ? null : '[' + name + '](' + fixed + ')';
-});
+// One pass over a note's links. `selected` null is a dry run: apply every fix to build the
+// preview and record each change under a key (its order of appearance). A set of keys
+// applies only those — same walk, same order, so keys line up as long as the note is
+// unchanged (the write guard ensures it). Broken links are collected in the dry run only,
+// since there is no fix to offer for them.
+const rewriteUpdates = (plugin, text, selected) => {
+  const collect = selected == null;
+  const changes = [];
+  const broken = [];
+  let key = 0;
+  const links = rewriteLinks(text, (name, target) => {
+    const r = bindStateOf(plugin, target);
+    if (r && r.state === 'stale') {
+      const k = key++;
+      const { url, title } = splitTarget(target);
+      // bindStateFrom names the moved-to position `line`; for a document it is a page.
+      if (collect) changes.push({ key: k, label: name, from: String(plugin.targetPage(url)), to: String(r.line) });
+      if (!collect && !selected.has(k)) return null;
+      return '[' + name + '](' + withTitle(withPage(url, r.line), title) + ')';
+    }
+    if (collect && r && r.state === 'broken') broken.push(name);
+    return null;
+  });
+  return { newText: links.text, count: links.count, changes, broken };
+};
 
 // Pin every unpinned link to the section on its page — retrofits notes written before
 // pinning. A link with any title is left alone: pinned, or a tooltip that isn't ours.
@@ -30,60 +53,19 @@ const pinLinksInText = (plugin, text) => rewriteLinks(text, (name, target) => {
   return sec ? '[' + name + '](' + withTitle(url, formatBinding({ sec: sec.name })) + ')' : null;
 });
 
-const refreshEffect = StateEffect.define();
-
-function refreshStaleLinks(app) {
-  app.workspace.iterateAllLeaves((leaf) => {
-    const cm = leaf.view && leaf.view.editor && leaf.view.editor.cm;
-    if (cm) cm.dispatch({ effects: refreshEffect.of(null) });
-  });
-}
-
-// Live Preview underline for drifted links. Links inside code are skipped — there they're
-// example text.
-function staleLinksExtension(plugin) {
-  const marks = {
-    stale: Decoration.mark({ class: 'reference-linker-stale' }),
-    broken: Decoration.mark({ class: 'reference-linker-broken' }),
-  };
-  const build = (view) => {
-    const builder = new RangeSetBuilder();
-    if (plugin.settings.markStaleLinks) {
-      const tree = syntaxTree(view.state);
-      for (const { from, to } of view.visibleRanges) {
-        const text = view.state.doc.sliceString(from, to);
-        const re = linkRegex();
-        let m;
-        while ((m = re.exec(text))) {
-          const start = from + m.index;
-          const end = start + m[0].length;
-          let inCode = false;
-          tree.iterate({ from: start, to: end, enter: (n) => { if (SKIP_NODE.test(n.type.name)) inCode = true; } });
-          const state = inCode ? null : plugin.linkState(m[2]);
-          if (state) builder.add(start, end, marks[state]);
-        }
-      }
-    }
-    return builder.finish();
-  };
-  return ViewPlugin.fromClass(
-    class {
-      constructor(view) { this.decorations = build(view); }
-      update(u) {
-        const refresh = u.transactions.some((tr) => tr.effects.some((e) => e.is(refreshEffect)));
-        if (u.docChanged || u.viewportChanged || refresh) this.decorations = build(u.view);
-      }
-    },
-    { decorations: (v) => v.decorations }
-  );
-}
+const { refreshStaleLinks } = shared;
+const staleLinksExtension = (plugin) => shared.staleLinksExtension(plugin, { stale: 'reference-linker-stale', broken: 'reference-linker-broken' });
 
 // A link's binding against the live index, or null when there's nothing to judge: not a
-// file link, or no binding.
+// file link, or no binding of ours.
+//
+// The ownership check is explicit rather than left to the sec lookup downstream. Code
+// links are file:// links too, so without it a code binding reaches urlBindState and only
+// the absence of a sec anchor keeps it from being judged here.
 function bindStateOf(plugin, target) {
   const { url, title } = splitTarget(target);
   if (!url || !/^file:\/\//i.test(url)) return null;
-  const b = parseBinding(title);
+  const b = ownsBinding(title, OWNER) ? parseBinding(title) : null;
   return b ? plugin.urlBindState(url, b, plugin.targetPage(url)) : null;
 }
 
@@ -108,35 +90,11 @@ const methods = {
     return withTitle(withPage(url, r.line), title);
   },
 
-  // An open editor keeps cursor and undo; reading view has none, so the file is rewritten
-  // through the vault.
-  async rewriteActiveNote(transform, noticeKey) {
-    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-    const editor = view && view.editor;
-    if (editor) {
-      const { text, count } = transform(this, editor.getValue());
-      if (count) { const cur = editor.getCursor(); editor.setValue(text); editor.setCursor(cur); }
-      new Notice(t(noticeKey, { n: count }));
-      return;
-    }
-    const file = this.app.workspace.getActiveFile();
-    if (!file) { new Notice(t(noticeKey, { n: 0 })); return; }
-    const { text, count } = transform(this, await this.app.vault.read(file));
-    if (count) await this.app.vault.modify(file, text);
-    new Notice(t(noticeKey, { n: count }));
-  },
+  rewriteActiveNote(transform, noticeKey) { return shared.rewriteActiveNote(this, transform, noticeKey); },
+  rewriteVault(transform, noticeKey) { return shared.rewriteVault(this, transform, noticeKey); },
 
-  async rewriteVault(transform, noticeKey) {
-    let files = 0, total = 0;
-    for (const f of this.app.vault.getMarkdownFiles()) {
-      const { text, count } = transform(this, await this.app.vault.read(f));
-      if (count) { await this.app.vault.modify(f, text); files++; total += count; }
-    }
-    new Notice(t(noticeKey, { n: total, files }));
-  },
-
-  updateLinksInActiveNote() { return this.rewriteActiveNote(updateLinksInText, 'notice.linksUpdated'); },
-  updateLinksInVault() { return this.rewriteVault(updateLinksInText, 'notice.linksUpdatedVault'); },
+  updateLinksInActiveNote() { return preview.updateInActiveNote(this, rewriteUpdates, PREVIEW_CLASS); },
+  updateLinksInVault() { return preview.updateInVault(this, rewriteUpdates, PREVIEW_CLASS); },
   pinLinksInActiveNote() { return this.rewriteActiveNote(pinLinksInText, 'notice.linksPinned'); },
   pinLinksInVault() { return this.rewriteVault(pinLinksInText, 'notice.linksPinnedVault'); },
 };
