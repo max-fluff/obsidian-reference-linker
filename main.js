@@ -501,6 +501,13 @@ var require_discover = __commonJS({
             open: (sourcePath, newTab) => {
               if (typeof peer.open === "function")
                 peer.open(m.target, sourcePath, newTab);
+            },
+            // The peer previews its own target: only it knows whether that means a note, a
+            // heading anchor or something else. A peer too old to publish this simply has no
+            // preview in the list, which is the behaviour it had before the list existed.
+            hover: (event, targetEl, sourcePath, hoverParent) => {
+              if (typeof peer.hover === "function")
+                peer.hover(m.target, event, targetEl, sourcePath, hoverParent);
             }
           });
         }
@@ -509,6 +516,39 @@ var require_discover = __commonJS({
     }
     function candidatesFor(candidates, s, e) {
       return candidates.filter((c) => c.start < e && c.end > s);
+    }
+    function peerSuggestions(app, self, query) {
+      const out = [];
+      for (const peer of discoverLinkers(app)) {
+        if (peer.id === self.id || typeof peer.suggest !== "function")
+          continue;
+        let items;
+        try {
+          items = peer.suggest(String(query || "")) || [];
+        } catch (e) {
+          items = [];
+        }
+        for (const it of items) {
+          if (!it || typeof it.label !== "string")
+            continue;
+          out.push({
+            label: it.label,
+            note: it.note || "",
+            target: it.target,
+            // What the inserted link should read. null (or absent) means "keep whatever the
+            // reader typed" — the peer says which, because only it knows whether its candidate
+            // matched an inflection of the typed word or completed a prefix of it.
+            display: it.display == null ? null : it.display,
+            id: peer.id,
+            source: peer.displayName || peer.id,
+            precedence: peer.precedence || 0,
+            // The peer builds its own link text: nobody else should have to know whether a
+            // target is a term title or a File#Heading.
+            insert: (display, inTable) => typeof peer.linkFor === "function" ? peer.linkFor(it.target, display, inTable) : null
+          });
+        }
+      }
+      return out;
     }
     function peersOffering2(app, self, kind, text) {
       const out = [];
@@ -529,7 +569,7 @@ var require_discover = __commonJS({
     function siblingLinkers(app, self) {
       return discoverLinkers(app).filter((p) => p.id !== self.id);
     }
-    module2.exports = { LINKER_API, discoverLinkers, outranks, foreignRanges, overlaps, ownedMatches, yieldedCandidates, candidatesFor, peersOffering: peersOffering2, siblingLinkers };
+    module2.exports = { LINKER_API, discoverLinkers, outranks, foreignRanges, overlaps, ownedMatches, yieldedCandidates, candidatesFor, peerSuggestions, peersOffering: peersOffering2, siblingLinkers };
   }
 });
 
@@ -762,42 +802,41 @@ var require_pdf = __commonJS({
   }
 });
 
-// src/hover.js
-var require_hover = __commonJS({
-  "src/hover.js"(exports2, module2) {
+// src/shared/popover.js
+var require_popover = __commonJS({
+  "src/shared/popover.js"(exports2, module2) {
     "use strict";
-    var nodePath2 = require("path");
-    var fs2 = require("fs");
-    var { openDocument, renderPageToCanvas } = require_pdf();
     var SHOW_DELAY = 200;
     var HIDE_GRACE = 250;
-    var PREVIEW_WIDTH = 420;
-    var IMAGE_EXT = /* @__PURE__ */ new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "avif"]);
-    var MIME = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", bmp: "image/bmp", svg: "image/svg+xml", avif: "image/avif" };
-    var keyOf = (e) => e.path + ":" + (e.page || e.line || 1);
-    var HoverPreview2 = class {
-      constructor(plugin) {
-        this.plugin = plugin;
+    var EDGE_PAD = 12;
+    var Popover = class {
+      // `cls` is the plugin's own class on the root element; `hiddenCls` defaults to `${cls}`
+      // with a -hidden suffix on the plugin's prefix, but both can be passed explicitly.
+      constructor(opts) {
+        this.cls = opts.cls;
+        this.hiddenCls = opts.hiddenCls;
+        this.showDelay = opts.showDelay == null ? SHOW_DELAY : opts.showDelay;
+        this.hideGrace = opts.hideGrace == null ? HIDE_GRACE : opts.hideGrace;
+        this.onHide = opts.onHide || null;
+        this.onDestroy = opts.onDestroy || null;
+        this.keepAlive = opts.keepAlive || null;
         this.el = null;
         this.timer = null;
         this.hideTimer = null;
         this.key = "";
         this.pendingKey = "";
         this.token = 0;
-        this.docPath = "";
-        this.doc = null;
-        this.blobUrl = "";
       }
       ensureEl() {
         if (!this.el) {
-          this.el = document.body.createDiv({ cls: "reference-linker-hover reference-linker-hidden" });
+          this.el = document.body.createDiv({ cls: `${this.cls} ${this.hiddenCls}` });
           this.el.addEventListener("mouseenter", () => this.cancelHide());
           this.el.addEventListener("mouseleave", () => this.leave());
         }
         return this.el;
       }
       isVisible() {
-        return !!this.el && !this.el.classList.contains("reference-linker-hidden");
+        return !!this.el && !this.el.classList.contains(this.hiddenCls);
       }
       contains(node) {
         return !!this.el && !!node && this.el.contains(node);
@@ -806,16 +845,10 @@ var require_hover = __commonJS({
         clearTimeout(this.hideTimer);
         this.hideTimer = null;
       }
-      // Only PDFs and images preview; skip other types so nothing schedules for them.
-      previewable(entry) {
-        const ext = (entry.lang || "").toLowerCase();
-        return ext === "pdf" || IMAGE_EXT.has(ext);
-      }
-      schedule(entry, x, y) {
+      // Ask for `key` to be shown after the delay. Re-asking for what is already up, or already
+      // on its way, changes nothing — otherwise every mouse move would restart the timer.
+      schedule(key, x, y, build) {
         this.cancelHide();
-        if (!this.previewable(entry))
-          return;
-        const key = keyOf(entry);
         if (key === this.key && this.isVisible())
           return;
         if (key === this.pendingKey)
@@ -824,13 +857,144 @@ var require_hover = __commonJS({
         clearTimeout(this.timer);
         this.timer = setTimeout(() => {
           this.pendingKey = "";
-          this.show(entry, x, y);
-        }, SHOW_DELAY);
+          this.show(key, x, y, build);
+        }, this.showDelay);
       }
       leave() {
         if (this.hideTimer)
           return;
-        this.hideTimer = setTimeout(() => this.hide(), HIDE_GRACE);
+        this.hideTimer = setTimeout(() => {
+          this.hideTimer = null;
+          if (this.keepAlive && this.keepAlive()) {
+            this.leave();
+            return;
+          }
+          this.hide();
+        }, this.hideGrace);
+      }
+      async show(key, x, y, build) {
+        const token = ++this.token;
+        const ctx = { isCurrent: () => token === this.token };
+        const el = this.ensureEl();
+        el.empty();
+        const after = await build(el, ctx);
+        if (after === false || !ctx.isCurrent())
+          return;
+        this.key = key;
+        el.style.visibility = "hidden";
+        el.style.left = "-9999px";
+        el.style.top = "0px";
+        el.removeClass(this.hiddenCls);
+        if (typeof after === "function")
+          after();
+        const r = el.getBoundingClientRect();
+        let left = x + EDGE_PAD;
+        let top = y + EDGE_PAD;
+        if (left + r.width > window.innerWidth - EDGE_PAD)
+          left = Math.max(EDGE_PAD, x - EDGE_PAD - r.width);
+        if (top + r.height > window.innerHeight - EDGE_PAD)
+          top = Math.max(EDGE_PAD, y - EDGE_PAD - r.height);
+        el.style.left = left + "px";
+        el.style.top = top + "px";
+        el.style.visibility = "visible";
+      }
+      hide() {
+        clearTimeout(this.timer);
+        clearTimeout(this.hideTimer);
+        this.hideTimer = null;
+        this.pendingKey = "";
+        this.key = "";
+        this.token++;
+        if (this.onHide)
+          this.onHide();
+        if (this.el) {
+          this.el.addClass(this.hiddenCls);
+          this.el.empty();
+        }
+      }
+      destroy() {
+        clearTimeout(this.timer);
+        clearTimeout(this.hideTimer);
+        this.token++;
+        if (this.onDestroy)
+          this.onDestroy();
+        if (this.el) {
+          this.el.remove();
+          this.el = null;
+        }
+      }
+    };
+    module2.exports = { Popover, SHOW_DELAY, HIDE_GRACE };
+  }
+});
+
+// src/hover.js
+var require_hover = __commonJS({
+  "src/hover.js"(exports2, module2) {
+    "use strict";
+    var nodePath2 = require("path");
+    var fs2 = require("fs");
+    var { openDocument, renderPageToCanvas } = require_pdf();
+    var { Popover } = require_popover();
+    var PREVIEW_WIDTH = 420;
+    var IMAGE_EXT = /* @__PURE__ */ new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "avif"]);
+    var MIME = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", bmp: "image/bmp", svg: "image/svg+xml", avif: "image/avif" };
+    var keyOf = (e) => e.path + ":" + (e.page || e.line || 1);
+    var HoverPreview2 = class {
+      constructor(plugin) {
+        this.plugin = plugin;
+        this.docPath = "";
+        this.doc = null;
+        this.blobUrl = "";
+        this.pop = new Popover({
+          cls: "reference-linker-hover",
+          hiddenCls: "reference-linker-hidden",
+          onHide: () => this.revokeBlob(),
+          onDestroy: () => {
+            this.revokeBlob();
+            if (this.doc) {
+              try {
+                this.doc.destroy();
+              } catch (e) {
+              }
+              this.doc = null;
+            }
+          }
+        });
+      }
+      // Read from onHoverMove to tell "nothing scheduled" from "waiting to show". It lives on
+      // the shell now, so it is forwarded rather than duplicated.
+      get pendingKey() {
+        return this.pop.pendingKey;
+      }
+      isVisible() {
+        return this.pop.isVisible();
+      }
+      contains(node) {
+        return this.pop.contains(node);
+      }
+      cancelHide() {
+        this.pop.cancelHide();
+      }
+      leave() {
+        this.pop.leave();
+      }
+      hide() {
+        this.pop.hide();
+      }
+      destroy() {
+        this.pop.destroy();
+      }
+      // Only PDFs and images preview; skip other types so nothing schedules for them.
+      previewable(entry) {
+        const ext = (entry.lang || "").toLowerCase();
+        return ext === "pdf" || IMAGE_EXT.has(ext);
+      }
+      schedule(entry, x, y) {
+        this.pop.cancelHide();
+        if (!this.previewable(entry))
+          return;
+        this.pop.schedule(keyOf(entry), x, y, (el, ctx) => this.build(entry, el, ctx));
       }
       // Open + cache the PDF for `abs`, reusing it while hovering pages of the same file.
       async getDoc(abs) {
@@ -847,57 +1011,39 @@ var require_hover = __commonJS({
         this.docPath = this.doc ? abs : "";
         return this.doc;
       }
-      async show(entry, x, y) {
+      async build(entry, el, ctx) {
         const root = this.plugin.codeRoot();
         const abs = root ? nodePath2.join(root, entry.path) : entry.path;
         const ext = (entry.lang || "").toLowerCase();
-        const token = ++this.token;
-        const el = this.ensureEl();
-        el.empty();
         const page = entry.page || 1;
         const label = entry.title || entry.name;
-        const header = page > 1 ? label + "  \xB7  p." + page : label;
-        el.createDiv({ cls: "reference-linker-hover-header", text: header });
+        el.createDiv({ cls: "reference-linker-hover-header", text: page > 1 ? label + "  \xB7  p." + page : label });
         const body = el.createDiv({ cls: "reference-linker-hover-body" });
         if (ext === "pdf") {
           const doc = await this.getDoc(abs);
-          if (token !== this.token || !doc)
-            return;
+          if (!ctx.isCurrent() || !doc)
+            return false;
           const canvas = body.createEl("canvas");
-          const ok = await renderPageToCanvas(doc, entry.page || 1, canvas, PREVIEW_WIDTH);
-          if (token !== this.token || !ok)
-            return;
-        } else if (IMAGE_EXT.has(ext)) {
+          const ok = await renderPageToCanvas(doc, page, canvas, PREVIEW_WIDTH);
+          if (!ctx.isCurrent() || !ok)
+            return false;
+          return void 0;
+        }
+        if (IMAGE_EXT.has(ext)) {
           let buf;
           try {
             buf = fs2.readFileSync(abs);
           } catch (e) {
-            return;
+            return false;
           }
-          if (token !== this.token)
-            return;
+          if (!ctx.isCurrent())
+            return false;
           this.revokeBlob();
           this.blobUrl = URL.createObjectURL(new Blob([buf], { type: MIME[ext] || "application/octet-stream" }));
           body.createEl("img").src = this.blobUrl;
-        } else {
-          return;
+          return void 0;
         }
-        this.key = keyOf(entry);
-        el.style.visibility = "hidden";
-        el.style.left = "-9999px";
-        el.style.top = "0px";
-        el.removeClass("reference-linker-hidden");
-        const r = el.getBoundingClientRect();
-        const pad = 12;
-        let left = x + pad;
-        let top = y + pad;
-        if (left + r.width > window.innerWidth - pad)
-          left = Math.max(pad, x - pad - r.width);
-        if (top + r.height > window.innerHeight - pad)
-          top = Math.max(pad, y - pad - r.height);
-        el.style.left = left + "px";
-        el.style.top = top + "px";
-        el.style.visibility = "visible";
+        return false;
       }
       revokeBlob() {
         if (this.blobUrl) {
@@ -906,35 +1052,6 @@ var require_hover = __commonJS({
           } catch (e) {
           }
           this.blobUrl = "";
-        }
-      }
-      hide() {
-        clearTimeout(this.timer);
-        clearTimeout(this.hideTimer);
-        this.hideTimer = null;
-        this.pendingKey = "";
-        this.key = "";
-        this.token++;
-        this.revokeBlob();
-        if (this.el) {
-          this.el.addClass("reference-linker-hidden");
-          this.el.empty();
-        }
-      }
-      destroy() {
-        clearTimeout(this.timer);
-        clearTimeout(this.hideTimer);
-        this.revokeBlob();
-        if (this.doc) {
-          try {
-            this.doc.destroy();
-          } catch (e) {
-          }
-          this.doc = null;
-        }
-        if (this.el) {
-          this.el.remove();
-          this.el = null;
         }
       }
     };
@@ -1615,9 +1732,9 @@ var require_modal = __commonJS({
   }
 });
 
-// src/folder-suggest.js
+// src/shared/deeplink/folder-suggest.js
 var require_folder_suggest = __commonJS({
-  "src/folder-suggest.js"(exports2, module2) {
+  "src/shared/deeplink/folder-suggest.js"(exports2, module2) {
     "use strict";
     var obsidian = require("obsidian");
     var fs2 = require("fs");
@@ -1678,6 +1795,14 @@ var require_folder_suggest = __commonJS({
     };
     var folderSuggestAvailable = () => typeof AbstractInputSuggest === "function";
     module2.exports = { FolderSuggest, folderSuggestAvailable };
+  }
+});
+
+// src/folder-suggest.js
+var require_folder_suggest2 = __commonJS({
+  "src/folder-suggest.js"(exports2, module2) {
+    "use strict";
+    module2.exports = require_folder_suggest();
   }
 });
 
@@ -1824,7 +1949,7 @@ var require_settings_tab = __commonJS({
     "use strict";
     var { PluginSettingTab, Setting } = require("obsidian");
     var { PRESETS: PRESETS2 } = require_constants();
-    var { FolderSuggest, folderSuggestAvailable } = require_folder_suggest();
+    var { FolderSuggest, folderSuggestAvailable } = require_folder_suggest2();
     var { renderFolderList } = require_folder_list();
     var { t: t2, plural: plural2 } = require_i18n();
     var { renderPrecedence: precedenceSetting } = require_precedence();
@@ -2272,8 +2397,8 @@ var require_en = __commonJS({
       // Plural noun phrases
       "plural.entry": { one: "{n} entry", other: "{n} entries" },
       "set.precedence.name": "Priority among linker plugins",
-      "set.precedence.desc": "When two linkers claim the same word or the same link, the one higher in this list wins and the other steps aside. Only this plugin\u2019s own position can be moved from here \u2014 move the others from their own settings.",
-      "set.precedence.other": "Move from that plugin\u2019s own settings",
+      "set.precedence.desc": "A word or link several linkers claim goes to the one highest in this list. You can only move this plugin \u2014 move the others from their own settings.",
+      "set.precedence.other": "Moved from its own settings",
       "set.precedence.up": "Move up",
       "set.precedence.down": "Move down"
     };
@@ -2412,8 +2537,8 @@ var require_ru = __commonJS({
       // Plural noun phrases
       "plural.entry": { one: "{n} \u0437\u0430\u043F\u0438\u0441\u044C", few: "{n} \u0437\u0430\u043F\u0438\u0441\u0438", many: "{n} \u0437\u0430\u043F\u0438\u0441\u0435\u0439", other: "{n} \u0437\u0430\u043F\u0438\u0441\u0435\u0439" },
       "set.precedence.name": "\u041F\u0440\u0438\u043E\u0440\u0438\u0442\u0435\u0442 \u0441\u0440\u0435\u0434\u0438 \u043F\u043B\u0430\u0433\u0438\u043D\u043E\u0432-\u043B\u0438\u043D\u043A\u0435\u0440\u043E\u0432",
-      "set.precedence.desc": "\u041A\u043E\u0433\u0434\u0430 \u0434\u0432\u0430 \u043B\u0438\u043D\u043A\u0435\u0440\u0430 \u043F\u0440\u0435\u0442\u0435\u043D\u0434\u0443\u044E\u0442 \u043D\u0430 \u043E\u0434\u043D\u043E \u0441\u043B\u043E\u0432\u043E \u0438\u043B\u0438 \u043E\u0434\u043D\u0443 \u0441\u0441\u044B\u043B\u043A\u0443, \u0432\u044B\u0438\u0433\u0440\u044B\u0432\u0430\u0435\u0442 \u0442\u043E\u0442, \u043A\u0442\u043E \u0432\u044B\u0448\u0435 \u0432 \u0441\u043F\u0438\u0441\u043A\u0435, \u043E\u0441\u0442\u0430\u043B\u044C\u043D\u044B\u0435 \u0443\u0441\u0442\u0443\u043F\u0430\u044E\u0442. \u041E\u0442\u0441\u044E\u0434\u0430 \u043C\u043E\u0436\u043D\u043E \u0434\u0432\u0438\u0433\u0430\u0442\u044C \u0442\u043E\u043B\u044C\u043A\u043E \u044D\u0442\u043E\u0442 \u043F\u043B\u0430\u0433\u0438\u043D \u2014 \u043E\u0441\u0442\u0430\u043B\u044C\u043D\u044B\u0435 \u0438\u0437 \u0438\u0445 \u0441\u043E\u0431\u0441\u0442\u0432\u0435\u043D\u043D\u044B\u0445 \u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043A.",
-      "set.precedence.other": "\u041F\u0435\u0440\u0435\u043C\u0435\u0441\u0442\u0438\u0442\u044C \u0438\u0437 \u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043A \u0442\u043E\u0433\u043E \u043F\u043B\u0430\u0433\u0438\u043D\u0430",
+      "set.precedence.desc": "\u0421\u043B\u043E\u0432\u043E \u0438\u043B\u0438 \u0441\u0441\u044B\u043B\u043A\u0443, \u043D\u0430 \u043A\u043E\u0442\u043E\u0440\u044B\u0435 \u043F\u0440\u0435\u0442\u0435\u043D\u0434\u0443\u044E\u0442 \u043D\u0435\u0441\u043A\u043E\u043B\u044C\u043A\u043E \u043B\u0438\u043D\u043A\u0435\u0440\u043E\u0432, \u0437\u0430\u0431\u0438\u0440\u0430\u0435\u0442 \u0442\u043E\u0442, \u043A\u0442\u043E \u0432\u044B\u0448\u0435 \u0432 \u0441\u043F\u0438\u0441\u043A\u0435. \u041E\u0442\u0441\u044E\u0434\u0430 \u0434\u0432\u0438\u0433\u0430\u0435\u0442\u0441\u044F \u0442\u043E\u043B\u044C\u043A\u043E \u044D\u0442\u043E\u0442 \u043F\u043B\u0430\u0433\u0438\u043D \u2014 \u043E\u0441\u0442\u0430\u043B\u044C\u043D\u044B\u0435 \u0438\u0437 \u0441\u0432\u043E\u0438\u0445 \u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043A.",
+      "set.precedence.other": "\u0414\u0432\u0438\u0433\u0430\u0435\u0442\u0441\u044F \u0438\u0437 \u0441\u0432\u043E\u0438\u0445 \u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043A",
       "set.precedence.up": "\u0412\u044B\u0448\u0435",
       "set.precedence.down": "\u041D\u0438\u0436\u0435"
     };
@@ -2466,9 +2591,12 @@ function namesPath(p, full) {
   const i = a.length - b.length;
   return i === 0 || a[i - 1] === "/";
 }
-var previewEntry = (ref, title) => {
+var previewEntry = (plugin, ref, title, url) => {
   const b = parseBinding(title);
-  return Object.assign({}, ref.entry, { page: ref.page, title: b && b.sec ? b.sec : "" });
+  if (b && b.sec)
+    return Object.assign({}, ref.entry, { page: ref.page, title: b.sec });
+  const sec = plugin.sectionAtLinkPage(url);
+  return Object.assign({}, ref.entry, { page: ref.page, title: sec ? sec.name : "" });
 };
 var ReferenceLinkerPlugin = class extends Plugin {
   async onload() {
@@ -2703,16 +2831,17 @@ var ReferenceLinkerPlugin = class extends Plugin {
       return null;
     const a = el.closest("a");
     if (a && !(a.classList && a.classList.contains("internal-link"))) {
-      const ref = this.refForTarget(a.getAttribute("href") || a.getAttribute("data-href") || "");
+      const href = a.getAttribute("href") || a.getAttribute("data-href") || "";
+      const ref = this.refForTarget(href);
       if (ref)
-        return { entry: previewEntry(ref, anchorTitle(a)), requireMod: false };
+        return { entry: previewEntry(this, ref, anchorTitle(a), href), requireMod: false };
     }
     if (el.closest(".cm-link")) {
       const view = typeof EditorView.findFromDOM === "function" ? EditorView.findFromDOM(el) : this.activeCm();
       const at = view && this.codeRefAt(view, x, y);
       const ref = at && this.refForTarget(at.target);
       if (ref)
-        return { entry: previewEntry(ref, at.title), requireMod: true };
+        return { entry: previewEntry(this, ref, at.title, at.target), requireMod: true };
     }
     return null;
   }

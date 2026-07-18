@@ -145,8 +145,8 @@ module.exports = {
   // Plural noun phrases
   'plural.entry': { one: '{n} entry', other: '{n} entries' },
   'set.precedence.name': 'Priority among linker plugins',
-  'set.precedence.desc': 'When two linkers claim the same word or the same link, the one higher in this list wins and the other steps aside. Only this plugin’s own position can be moved from here — move the others from their own settings.',
-  'set.precedence.other': 'Move from that plugin’s own settings',
+  'set.precedence.desc': 'A word or link several linkers claim goes to the one highest in this list. You can only move this plugin — move the others from their own settings.',
+  'set.precedence.other': 'Moved from its own settings',
   'set.precedence.up': 'Move up',
   'set.precedence.down': 'Move down',
 };

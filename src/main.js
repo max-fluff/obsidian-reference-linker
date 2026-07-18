@@ -70,10 +70,18 @@ function namesPath(p, full) {
   return i === 0 || a[i - 1] === '/';
 }
 
-// The hover entry: the document, the link's page, and the pinned section's name if any.
-const previewEntry = (ref, title) => {
+// The hover entry: the document, the link's page, and the name of the section it lands in.
+//
+// A pinned link says which section in its own binding. An unpinned one doesn't, but the
+// outline still knows what begins on that page — so the header names the section either way
+// rather than falling back to the file name, which the reader could already see in the link.
+// The code linker's header always says exactly where the link goes; this is the same promise
+// for documents.
+const previewEntry = (plugin, ref, title, url) => {
   const b = parseBinding(title);
-  return Object.assign({}, ref.entry, { page: ref.page, title: b && b.sec ? b.sec : '' });
+  if (b && b.sec) return Object.assign({}, ref.entry, { page: ref.page, title: b.sec });
+  const sec = plugin.sectionAtLinkPage(url);
+  return Object.assign({}, ref.entry, { page: ref.page, title: sec ? sec.name : '' });
 };
 
 class ReferenceLinkerPlugin extends Plugin {
@@ -341,14 +349,15 @@ class ReferenceLinkerPlugin extends Plugin {
     if (!el || !el.closest) return null;
     const a = el.closest('a');
     if (a && !(a.classList && a.classList.contains('internal-link'))) {
-      const ref = this.refForTarget(a.getAttribute('href') || a.getAttribute('data-href') || '');
-      if (ref) return { entry: previewEntry(ref, anchorTitle(a)), requireMod: false };
+      const href = a.getAttribute('href') || a.getAttribute('data-href') || '';
+      const ref = this.refForTarget(href);
+      if (ref) return { entry: previewEntry(this, ref, anchorTitle(a), href), requireMod: false };
     }
     if (el.closest('.cm-link')) {
       const view = typeof EditorView.findFromDOM === 'function' ? EditorView.findFromDOM(el) : this.activeCm();
       const at = view && this.codeRefAt(view, x, y);
       const ref = at && this.refForTarget(at.target);
-      if (ref) return { entry: previewEntry(ref, at.title), requireMod: true };
+      if (ref) return { entry: previewEntry(this, ref, at.title, at.target), requireMod: true };
     }
     return null;
   }
