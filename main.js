@@ -493,18 +493,14 @@ var require_discover = __commonJS({
             end: m.end,
             label: m.label || m.target || "",
             target: m.target,
-            // The peer's id travels with the candidate so it can survive a round trip through a
-            // DOM attribute — the editor decoration carries candidates as data, and the opener
-            // is looked up again at click time.
+            // The id survives a round trip through a DOM attribute; the opener is looked up
+            // again at click time.
             id: peer.id,
             source: peer.displayName || peer.id,
             open: (sourcePath, newTab) => {
               if (typeof peer.open === "function")
                 peer.open(m.target, sourcePath, newTab);
             },
-            // The peer previews its own target: only it knows whether that means a note, a
-            // heading anchor or something else. A peer too old to publish this simply has no
-            // preview in the list, which is the behaviour it had before the list existed.
             hover: (event, targetEl, sourcePath, hoverParent) => {
               if (typeof peer.hover === "function")
                 peer.hover(m.target, event, targetEl, sourcePath, hoverParent);
@@ -535,15 +531,12 @@ var require_discover = __commonJS({
             label: it.label,
             note: it.note || "",
             target: it.target,
-            // What the inserted link should read. null (or absent) means "keep whatever the
-            // reader typed" — the peer says which, because only it knows whether its candidate
-            // matched an inflection of the typed word or completed a prefix of it.
+            // null means "keep what the reader typed"; only the peer knows whether its
+            // candidate matched an inflection or completed a prefix.
             display: it.display == null ? null : it.display,
             id: peer.id,
             source: peer.displayName || peer.id,
             precedence: peer.precedence || 0,
-            // The peer builds its own link text: nobody else should have to know whether a
-            // target is a term title or a File#Heading.
             insert: (display, inTable) => typeof peer.linkFor === "function" ? peer.linkFor(it.target, display, inTable) : null
           });
         }
@@ -579,7 +572,7 @@ var require_link_owner = __commonJS({
     "use strict";
     var { outranks, discoverLinkers } = require_discover();
     var RANK = { binding: 2, index: 1 };
-    function linkOwner(app, self, target, title) {
+    function linkOwner(app, target, title) {
       let best = null;
       let bestRank = 0;
       for (const peer of discoverLinkers(app)) {
@@ -602,7 +595,7 @@ var require_link_owner = __commonJS({
       return best;
     }
     function ownsLink2(app, self, target, title) {
-      const owner = linkOwner(app, self, target, title);
+      const owner = linkOwner(app, target, title);
       return !!owner && owner.id === self.id;
     }
     module2.exports = { linkOwner, ownsLink: ownsLink2, RANK };
@@ -810,8 +803,6 @@ var require_popover = __commonJS({
     var HIDE_GRACE = 250;
     var EDGE_PAD = 12;
     var Popover = class {
-      // `cls` is the plugin's own class on the root element; `hiddenCls` defaults to `${cls}`
-      // with a -hidden suffix on the plugin's prefix, but both can be passed explicitly.
       constructor(opts) {
         this.cls = opts.cls;
         this.hiddenCls = opts.hiddenCls;
@@ -845,8 +836,8 @@ var require_popover = __commonJS({
         clearTimeout(this.hideTimer);
         this.hideTimer = null;
       }
-      // Ask for `key` to be shown after the delay. Re-asking for what is already up, or already
-      // on its way, changes nothing — otherwise every mouse move would restart the timer.
+      // Re-asking for what is already up, or already on its way, changes nothing — otherwise
+      // every mouse move would restart the timer.
       schedule(key, x, y, build) {
         this.cancelHide();
         if (key === this.key && this.isVisible())
@@ -962,8 +953,7 @@ var require_hover = __commonJS({
           }
         });
       }
-      // Read from onHoverMove to tell "nothing scheduled" from "waiting to show". It lives on
-      // the shell now, so it is forwarded rather than duplicated.
+      // Read from onHoverMove to tell "nothing scheduled" from "waiting to show".
       get pendingKey() {
         return this.pop.pendingKey;
       }
@@ -1798,14 +1788,6 @@ var require_folder_suggest = __commonJS({
   }
 });
 
-// src/folder-suggest.js
-var require_folder_suggest2 = __commonJS({
-  "src/folder-suggest.js"(exports2, module2) {
-    "use strict";
-    module2.exports = require_folder_suggest();
-  }
-});
-
 // src/shared/folder-list.js
 var require_folder_list = __commonJS({
   "src/shared/folder-list.js"(exports2, module2) {
@@ -1949,7 +1931,7 @@ var require_settings_tab = __commonJS({
     "use strict";
     var { PluginSettingTab, Setting } = require("obsidian");
     var { PRESETS: PRESETS2 } = require_constants();
-    var { FolderSuggest, folderSuggestAvailable } = require_folder_suggest2();
+    var { FolderSuggest, folderSuggestAvailable } = require_folder_suggest();
     var { renderFolderList } = require_folder_list();
     var { t: t2, plural: plural2 } = require_i18n();
     var { renderPrecedence: precedenceSetting } = require_precedence();
@@ -2189,20 +2171,16 @@ var require_api = __commonJS({
           uriFor: (entry) => this.fillRoot(this.buildUri(entry)),
           // Subscribe to index rebuilds; returns an unsubscribe function.
           onChange: (cb) => this.onIndexChange(cb),
-          // What the sibling linker plugins read. See shared/discover.js and shared/link-owner.js.
+          // The provider contract the sibling linkers read (consumed in shared/discover.js and
+          // shared/link-owner.js).
           linker: {
             apiVersion: LINKER_API,
             id: "reference-linker",
             displayName: "Reference Linker",
-            // The sigil half of the family: we resolve an explicit reference rather than
-            // matching bare words, so we never contest a prose span.
             kind: "sigil",
             get precedence() {
               return plugin.settings.linkPrecedence;
             },
-            // How strongly this link is ours. A `sec:` anchor is the author's own word and
-            // settles it; landing in our index is a weaker claim that the code linker can make
-            // about the same file whenever the two roots overlap.
             claim: (target, title) => {
               const split = splitTarget2(String(target || ""));
               const ttl = title ? String(title) : split.title;
@@ -2212,12 +2190,8 @@ var require_api = __commonJS({
                 return null;
               return split.url && plugin.refForTarget(split.url) ? "index" : null;
             },
-            // Whether we'd add a menu entry of this kind, asked before either plugin writes one
-            // so the pair can share a submenu instead of doubling up.
-            //
-            // Both selection actions search on click rather than filtering the menu by what the
-            // index holds, so the answer doesn't depend on the text — only on whether our
-            // context menu is switched on at all.
+            // Both selection actions search on click, so the answer doesn't depend on the text —
+            // only on whether our context menu is switched on at all.
             offers: (kind) => (kind === "convert" || kind === "open") && !!plugin.settings.contextMenu
           }
         };

@@ -1,13 +1,9 @@
 'use strict';
 
-// The plugin must survive being constructed and loaded.
-//
-// This exists because in a sibling plugin it didn't: a helper was deleted while a call to it
-// stayed behind, and the plugin threw in onload and refused to load at all. esbuild bundles
-// an undefined identifier happily, and no other test reaches the event wiring — so "it builds
-// and the tests pass" said nothing about whether the plugin runs. This runs it.
+// The plugin must survive being constructed and loaded. esbuild happily bundles a call to a
+// deleted helper, so "it builds" says nothing about whether onload runs — this runs it.
 
-const { describe, it, assert } = require('./harness');
+const { describe, it, assert } = require('../src/shared/testing/harness');
 const path = require('path');
 const { fakeApp, installStubs, recordingMenu, fakeEditor } = require('./stubs/app');
 
@@ -44,17 +40,13 @@ describe('onload', () => {
   });
 
   it('leaves a link carrying the code linker’s anchor alone', async () => {
-    // The whole point of the graded claim: our index may well hold this file, but the
-    // author already said what the link is, and it is not a reference link.
     const plugin = await load();
     const claim = plugin.api.linker.claim('file:///x/Player.cs', 'sym:Player');
     assert.strictEqual(claim, null);
   });
 
   it('builds the editor menu without throwing', async () => {
-    // The handler itself, not just the registration. Everything the reader sees in the
-    // right-click menu is built in here, and nothing else in the suite runs a line of it —
-    // which is how a call to a deleted helper survived a green test run once already.
+    // The handler itself, not just the registration — nothing else in the suite runs it.
     const plugin = await load();
     const handler = fakeApp.handlers.get('editor-menu');
     assert.ok(handler, 'no editor-menu handler was registered');
