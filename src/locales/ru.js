@@ -19,6 +19,12 @@ module.exports = {
 
   // Editor context menu
   'menu.convert': 'Найти и превратить в ссылку',
+  'menu.convert.solo': 'Найти и превратить в ссылку на документ',
+  'menu.convert.group': 'Найти и превратить в ссылку',
+  'menu.convert.item': 'Документ',
+  'menu.open.solo': 'Найти и открыть документ',
+  'menu.open.group': 'Найти и открыть',
+  'menu.open.item': 'Документ',
   'menu.copyLink': 'Скопировать ссылку на документ',
   'menu.fixLink': 'Актуализировать эту ссылку',
   'menu.pin': 'Закрепить за разделом «{sec}»',
@@ -134,4 +140,9 @@ module.exports = {
 
   // Plural noun phrases
   'plural.entry': { one: '{n} запись', few: '{n} записи', many: '{n} записей', other: '{n} записей' },
+  'set.precedence.name': 'Приоритет среди плагинов-линкеров',
+  'set.precedence.desc': 'Когда два линкера претендуют на одно слово или одну ссылку, выигрывает тот, кто выше в списке, остальные уступают. Отсюда можно двигать только этот плагин — остальные из их собственных настроек.',
+  'set.precedence.other': 'Переместить из настроек того плагина',
+  'set.precedence.up': 'Выше',
+  'set.precedence.down': 'Ниже',
 };

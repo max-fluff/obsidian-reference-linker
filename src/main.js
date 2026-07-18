@@ -18,6 +18,9 @@ const { PRESETS, DEFAULT_SETTINGS, parseExtensions, parseSkip, underSkip } = req
 const { splitLines, inTableCell, inCode, inLink, linkRegex, splitTarget, withTitle } = require('./shared/markdown');
 const { parseBinding, formatBinding, bindStateFrom, bindingOwner, ownsBinding } = require('./shared/binding');
 const { fillRoot: fillRootToken, ownsRootToken } = require('./shared/root-token');
+const { sharedSection } = require('./shared/menu');
+const { peersOffering } = require('./shared/discover');
+const { ownsLink } = require('./shared/link-owner');
 const { ReferenceSuggest } = require('./suggest');
 const filter = require('./filter');
 const { HoverPreview } = require('./hover');
@@ -84,7 +87,6 @@ class ReferenceLinkerPlugin extends Plugin {
     this._indexListeners = new Set(); // API onChange subscribers; needed before the first rebuild
     this.migrateSettings();
     await this.loadCache();
-    this.api = this.buildApi(); // app.plugins.plugins['reference-linker'].api
     this.hover = new HoverPreview(this);
 
     this.registerEditorSuggest(new ReferenceSuggest(this.app, this));
@@ -149,16 +151,23 @@ class ReferenceLinkerPlugin extends Plugin {
         if (!this.settings.contextMenu) return;
         // Convert writes a link, so it's offered only where that's safe (not in a link,
         // code, or frontmatter); open is read-only, so it's offered anywhere but a link.
+        //
+        // Both sigil linkers offer these two verbs on any word, so with the sibling installed
+        // the menu used to carry two near-identical lines per verb. Now the verb is the entry
+        // and each plugin names its own destination inside it — one "Find and open" with
+        // "Code" and "Document" under it, rather than two entries the reader has to tell
+        // apart. Alone, nothing is nested and the wording says which kind of link it makes.
         if (this.selectionTarget(editor, true)) {
-          menu.addItem((item) => item.setTitle(t('menu.convert')).setIcon('link').onClick(() => this.convertSelection(editor)));
+          this.selectionItem(menu, 'convert', 'link', () => this.convertSelection(editor));
         }
         if (this.selectionTarget(editor, false)) {
-          menu.addItem((item) => item.setTitle(t('cmd.openSelection')).setIcon('file-search').onClick(() => this.openSelection(editor)));
+          this.selectionItem(menu, 'open', 'file-search', () => this.openSelection(editor));
         }
         // Right-clicking one of our reference links: copy its target; fix a drifted pinned
-        // section; pin an unpinned link or unpin a pinned one.
+        // section; pin an unpinned link or unpin a pinned one. Ownership is checked so a link
+        // the code linker recognises too gets one set of actions, not two.
         const link = this.linkAtCursor(editor);
-        if (link && this.isReferenceLink(link.name, link.target, link.title)) {
+        if (link && this.ownsLinkAtCursor(link)) {
           menu.addItem((item) => item.setTitle(t('menu.copyLink')).setIcon('copy').onClick(() => this.copyLinkAtCursor(link)));
           if (this.isLinkStale(withTitle(link.target, link.title))) {
             menu.addItem((item) => item.setTitle(t('menu.fixLink')).setIcon('wrench').onClick(() => this.fixLinkAtCursor(editor, link)));
@@ -177,6 +186,12 @@ class ReferenceLinkerPlugin extends Plugin {
     // The disk cache (loaded above) gives an instant index on startup; this
     // background rebuild validates it against the filesystem and refreshes.
     this.app.workspace.onLayoutReady(() => this.rebuildIndex(false));
+
+    // Published last, and deliberately so. app.plugins.plugins['reference-linker'].api is how
+    // the code linker finds us and decides a link we both recognise is ours — so a load that
+    // throws before this point leaves no provider behind, and the sibling keeps offering its
+    // own actions instead of standing down for a plugin that never came up.
+    this.api = this.buildApi();
   }
 
   onunload() {
@@ -892,6 +907,30 @@ class ReferenceLinkerPlugin extends Plugin {
     if (!parseBinding(link.title)) return;
     editor.replaceRange('[' + link.name + '](' + link.target + ')', { line: link.line, ch: link.from }, { line: link.line, ch: link.to });
     new Notice(t('notice.unpinned'));
+  }
+
+  // One of the two selection verbs, nested under the verb itself when the code linker will
+  // offer the same one. Whether to nest has to be settled before anything is written: an item
+  // already in Obsidian's menu can't be pulled back out and reparented, so we ask the sibling
+  // first rather than discovering the clash afterwards.
+  selectionItem(menu, kind, icon, run) {
+    const provider = this.api && this.api.linker;
+    const shared = !!provider && peersOffering(this.app, provider, kind).length > 0;
+    const where = shared ? sharedSection(menu, 'linker:' + kind, t('menu.' + kind + '.group'), icon) : menu;
+    where.addItem((item) => item
+      .setTitle(t(shared ? 'menu.' + kind + '.item' : 'menu.' + kind + '.solo'))
+      .setIcon(icon)
+      .onClick(run));
+  }
+
+  // Whether the link under the cursor is ours to act on. Recognising it isn't enough: the
+  // code linker recognises a file both indexes cover just as readily, and two Copy and two
+  // Unpin items on one link tell the reader nothing about which is which.
+  ownsLinkAtCursor(link) {
+    if (!this.isReferenceLink(link.name, link.target, link.title)) return false;
+    const provider = this.api && this.api.linker;
+    if (!provider) return true;
+    return ownsLink(this.app, provider, link.target, link.title);
   }
 
   // One of ours — a link into an indexed document — so the copy/pin/fix items show only on

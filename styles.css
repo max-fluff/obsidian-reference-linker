@@ -269,4 +269,23 @@ settings:
   margin-top: 16px;
 }
 
+/* Priority order among the installed linker plugins. Our own row is the movable one, so
+   it is the one that reads as active; the others are context. */
+.reference-precedence-list {
+  margin: 0 0 18px 1.5em;
+}
+.reference-precedence-list .setting-item {
+  border-top: none;
+  /* Padding matches the folder-list rows, so this nested list lines up with the other
+     one in the same pane: text off the left edge, arrows level with the remove buttons. */
+  padding: 4px 6px 4px 0.75em;
+}
+.reference-precedence-list .setting-item-name {
+  color: var(--text-muted);
+}
+.reference-precedence-self .setting-item-name {
+  color: var(--text-normal);
+  font-weight: var(--font-semibold);
+}
+
 /* Reference Linker 1.0.0 */

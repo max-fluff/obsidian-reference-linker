@@ -5,6 +5,7 @@ const { PRESETS } = require('./constants');
 const { FolderSuggest, folderSuggestAvailable } = require('./folder-suggest');
 const { renderFolderList } = require('./shared/folder-list');
 const { t, plural } = require('./shared/i18n');
+const { renderPrecedence: precedenceSetting } = require('./shared/precedence');
 
 // Path tidy for the folder-list rows: backslashes to slashes, no trailing slash.
 const normFolder = (p) => p.replace(/\\/g, '/').replace(/\/+$/, '').trim();
@@ -175,6 +176,22 @@ class ReferenceLinkerSettingTab extends PluginSettingTab {
       .addToggle((c) => c.setValue(s.markStaleLinks).onChange(async (v) => { s.markStaleLinks = v; await save(false); }));
 
     new Setting(containerEl).setName(t('set.heading.maintenance')).setHeading();
+
+    // First thing in Maintenance, in the same place in all four plugins: it is a
+    // vault-wide arrangement between plugins rather than a knob for this one, and it
+    // renders nothing at all unless another linker is installed.
+    precedenceSetting(containerEl, {
+      app: this.app,
+      provider: this.plugin.api && this.plugin.api.linker,
+      Setting,
+      cls: 'reference',
+      name: t('set.precedence.name'),
+      desc: t('set.precedence.desc'),
+      otherDesc: t('set.precedence.other'),
+      upTooltip: t('set.precedence.up'),
+      downTooltip: t('set.precedence.down'),
+      save: async (value) => { s.linkPrecedence = value; await save(false); },
+    });
 
     new Setting(containerEl)
       .setName(t('set.rebuild.name'))

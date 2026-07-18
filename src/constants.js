@@ -24,6 +24,10 @@ const DEFAULT_SETTINGS = {
   minChars: 1,
   maxResults: 12,
   contextMenu: true, // the "Convert"/"Find and open" items in the editor right-click menu
+  // Breaks a tie when a link lands in both our index and the code linker's and carries no
+  // binding to say whose it is. A binding always decides on its own, so this only ever
+  // settles the genuinely ambiguous case.
+  linkPrecedence: 10,
 };
 
 // Parse the extensions field into a Set of normalized ".ext" (lowercase). Accepts

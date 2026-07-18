@@ -19,6 +19,16 @@ module.exports = {
 
   // Editor context menu
   'menu.convert': 'Find and convert to link',
+  // Selection actions. `.solo` is the flat wording used when no sibling linker offers the
+  // same verb; `.group` labels the shared submenu when one does, and `.item` names our
+  // destination inside it. The `.group` wording must match the sibling's word for word —
+  // whichever plugin is called first creates the group and its label is the one shown.
+  'menu.convert.solo': 'Find and convert to reference link',
+  'menu.convert.group': 'Find and convert to link',
+  'menu.convert.item': 'Document',
+  'menu.open.solo': 'Find and open document',
+  'menu.open.group': 'Find and open',
+  'menu.open.item': 'Document',
   'menu.copyLink': 'Copy reference link',
   'menu.fixLink': 'Update this reference link',
   'menu.pin': 'Pin to section “{sec}”',
@@ -134,4 +144,9 @@ module.exports = {
 
   // Plural noun phrases
   'plural.entry': { one: '{n} entry', other: '{n} entries' },
+  'set.precedence.name': 'Priority among linker plugins',
+  'set.precedence.desc': 'When two linkers claim the same word or the same link, the one higher in this list wins and the other steps aside. Only this plugin’s own position can be moved from here — move the others from their own settings.',
+  'set.precedence.other': 'Move from that plugin’s own settings',
+  'set.precedence.up': 'Move up',
+  'set.precedence.down': 'Move down',
 };
