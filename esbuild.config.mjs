@@ -7,5 +7,7 @@ await buildPlugin({
   name: 'Reference Linker',
   platform: 'node',
   external: ['obsidian', 'electron', 'fs', 'path', '@codemirror/view', '@codemirror/state', '@codemirror/language'],
+  kind: 'sigil',
+  prefix: 'reference-linker',
   deployTargets,
 });

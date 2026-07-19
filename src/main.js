@@ -29,8 +29,9 @@ const actualize = require('./actualize');
 const { ReferenceLinkModal, PresetPickerModal } = require('./modal');
 const { ReferenceLinkerSettingTab } = require('./settings-tab');
 const { readOutline } = require('./pdf');
-const { initI18n, t, plural } = require('./shared/i18n');
+const { initI18n, withFamily, t, plural } = require('./shared/i18n');
 const api = require('./api');
+const indexEvents = require('./shared/index-events');
 
 // Open a URL through the OS. Obsidian's window.open corrupts a file:// #page= fragment
 // (it doubles it — "…pdf#page=3#page=3" — and the OS then can't find the file), so hand it
@@ -86,7 +87,7 @@ const previewEntry = (plugin, ref, title, url) => {
 
 class ReferenceLinkerPlugin extends Plugin {
   async onload() {
-    initI18n({ en: require('./locales/en'), ru: require('./locales/ru') });
+    initI18n(withFamily('sigil', { en: require('./locales/en'), ru: require('./locales/ru') }));
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
     this.setIndex([]);
     this.watchers = [];
@@ -998,7 +999,7 @@ class ReferenceLinkerPlugin extends Plugin {
   }
 }
 
-Object.assign(ReferenceLinkerPlugin.prototype, api);
+Object.assign(ReferenceLinkerPlugin.prototype, api, indexEvents);
 Object.assign(ReferenceLinkerPlugin.prototype, actualize.methods);
 
 module.exports = ReferenceLinkerPlugin;

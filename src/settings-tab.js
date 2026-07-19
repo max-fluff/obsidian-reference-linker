@@ -184,7 +184,7 @@ class ReferenceLinkerSettingTab extends PluginSettingTab {
       app: this.app,
       provider: this.plugin.api && this.plugin.api.linker,
       Setting,
-      cls: 'reference',
+      cls: 'reference-linker',
       name: t('set.precedence.name'),
       desc: t('set.precedence.desc'),
       otherDesc: t('set.precedence.other'),

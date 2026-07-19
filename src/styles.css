@@ -1,0 +1,86 @@
+/* @settings
+
+name: Reference Linker
+id: %p%
+settings:
+  -
+    id: %p%-stale-color
+    title: Stale-link underline colour
+    description: Reference links whose target document has moved or is missing. Default follows the theme's warning colour.
+    type: variable-themed-color
+    format: hex
+    opacity: false
+    default-light: '#c1810b'
+    default-dark: '#e0a526'
+  -
+    id: %p%-broken-color
+    title: Broken-link underline colour
+    description: Reference links whose target document is gone. Default follows the theme's error colour.
+    type: variable-themed-color
+    format: hex
+    opacity: false
+    default-light: '#c4302b'
+    default-dark: '#e35555'
+  -
+    id: %p%-mark-underline-style
+    title: Stale / broken underline style
+    type: variable-select
+    default: dotted
+    options:
+      - dotted
+      - dashed
+      - solid
+      - double
+
+*/
+
+/* Chrome shared by the hover popover and the inline embed: a header above a body that holds
+   the rendered PDF page (canvas) or image. The popover is a fixed overlay; the embed flows
+   inline — otherwise the parts match. */
+.%p%-hover,
+.%p%-embed {
+  overflow: hidden;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+}
+
+.%p%-hover-header,
+.%p%-embed-header {
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.%p%-embed-header {
+  cursor: pointer;
+}
+
+.%p%-hover-body,
+.%p%-embed-body {
+  overflow: auto;
+  max-height: 60vh;
+}
+
+/* Rendered PDF page (canvas) or image inside the popover / embed. */
+.%p%-hover-body canvas,
+.%p%-hover-body img,
+.%p%-embed-body canvas,
+.%p%-embed-body img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+/* Update preview: each note is a checkable group, its link changes a compact table, and
+   the section that's gone is listed apart in the warning colour — so an update is something
+   you look over and confirm, not a blind sweep. */
+.%p%-preview-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}

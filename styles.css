@@ -1,3 +1,256 @@
+/* Reference Linker 1.0.0 — assembled from the shared styles and src/styles.css by "npm run build". Do not edit directly. */
+
+/* Styles every linker plugin uses. The token below stands for the plugin class prefix;
+   build.mjs substitutes it when it assembles styles.css. See CONTRIBUTING.md. */
+
+.reference-linker-preview-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-ui-small);
+}
+
+.reference-linker-preview-buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+.reference-linker-folder-row .setting-item-name {
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+  overflow-wrap: anywhere;
+}
+
+.reference-linker-folder-add {
+  display: flex;
+  gap: 8px;
+  margin: 6px 0 18px 1.5em;
+}
+
+.reference-linker-folder-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.reference-linker-folder-addbtn {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.reference-linker-folder-addbtn svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Priority order among the installed linker plugins. Our own row is the movable one, so
+   it is the one that reads as active; the others are context. */
+.reference-linker-precedence-list {
+  margin: 0 0 18px 1.5em;
+}
+
+.reference-linker-precedence-list .setting-item {
+  border-top: none;
+  /* Padding matches the folder-list rows, so this nested list lines up with the other one in the same pane: text off the left edge, arrows level with the remove buttons. */ padding: 4px 6px 4px 0.75em;
+}
+
+.reference-linker-precedence-list .setting-item-name {
+  color: var(--text-muted);
+}
+
+.reference-linker-precedence-self .setting-item-name {
+  color: var(--text-normal);
+  font-weight: var(--font-semibold);
+}
+
+/* Styles both sigil linkers use. The plugin class prefix is substituted by build.mjs. */
+
+.reference-linker-suggestion {
+  display: flex;
+  gap: 0.5em;
+  align-items: baseline;
+}
+
+.reference-linker-name {
+  font-weight: var(--font-semibold);
+}
+
+.reference-linker-kind {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.reference-linker-path {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+}
+
+.reference-linker-input {
+  width: 100%;
+}
+
+/* Muted helper / status line under a control or section — one class for every such
+   note in the pane. .is-error tints it for a missing folder or other problem. */
+.reference-linker-note {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  margin: 4px 0 14px;
+}
+
+.reference-linker-note.is-error {
+  color: var(--text-error);
+}
+
+/* User editor preset rows: name + template + remove on one line, wrapping to
+   two lines on a narrow pane so nothing collides. The full control area is used
+   (the empty name label is hidden) and the theme styles the row like any other. */
+.reference-linker-editor-row .setting-item-info {
+  display: none;
+}
+
+.reference-linker-editor-row .setting-item-control {
+  width: 100%;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 8px;
+}
+
+.reference-linker-editor-name {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+
+.reference-linker-editor-tpl {
+  flex: 3 1 240px;
+  min-width: 0;
+}
+
+.reference-linker-hover {
+  position: fixed;
+  z-index: var(--layer-popover);
+  max-width: min(720px, 90vw);
+  box-shadow: var(--shadow-s);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.reference-linker-hover.reference-linker-hidden {
+  display: none;
+}
+
+.reference-linker-embed {
+  margin: var(--p-spacing, 1em) 0;
+}
+
+.reference-linker-embed-error,
+.reference-linker-embed-note {
+  padding: 6px 10px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.reference-linker-embed-error {
+  color: var(--text-error);
+}
+
+/* Drifted line (stale) and renamed/removed symbol (broken), in both render modes.
+   A border-bottom rather than text-decoration: wavy/offset underlines render
+   inconsistently across platforms, so a plain border is the reliable choice. */
+.reference-linker-stale,
+.reference-linker-broken {
+  border-bottom-width: 1px;
+  border-bottom-style: var(--reference-linker-mark-underline-style, dotted);
+}
+
+.reference-linker-stale {
+  border-bottom-color: var(--reference-linker-stale-color, var(--text-warning));
+}
+
+.reference-linker-broken {
+  border-bottom-color: var(--reference-linker-broken-color, var(--text-error));
+}
+
+/* Nested sub-rows — searchable kinds under a language, and chosen folders under a
+   folder list — share one indent and compact height so the pane reads as one list
+   style. The kind rule is unqualified so it also indents the plain rebuild hint. */
+.reference-linker-kind-row,
+.reference-linker-folder-row {
+  margin-left: 1.5em;
+  padding-left: 0.75em;
+  border-left: 2px solid var(--background-modifier-border);
+}
+
+.reference-linker-kind-row.setting-item,
+.reference-linker-folder-row.setting-item {
+  border-top: 0;
+  padding: 4px 6px 4px 0.75em;
+}
+
+.reference-linker-kind-row .setting-item-name {
+  font-size: 0.9em;
+  opacity: 0.85;
+}
+
+/* Folder-set editor: a full-width input with autocomplete and an add button below
+   the chosen-folder rows. */
+.reference-linker-folder-rows:not(:empty) {
+  margin: 6px 0;
+}
+
+.reference-linker-preview-file {
+  font-weight: var(--font-semibold);
+  margin: 12px 0 4px;
+  overflow-wrap: anywhere;
+}
+
+.reference-linker-preview-table td {
+  border-bottom: 1px solid var(--background-modifier-border);
+  padding: 3px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.reference-linker-preview-pick {
+  width: 1%;
+  padding-right: 0;
+  vertical-align: middle;
+}
+
+.reference-linker-preview-move {
+  font-family: var(--font-monospace);
+  white-space: nowrap;
+  width: 1%;
+  color: var(--text-muted);
+}
+
+/* A guessed move (file matched by symbol or basename), not a plain line drift — tinted so
+   it stands out for a closer look before applying. */
+.reference-linker-preview-moved .reference-linker-preview-move {
+  color: var(--reference-linker-stale-color, var(--text-warning));
+  white-space: normal;
+}
+
+.reference-linker-preview-more,
+.reference-linker-preview-empty {
+  color: var(--text-muted);
+  padding: 8px 0;
+}
+
+.reference-linker-preview-attention {
+  color: var(--reference-linker-broken-color, var(--text-error));
+}
+
+.reference-linker-preview-broken {
+  font-size: var(--font-ui-small);
+  color: var(--reference-linker-broken-color, var(--text-error));
+  padding: 2px 8px;
+  overflow-wrap: anywhere;
+}
+
 /* @settings
 
 name: Reference Linker
@@ -34,60 +287,6 @@ settings:
 
 */
 
-.reference-linker-suggestion {
-  display: flex;
-  gap: 0.5em;
-  align-items: baseline;
-}
-.reference-linker-name {
-  font-weight: var(--font-semibold);
-}
-.reference-linker-kind {
-  color: var(--text-muted);
-  font-size: var(--font-ui-smaller);
-}
-.reference-linker-path {
-  margin-left: auto;
-  color: var(--text-faint);
-  font-size: var(--font-ui-smaller);
-}
-
-.reference-linker-input {
-  width: 100%;
-}
-
-/* Muted helper / status line under a control or section — one class for every such
-   note in the pane. .is-error tints it for a missing folder or other problem. */
-.reference-linker-note {
-  color: var(--text-muted);
-  font-size: var(--font-ui-small);
-  margin: 4px 0 14px;
-}
-.reference-linker-note.is-error {
-  color: var(--text-error);
-}
-
-/* User editor preset rows: name + template + remove on one line, wrapping to
-   two lines on a narrow pane so nothing collides. The full control area is used
-   (the empty name label is hidden) and the theme styles the row like any other. */
-.reference-linker-editor-row .setting-item-info {
-  display: none;
-}
-.reference-linker-editor-row .setting-item-control {
-  width: 100%;
-  flex-wrap: wrap;
-  justify-content: flex-start;
-  gap: 8px;
-}
-.reference-linker-editor-name {
-  flex: 1 1 140px;
-  min-width: 0;
-}
-.reference-linker-editor-tpl {
-  flex: 3 1 240px;
-  min-width: 0;
-}
-
 /* Chrome shared by the hover popover and the inline embed: a header above a body that holds
    the rendered PDF page (canvas) or image. The popover is a fixed overlay; the embed flows
    inline — otherwise the parts match. */
@@ -98,20 +297,7 @@ settings:
   border: 1px solid var(--background-modifier-border);
   border-radius: var(--radius-m);
 }
-.reference-linker-hover {
-  position: fixed;
-  z-index: var(--layer-popover);
-  max-width: min(720px, 90vw);
-  box-shadow: var(--shadow-s);
-  user-select: text;
-  -webkit-user-select: text;
-}
-.reference-linker-hover.reference-linker-hidden {
-  display: none;
-}
-.reference-linker-embed {
-  margin: var(--p-spacing, 1em) 0;
-}
+
 .reference-linker-hover-header,
 .reference-linker-embed-header {
   padding: 4px 10px;
@@ -122,12 +308,17 @@ settings:
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.reference-linker-embed-header { cursor: pointer; }
+
+.reference-linker-embed-header {
+  cursor: pointer;
+}
+
 .reference-linker-hover-body,
 .reference-linker-embed-body {
   overflow: auto;
   max-height: 60vh;
 }
+
 /* Rendered PDF page (canvas) or image inside the popover / embed. */
 .reference-linker-hover-body canvas,
 .reference-linker-hover-body img,
@@ -138,75 +329,6 @@ settings:
   height: auto;
 }
 
-.reference-linker-embed-error,
-.reference-linker-embed-note {
-  padding: 6px 10px;
-  color: var(--text-muted);
-  font-size: var(--font-ui-smaller);
-}
-.reference-linker-embed-error { color: var(--text-error); }
-
-/* Drifted line (stale) and renamed/removed symbol (broken), in both render modes.
-   A border-bottom rather than text-decoration: wavy/offset underlines render
-   inconsistently across platforms, so a plain border is the reliable choice. */
-.reference-linker-stale,
-.reference-linker-broken {
-  border-bottom-width: 1px;
-  border-bottom-style: var(--reference-linker-mark-underline-style, dotted);
-}
-.reference-linker-stale { border-bottom-color: var(--reference-linker-stale-color, var(--text-warning)); }
-.reference-linker-broken { border-bottom-color: var(--reference-linker-broken-color, var(--text-error)); }
-
-/* Nested sub-rows — searchable kinds under a language, and chosen folders under a
-   folder list — share one indent and compact height so the pane reads as one list
-   style. The kind rule is unqualified so it also indents the plain rebuild hint. */
-.reference-linker-kind-row,
-.reference-linker-folder-row {
-  margin-left: 1.5em;
-  padding-left: 0.75em;
-  border-left: 2px solid var(--background-modifier-border);
-}
-.reference-linker-kind-row.setting-item,
-.reference-linker-folder-row.setting-item {
-  border-top: 0;
-  padding: 4px 6px 4px 0.75em;
-}
-.reference-linker-kind-row .setting-item-name {
-  font-size: 0.9em;
-  opacity: 0.85;
-}
-
-/* Folder-set editor: a full-width input with autocomplete and an add button below
-   the chosen-folder rows. */
-.reference-linker-folder-rows:not(:empty) {
-  margin: 6px 0;
-}
-.reference-linker-folder-row .setting-item-name {
-  font-family: var(--font-monospace);
-  font-size: var(--font-ui-smaller);
-  overflow-wrap: anywhere;
-}
-.reference-linker-folder-add {
-  display: flex;
-  gap: 8px;
-  margin: 6px 0 18px 1.5em;
-}
-.reference-linker-folder-input {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-.reference-linker-folder-addbtn {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-}
-.reference-linker-folder-addbtn svg {
-  width: 16px;
-  height: 16px;
-}
-
 /* Update preview: each note is a checkable group, its link changes a compact table, and
    the section that's gone is listed apart in the warning colour — so an update is something
    you look over and confirm, not a blind sweep. */
@@ -214,78 +336,6 @@ settings:
   display: flex;
   align-items: center;
   gap: 6px;
-}
-.reference-linker-preview-file {
-  font-weight: var(--font-semibold);
-  margin: 12px 0 4px;
-  overflow-wrap: anywhere;
-}
-.reference-linker-preview-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: var(--font-ui-small);
-}
-.reference-linker-preview-table td {
-  border-bottom: 1px solid var(--background-modifier-border);
-  padding: 3px 8px;
-  text-align: left;
-  vertical-align: top;
-}
-.reference-linker-preview-pick {
-  width: 1%;
-  padding-right: 0;
-  vertical-align: middle;
-}
-.reference-linker-preview-move {
-  font-family: var(--font-monospace);
-  white-space: nowrap;
-  width: 1%;
-  color: var(--text-muted);
-}
-/* A guessed move (file matched by symbol or basename), not a plain line drift — tinted so
-   it stands out for a closer look before applying. */
-.reference-linker-preview-moved .reference-linker-preview-move {
-  color: var(--reference-linker-stale-color, var(--text-warning));
-  white-space: normal;
-}
-.reference-linker-preview-more,
-.reference-linker-preview-empty {
-  color: var(--text-muted);
-  padding: 8px 0;
-}
-.reference-linker-preview-attention {
-  color: var(--reference-linker-broken-color, var(--text-error));
-}
-.reference-linker-preview-broken {
-  font-size: var(--font-ui-small);
-  color: var(--reference-linker-broken-color, var(--text-error));
-  padding: 2px 8px;
-  overflow-wrap: anywhere;
-}
-.reference-linker-preview-buttons {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-  margin-top: 16px;
-}
-
-/* Priority order among the installed linker plugins. Our own row is the movable one, so
-   it is the one that reads as active; the others are context. */
-.reference-precedence-list {
-  margin: 0 0 18px 1.5em;
-}
-.reference-precedence-list .setting-item {
-  border-top: none;
-  /* Padding matches the folder-list rows, so this nested list lines up with the other
-     one in the same pane: text off the left edge, arrows level with the remove buttons. */
-  padding: 4px 6px 4px 0.75em;
-}
-.reference-precedence-list .setting-item-name {
-  color: var(--text-muted);
-}
-.reference-precedence-self .setting-item-name {
-  color: var(--text-normal);
-  font-weight: var(--font-semibold);
 }
 
 /* Reference Linker 1.0.0 */

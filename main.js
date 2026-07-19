@@ -602,83 +602,101 @@ var require_link_owner = __commonJS({
   }
 });
 
-// src/suggest.js
+// src/shared/deeplink/suggest.js
 var require_suggest = __commonJS({
-  "src/suggest.js"(exports2, module2) {
+  "src/shared/deeplink/suggest.js"(exports2, module2) {
     "use strict";
     var { EditorSuggest, prepareFuzzySearch } = require("obsidian");
     var { isProtected, inTableCell: inTableCell2 } = require_markdown();
-    var ReferenceSuggest2 = class extends EditorSuggest {
-      constructor(app, plugin) {
-        super(app);
-        this.plugin = plugin;
-      }
-      onTrigger(cursor, editor) {
-        const s = this.plugin.settings;
-        const before = editor.getLine(cursor.line).slice(0, cursor.ch);
-        const i = before.lastIndexOf(s.trigger);
-        if (i === -1)
-          return null;
-        const query = before.slice(i + s.trigger.length);
-        if (!/^[\w.:]*$/.test(query))
-          return null;
-        if (query.length < Math.max(0, s.minChars))
-          return null;
-        const off = editor.posToOffset(cursor);
-        if (isProtected(editor.getValue(), off))
-          return null;
-        return { start: { line: cursor.line, ch: i }, end: cursor, query };
-      }
-      getSuggestions(ctx) {
-        const idx = this.plugin.index;
-        if (!idx || !idx.length)
-          return [];
-        const max = this.plugin.settings.maxResults;
-        const f = this.plugin.parseQuery(ctx.query);
-        const pass = (e) => this.plugin.entryPassesFilter(e, f);
-        if (!f.name) {
-          const out = [];
+    function createSigilSuggest(config) {
+      const { cls, kindText } = config;
+      const prepare = config.prepare || (() => () => true);
+      return class SigilSuggest extends EditorSuggest {
+        constructor(app, plugin) {
+          super(app);
+          this.plugin = plugin;
+        }
+        onTrigger(cursor, editor) {
+          const s = this.plugin.settings;
+          const before = editor.getLine(cursor.line).slice(0, cursor.ch);
+          const i = before.lastIndexOf(s.trigger);
+          if (i === -1)
+            return null;
+          const query = before.slice(i + s.trigger.length);
+          if (!/^[\w.:]*$/.test(query))
+            return null;
+          if (query.length < Math.max(0, s.minChars))
+            return null;
+          const off = editor.posToOffset(cursor);
+          if (isProtected(editor.getValue(), off))
+            return null;
+          return { start: { line: cursor.line, ch: i }, end: cursor, query };
+        }
+        getSuggestions(ctx) {
+          const idx = this.plugin.index;
+          if (!idx || !idx.length)
+            return [];
+          const max = this.plugin.settings.maxResults;
+          const f = this.plugin.parseQuery(ctx.query);
+          const allowed = prepare(this.plugin);
+          const pass = (e) => allowed(e) && this.plugin.entryPassesFilter(e, f);
+          if (!f.name) {
+            const out = [];
+            for (const e of idx) {
+              if (!pass(e))
+                continue;
+              out.push(e);
+              if (out.length >= max)
+                break;
+            }
+            return out;
+          }
+          const match = prepareFuzzySearch(f.name);
+          const scored = [];
           for (const e of idx) {
             if (!pass(e))
               continue;
-            out.push(e);
-            if (out.length >= max)
-              break;
+            const r = match(e.name);
+            if (r)
+              scored.push({ e, score: r.score });
           }
-          return out;
+          scored.sort((a, b) => b.score - a.score || a.e.name.localeCompare(b.e.name));
+          return scored.slice(0, max).map((s) => s.e);
         }
-        const match = prepareFuzzySearch(f.name);
-        const scored = [];
-        for (const e of idx) {
-          if (!pass(e))
-            continue;
-          const r = match(e.name);
-          if (r)
-            scored.push({ e, score: r.score });
+        renderSuggestion(e, el) {
+          el.addClass(`${cls}-suggestion`);
+          el.createSpan({ cls: `${cls}-name`, text: e.name });
+          el.createSpan({ cls: `${cls}-kind`, text: kindText(e) });
+          el.createSpan({ cls: `${cls}-path`, text: e.path });
         }
-        scored.sort((a, b) => b.score - a.score || a.e.name.localeCompare(b.e.name));
-        return scored.slice(0, max).map((s) => s.e);
-      }
-      renderSuggestion(e, el) {
-        el.addClass("reference-linker-suggestion");
-        el.createSpan({ cls: "reference-linker-name", text: e.name });
-        el.createSpan({ cls: "reference-linker-kind", text: e.kind === "section" ? "p." + e.page : e.lang });
-        el.createSpan({ cls: "reference-linker-path", text: e.path });
-      }
-      selectSuggestion(e) {
-        const ctx = this.context;
-        if (!ctx)
-          return;
-        const inTable = inTableCell2(ctx.editor.getValue(), ctx.editor.posToOffset(ctx.start));
-        const insert = (template) => {
-          const link = this.plugin.buildLink(e, inTable, template);
-          ctx.editor.replaceRange(link, ctx.start, ctx.end);
-          const pos = ctx.editor.posToOffset(ctx.start) + link.length;
-          ctx.editor.setCursor(ctx.editor.offsetToPos(pos));
-        };
-        this.plugin.withFormat(this.plugin.settings.askOnInsert, insert);
-      }
-    };
+        selectSuggestion(e) {
+          const ctx = this.context;
+          if (!ctx)
+            return;
+          const inTable = inTableCell2(ctx.editor.getValue(), ctx.editor.posToOffset(ctx.start));
+          const insert = (template) => {
+            const link = this.plugin.buildLink(e, inTable, template);
+            ctx.editor.replaceRange(link, ctx.start, ctx.end);
+            const pos = ctx.editor.posToOffset(ctx.start) + link.length;
+            ctx.editor.setCursor(ctx.editor.offsetToPos(pos));
+          };
+          this.plugin.withFormat(this.plugin.settings.askOnInsert, insert);
+        }
+      };
+    }
+    module2.exports = { createSigilSuggest };
+  }
+});
+
+// src/suggest.js
+var require_suggest2 = __commonJS({
+  "src/suggest.js"(exports2, module2) {
+    "use strict";
+    var { createSigilSuggest } = require_suggest();
+    var ReferenceSuggest2 = createSigilSuggest({
+      cls: "reference-linker",
+      kindText: (e) => e.kind === "section" ? "p." + e.page : e.lang
+    });
     module2.exports = { ReferenceSuggest: ReferenceSuggest2 };
   }
 });
@@ -1049,6 +1067,328 @@ var require_hover = __commonJS({
   }
 });
 
+// src/shared/locales/common.js
+var require_common = __commonJS({
+  "src/shared/locales/common.js"(exports2, module2) {
+    "use strict";
+    var en = {
+      "modal.andMore": "\u2026and {n} more",
+      "btn.apply": "Apply",
+      "btn.cancel": "Cancel",
+      "set.heading.maintenance": "Maintenance",
+      "set.rebuild.button": "Rebuild",
+      "set.precedence.name": "Priority among linker plugins",
+      "set.precedence.desc": "A word or link several linkers claim goes to the one highest in this list. You can only move this plugin \u2014 move the others from their own settings.",
+      "set.precedence.other": "Moved from its own settings",
+      "set.precedence.up": "Move up",
+      "set.precedence.down": "Move down"
+    };
+    var ru = {
+      "modal.andMore": "\u2026\u0438 \u0435\u0449\u0451 {n}",
+      "btn.apply": "\u041F\u0440\u0438\u043C\u0435\u043D\u0438\u0442\u044C",
+      "btn.cancel": "\u041E\u0442\u043C\u0435\u043D\u0430",
+      "set.heading.maintenance": "\u041E\u0431\u0441\u043B\u0443\u0436\u0438\u0432\u0430\u043D\u0438\u0435",
+      "set.rebuild.button": "\u041F\u0435\u0440\u0435\u0441\u0442\u0440\u043E\u0438\u0442\u044C",
+      "set.precedence.name": "\u041F\u0440\u0438\u043E\u0440\u0438\u0442\u0435\u0442 \u0441\u0440\u0435\u0434\u0438 \u043F\u043B\u0430\u0433\u0438\u043D\u043E\u0432-\u043B\u0438\u043D\u043A\u0435\u0440\u043E\u0432",
+      "set.precedence.desc": "\u0421\u043B\u043E\u0432\u043E \u0438\u043B\u0438 \u0441\u0441\u044B\u043B\u043A\u0443, \u043D\u0430 \u043A\u043E\u0442\u043E\u0440\u044B\u0435 \u043F\u0440\u0435\u0442\u0435\u043D\u0434\u0443\u044E\u0442 \u043D\u0435\u0441\u043A\u043E\u043B\u044C\u043A\u043E \u043B\u0438\u043D\u043A\u0435\u0440\u043E\u0432, \u0437\u0430\u0431\u0438\u0440\u0430\u0435\u0442 \u0442\u043E\u0442, \u043A\u0442\u043E \u0432\u044B\u0448\u0435 \u0432 \u0441\u043F\u0438\u0441\u043A\u0435. \u041E\u0442\u0441\u044E\u0434\u0430 \u0434\u0432\u0438\u0433\u0430\u0435\u0442\u0441\u044F \u0442\u043E\u043B\u044C\u043A\u043E \u044D\u0442\u043E\u0442 \u043F\u043B\u0430\u0433\u0438\u043D \u2014 \u043E\u0441\u0442\u0430\u043B\u044C\u043D\u044B\u0435 \u0438\u0437 \u0441\u0432\u043E\u0438\u0445 \u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043A.",
+      "set.precedence.other": "\u0414\u0432\u0438\u0433\u0430\u0435\u0442\u0441\u044F \u0438\u0437 \u0441\u0432\u043E\u0438\u0445 \u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043A",
+      "set.precedence.up": "\u0412\u044B\u0448\u0435",
+      "set.precedence.down": "\u041D\u0438\u0436\u0435"
+    };
+    var de = {
+      "modal.andMore": "\u2026und {n} weitere",
+      "btn.apply": "Anwenden",
+      "btn.cancel": "Abbrechen",
+      "set.heading.maintenance": "Wartung",
+      "set.rebuild.button": "Neu aufbauen"
+    };
+    var es = {
+      "modal.andMore": "\u2026y {n} m\xE1s",
+      "btn.apply": "Aplicar",
+      "btn.cancel": "Cancelar",
+      "set.heading.maintenance": "Mantenimiento",
+      "set.rebuild.button": "Reconstruir"
+    };
+    var fr = {
+      "modal.andMore": "\u2026et {n} de plus",
+      "btn.apply": "Appliquer",
+      "btn.cancel": "Annuler",
+      "set.heading.maintenance": "Maintenance",
+      "set.rebuild.button": "Reconstruire"
+    };
+    var uk = {
+      "modal.andMore": "\u2026\u0442\u0430 \u0449\u0435 {n}",
+      "btn.apply": "\u0417\u0430\u0441\u0442\u043E\u0441\u0443\u0432\u0430\u0442\u0438",
+      "btn.cancel": "\u0421\u043A\u0430\u0441\u0443\u0432\u0430\u0442\u0438",
+      "set.heading.maintenance": "\u041E\u0431\u0441\u043B\u0443\u0433\u043E\u0432\u0443\u0432\u0430\u043D\u043D\u044F",
+      "set.rebuild.button": "\u041F\u0435\u0440\u0435\u0431\u0443\u0434\u0443\u0432\u0430\u0442\u0438"
+    };
+    module2.exports = { en, ru, de, es, fr, uk };
+  }
+});
+
+// src/shared/locales/prose.js
+var require_prose = __commonJS({
+  "src/shared/locales/prose.js"(exports2, module2) {
+    "use strict";
+    var en = {
+      "noun.file": "file",
+      "noun.folder": "folder",
+      "scope.first": "first",
+      "scope.all": "all",
+      "menu.linkThisWord": "Link \u201C{display}\u201D",
+      "menu.linkHere": "Link \u201C{display}\u201D here",
+      "menu.linkDisplayTo": 'Link "{display}" to\u2026',
+      "menu.linkScopeTo": 'Link {scope} "{display}" to\u2026',
+      "menu.openThisWord": "Open \u201C{display}\u201D",
+      "modal.choose.title": "Which one?",
+      "set.heading.scope": "Scope",
+      "set.heading.matching": "Matching",
+      "set.languages.name": "Languages",
+      "set.languages.show": "Show languages",
+      "set.languages.hide": "Hide languages",
+      "set.lang.higher": "Higher priority",
+      "set.lang.lower": "Lower priority",
+      "set.linkFirstOnly.name": "Link first occurrence only",
+      "set.heading.highlighting": "Highlighting",
+      "set.highlightInReading.name": "Highlight in Reading view",
+      "set.editingHighlight.onSave": "On save",
+      "set.skipHeadings.name": "Skip headings",
+      "set.statusBar.name": "Status bar count",
+      "set.heading.autocomplete": "Autocomplete",
+      "set.linkSuggest.name": "Suggest links while typing",
+      "set.suggestMinChars.desc": "How many characters to type before suggestions appear.",
+      "set.suggestSkipAfter.name": "Skip after characters",
+      "set.heading.contextMenu": "Context menu"
+    };
+    var ru = {
+      "noun.file": "\u0444\u0430\u0439\u043B",
+      "noun.folder": "\u043F\u0430\u043F\u043A\u0443",
+      "scope.first": "\u043F\u0435\u0440\u0432\u043E\u0435",
+      "scope.all": "\u0432\u0441\u0435",
+      "menu.linkThisWord": "\u0421\u0432\u044F\u0437\u0430\u0442\u044C \xAB{display}\xBB",
+      "menu.linkHere": "\u0421\u0432\u044F\u0437\u0430\u0442\u044C \xAB{display}\xBB \u0437\u0434\u0435\u0441\u044C",
+      "menu.linkDisplayTo": "\u0421\u0432\u044F\u0437\u0430\u0442\u044C \xAB{display}\xBB \u0441\u2026",
+      "menu.linkScopeTo": "\u0421\u0432\u044F\u0437\u0430\u0442\u044C {scope} \xAB{display}\xBB \u0441\u2026",
+      "menu.openThisWord": "\u041E\u0442\u043A\u0440\u044B\u0442\u044C \xAB{display}\xBB",
+      "modal.choose.title": "\u041A\u0430\u043A\u043E\u0435 \u0438\u0437 \u0441\u043E\u0432\u043F\u0430\u0434\u0435\u043D\u0438\u0439?",
+      "set.heading.scope": "\u041E\u0431\u043B\u0430\u0441\u0442\u044C",
+      "set.heading.matching": "\u0421\u043E\u043F\u043E\u0441\u0442\u0430\u0432\u043B\u0435\u043D\u0438\u0435",
+      "set.languages.name": "\u042F\u0437\u044B\u043A\u0438",
+      "set.languages.show": "\u041F\u043E\u043A\u0430\u0437\u0430\u0442\u044C \u044F\u0437\u044B\u043A\u0438",
+      "set.languages.hide": "\u0421\u043A\u0440\u044B\u0442\u044C \u044F\u0437\u044B\u043A\u0438",
+      "set.lang.higher": "\u0412\u044B\u0448\u0435 \u043F\u0440\u0438\u043E\u0440\u0438\u0442\u0435\u0442",
+      "set.lang.lower": "\u041D\u0438\u0436\u0435 \u043F\u0440\u0438\u043E\u0440\u0438\u0442\u0435\u0442",
+      "set.linkFirstOnly.name": "\u0421\u0432\u044F\u0437\u044B\u0432\u0430\u0442\u044C \u0442\u043E\u043B\u044C\u043A\u043E \u043F\u0435\u0440\u0432\u043E\u0435 \u0432\u0445\u043E\u0436\u0434\u0435\u043D\u0438\u0435",
+      "set.heading.highlighting": "\u041F\u043E\u0434\u0441\u0432\u0435\u0442\u043A\u0430",
+      "set.highlightInReading.name": "\u041F\u043E\u0434\u0441\u0432\u0435\u0442\u043A\u0430 \u0432 \u0440\u0435\u0436\u0438\u043C\u0435 \u0447\u0442\u0435\u043D\u0438\u044F",
+      "set.editingHighlight.onSave": "\u041F\u0440\u0438 \u0441\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u0438\u0438",
+      "set.skipHeadings.name": "\u041F\u0440\u043E\u043F\u0443\u0441\u043A\u0430\u0442\u044C \u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043A\u0438",
+      "set.statusBar.name": "\u0421\u0447\u0451\u0442\u0447\u0438\u043A \u0432 \u0441\u0442\u0440\u043E\u043A\u0435 \u0441\u043E\u0441\u0442\u043E\u044F\u043D\u0438\u044F",
+      "set.heading.autocomplete": "\u0410\u0432\u0442\u043E\u0434\u043E\u043F\u043E\u043B\u043D\u0435\u043D\u0438\u0435",
+      "set.linkSuggest.name": "\u041F\u043E\u0434\u0441\u043A\u0430\u0437\u044B\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0438 \u043F\u0440\u0438 \u043D\u0430\u0431\u043E\u0440\u0435",
+      "set.suggestMinChars.desc": "\u0421\u043A\u043E\u043B\u044C\u043A\u043E \u0441\u0438\u043C\u0432\u043E\u043B\u043E\u0432 \u043D\u0430\u0431\u0440\u0430\u0442\u044C, \u043F\u0440\u0435\u0436\u0434\u0435 \u0447\u0435\u043C \u043F\u043E\u044F\u0432\u044F\u0442\u0441\u044F \u043F\u043E\u0434\u0441\u043A\u0430\u0437\u043A\u0438.",
+      "set.suggestSkipAfter.name": "\u041F\u0440\u043E\u043F\u0443\u0441\u043A\u0430\u0442\u044C \u043F\u043E\u0441\u043B\u0435 \u0441\u0438\u043C\u0432\u043E\u043B\u043E\u0432",
+      "set.heading.contextMenu": "\u041A\u043E\u043D\u0442\u0435\u043A\u0441\u0442\u043D\u043E\u0435 \u043C\u0435\u043D\u044E"
+    };
+    var de = {
+      "noun.file": "Datei",
+      "noun.folder": "Ordner",
+      "scope.first": "erstes",
+      "scope.all": "alle",
+      "menu.linkDisplayTo": "\u201E{display}\u201C verlinken mit\u2026",
+      "menu.linkScopeTo": "{scope} \u201E{display}\u201C verlinken mit\u2026",
+      "modal.choose.title": "Begriff w\xE4hlen",
+      "set.heading.scope": "Bereich",
+      "set.heading.matching": "Abgleich",
+      "set.languages.name": "Sprachen",
+      "set.languages.show": "Sprachen anzeigen",
+      "set.languages.hide": "Sprachen ausblenden",
+      "set.lang.higher": "H\xF6here Priorit\xE4t",
+      "set.lang.lower": "Niedrigere Priorit\xE4t",
+      "set.linkFirstOnly.name": "Nur erstes Vorkommen verlinken",
+      "set.heading.highlighting": "Hervorhebung",
+      "set.highlightInReading.name": "In der Leseansicht hervorheben",
+      "set.editingHighlight.onSave": "Beim Speichern",
+      "set.skipHeadings.name": "\xDCberschriften \xFCberspringen",
+      "set.statusBar.name": "Z\xE4hler in der Statusleiste",
+      "set.heading.autocomplete": "Autovervollst\xE4ndigung",
+      "set.linkSuggest.name": "Links w\xE4hrend der Eingabe vorschlagen",
+      "set.suggestMinChars.desc": "Wie viele Zeichen einzugeben sind, bevor Vorschl\xE4ge erscheinen.",
+      "set.suggestSkipAfter.name": "Nach Zeichen \xFCberspringen",
+      "set.heading.contextMenu": "Kontextmen\xFC"
+    };
+    var es = {
+      "noun.file": "archivo",
+      "noun.folder": "carpeta",
+      "scope.first": "la primera",
+      "scope.all": "todas",
+      "menu.linkDisplayTo": "Enlazar \xAB{display}\xBB con\u2026",
+      "menu.linkScopeTo": "Enlazar {scope} \xAB{display}\xBB con\u2026",
+      "modal.choose.title": "Elegir un t\xE9rmino",
+      "set.heading.scope": "\xC1mbito",
+      "set.heading.matching": "Coincidencia",
+      "set.languages.name": "Idiomas",
+      "set.languages.show": "Mostrar idiomas",
+      "set.languages.hide": "Ocultar idiomas",
+      "set.lang.higher": "Mayor prioridad",
+      "set.lang.lower": "Menor prioridad",
+      "set.linkFirstOnly.name": "Enlazar solo la primera aparici\xF3n",
+      "set.heading.highlighting": "Resaltado",
+      "set.highlightInReading.name": "Resaltar en vista de lectura",
+      "set.editingHighlight.onSave": "Al guardar",
+      "set.skipHeadings.name": "Omitir encabezados",
+      "set.statusBar.name": "Contador en la barra de estado",
+      "set.heading.autocomplete": "Autocompletado",
+      "set.linkSuggest.name": "Sugerir enlaces al escribir",
+      "set.suggestMinChars.desc": "Cu\xE1ntos caracteres escribir antes de que aparezcan las sugerencias.",
+      "set.suggestSkipAfter.name": "Omitir tras caracteres",
+      "set.heading.contextMenu": "Men\xFA contextual"
+    };
+    var fr = {
+      "noun.file": "fichier",
+      "noun.folder": "dossier",
+      "scope.first": "la premi\xE8re",
+      "scope.all": "toutes",
+      "menu.linkDisplayTo": "Lier \xAB {display} \xBB \xE0\u2026",
+      "menu.linkScopeTo": "Lier {scope} \xAB {display} \xBB \xE0\u2026",
+      "modal.choose.title": "Choisir un terme",
+      "set.heading.scope": "Port\xE9e",
+      "set.heading.matching": "Correspondance",
+      "set.languages.name": "Langues",
+      "set.languages.show": "Afficher les langues",
+      "set.languages.hide": "Masquer les langues",
+      "set.lang.higher": "Priorit\xE9 plus haute",
+      "set.lang.lower": "Priorit\xE9 plus basse",
+      "set.linkFirstOnly.name": "Lier seulement la premi\xE8re occurrence",
+      "set.heading.highlighting": "Surlignage",
+      "set.highlightInReading.name": "Surligner en mode lecture",
+      "set.editingHighlight.onSave": "\xC0 l\u2019enregistrement",
+      "set.skipHeadings.name": "Ignorer les titres",
+      "set.statusBar.name": "Compteur dans la barre d\u2019\xE9tat",
+      "set.heading.autocomplete": "Autocompl\xE9tion",
+      "set.linkSuggest.name": "Sugg\xE9rer des liens pendant la saisie",
+      "set.suggestMinChars.desc": "Combien de caract\xE8res saisir avant que les suggestions apparaissent.",
+      "set.suggestSkipAfter.name": "Ignorer apr\xE8s caract\xE8res",
+      "set.heading.contextMenu": "Menu contextuel"
+    };
+    var uk = {
+      "noun.file": "\u0444\u0430\u0439\u043B",
+      "noun.folder": "\u0442\u0435\u043A\u0443",
+      "scope.first": "\u043F\u0435\u0440\u0448\u0435",
+      "scope.all": "\u0443\u0441\u0456",
+      "menu.linkDisplayTo": "\u0417\u0432\u2019\u044F\u0437\u0430\u0442\u0438 \xAB{display}\xBB \u0437\u2026",
+      "menu.linkScopeTo": "\u0417\u0432\u2019\u044F\u0437\u0430\u0442\u0438 {scope} \xAB{display}\xBB \u0437\u2026",
+      "modal.choose.title": "\u0412\u0438\u0431\u0435\u0440\u0456\u0442\u044C \u0442\u0435\u0440\u043C\u0456\u043D",
+      "set.heading.scope": "\u041E\u0431\u043B\u0430\u0441\u0442\u044C",
+      "set.heading.matching": "\u0417\u0456\u0441\u0442\u0430\u0432\u043B\u0435\u043D\u043D\u044F",
+      "set.languages.name": "\u041C\u043E\u0432\u0438",
+      "set.languages.show": "\u041F\u043E\u043A\u0430\u0437\u0430\u0442\u0438 \u043C\u043E\u0432\u0438",
+      "set.languages.hide": "\u0421\u0445\u043E\u0432\u0430\u0442\u0438 \u043C\u043E\u0432\u0438",
+      "set.lang.higher": "\u0412\u0438\u0449\u0438\u0439 \u043F\u0440\u0456\u043E\u0440\u0438\u0442\u0435\u0442",
+      "set.lang.lower": "\u041D\u0438\u0436\u0447\u0438\u0439 \u043F\u0440\u0456\u043E\u0440\u0438\u0442\u0435\u0442",
+      "set.linkFirstOnly.name": "\u0417\u0432\u2019\u044F\u0437\u0443\u0432\u0430\u0442\u0438 \u043B\u0438\u0448\u0435 \u043F\u0435\u0440\u0448\u0435 \u0432\u0445\u043E\u0434\u0436\u0435\u043D\u043D\u044F",
+      "set.heading.highlighting": "\u041F\u0456\u0434\u0441\u0432\u0456\u0447\u0443\u0432\u0430\u043D\u043D\u044F",
+      "set.highlightInReading.name": "\u041F\u0456\u0434\u0441\u0432\u0456\u0447\u0443\u0432\u0430\u0442\u0438 \u0432 \u0440\u0435\u0436\u0438\u043C\u0456 \u0447\u0438\u0442\u0430\u043D\u043D\u044F",
+      "set.editingHighlight.onSave": "\u041F\u0456\u0434 \u0447\u0430\u0441 \u0437\u0431\u0435\u0440\u0435\u0436\u0435\u043D\u043D\u044F",
+      "set.skipHeadings.name": "\u041F\u0440\u043E\u043F\u0443\u0441\u043A\u0430\u0442\u0438 \u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043A\u0438",
+      "set.statusBar.name": "\u041B\u0456\u0447\u0438\u043B\u044C\u043D\u0438\u043A \u0443 \u0440\u044F\u0434\u043A\u0443 \u0441\u0442\u0430\u043D\u0443",
+      "set.heading.autocomplete": "\u0410\u0432\u0442\u043E\u0434\u043E\u043F\u043E\u0432\u043D\u0435\u043D\u043D\u044F",
+      "set.linkSuggest.name": "\u041F\u0440\u043E\u043F\u043E\u043D\u0443\u0432\u0430\u0442\u0438 \u043F\u043E\u0441\u0438\u043B\u0430\u043D\u043D\u044F \u043F\u0456\u0434 \u0447\u0430\u0441 \u043D\u0430\u0431\u043E\u0440\u0443",
+      "set.suggestMinChars.desc": "\u0421\u043A\u0456\u043B\u044C\u043A\u0438 \u0441\u0438\u043C\u0432\u043E\u043B\u0456\u0432 \u043D\u0430\u0431\u0440\u0430\u0442\u0438, \u043F\u0435\u0440\u0448 \u043D\u0456\u0436 \u0437\u2019\u044F\u0432\u043B\u044F\u0442\u044C\u0441\u044F \u043F\u0456\u0434\u043A\u0430\u0437\u043A\u0438.",
+      "set.suggestSkipAfter.name": "\u041F\u0440\u043E\u043F\u0443\u0441\u043A\u0430\u0442\u0438 \u043F\u0456\u0441\u043B\u044F \u0441\u0438\u043C\u0432\u043E\u043B\u0456\u0432",
+      "set.heading.contextMenu": "\u041A\u043E\u043D\u0442\u0435\u043A\u0441\u0442\u043D\u0435 \u043C\u0435\u043D\u044E"
+    };
+    module2.exports = { en, ru, de, es, fr, uk };
+  }
+});
+
+// src/shared/locales/sigil.js
+var require_sigil = __commonJS({
+  "src/shared/locales/sigil.js"(exports2, module2) {
+    "use strict";
+    var en = {
+      "menu.convert": "Find and convert to link",
+      "menu.convert.group": "Find and convert to link",
+      "menu.open.group": "Find and open",
+      "notice.updateSkipped": "({n} note(s) skipped \u2014 changed since the preview)",
+      "embed.menu.refresh": "Refresh embed",
+      "modal.embedPlaceholder": "Choose an embed format\u2026",
+      "modal.update.summary": "{links} change(s) across {files} note(s). Uncheck any change to skip it, or a note to skip all of its changes.",
+      "modal.update.upToDate": "Everything is up to date \u2014 nothing to update.",
+      "btn.close": "Close",
+      "label.thisNote": "This note",
+      "set.heading.suggestions": "Suggestions & links",
+      "set.heading.hover": "Hover preview",
+      "set.heading.links": "Links",
+      "set.codeRoot.desc": "Base folder the scan paths are relative to. Empty = the folder containing this vault.",
+      "set.scanFolders.name": "Scan folders",
+      "set.folderList.add": "Add folder\u2026",
+      "set.folderList.remove": "Remove",
+      "set.folderList.addAria": "Add",
+      "set.skipFolders.name": "Skip folders",
+      "set.trigger.name": "Trigger",
+      "set.preset.file": "file://",
+      "set.preset.ask": "Always ask",
+      "set.editors.count": "{n} added",
+      "set.editors.collapse": "Collapse",
+      "set.editors.expand": "Expand",
+      "set.editors.namePlaceholder": "Name",
+      "set.editors.remove": "Remove",
+      "set.minChars.name": "Min characters",
+      "set.minChars.desc": "How many characters to type before suggestions appear.",
+      "set.maxResults.name": "Max results",
+      "set.maxResults.desc": "Most suggestions to show at once.",
+      "set.autoRefresh.name": "Auto-refresh index",
+      "set.autoRefresh.unsupported": "Recursive folder watching isn\u2019t supported on this platform (Linux); rebuild manually instead.",
+      "set.contextMenu.name": "Editor context menu",
+      "set.markStaleLinks.name": "Mark stale links",
+      "set.info.unknownRoot": "(unknown)",
+      "plural.entry": { one: "{n} entry", other: "{n} entries" }
+    };
+    var ru = {
+      "menu.convert": "\u041D\u0430\u0439\u0442\u0438 \u0438 \u043F\u0440\u0435\u0432\u0440\u0430\u0442\u0438\u0442\u044C \u0432 \u0441\u0441\u044B\u043B\u043A\u0443",
+      "menu.convert.group": "\u041D\u0430\u0439\u0442\u0438 \u0438 \u043F\u0440\u0435\u0432\u0440\u0430\u0442\u0438\u0442\u044C \u0432 \u0441\u0441\u044B\u043B\u043A\u0443",
+      "menu.open.group": "\u041D\u0430\u0439\u0442\u0438 \u0438 \u043E\u0442\u043A\u0440\u044B\u0442\u044C",
+      "notice.updateSkipped": "(\u043F\u0440\u043E\u043F\u0443\u0449\u0435\u043D\u043E \u0437\u0430\u043C\u0435\u0442\u043E\u043A \u2014 {n}: \u0438\u0437\u043C\u0435\u043D\u0438\u043B\u0438\u0441\u044C \u043F\u043E\u0441\u043B\u0435 \u043F\u0440\u0435\u0434\u043F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0430)",
+      "embed.menu.refresh": "\u041E\u0431\u043D\u043E\u0432\u0438\u0442\u044C embed",
+      "modal.embedPlaceholder": "\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0444\u043E\u0440\u043C\u0430\u0442 embed\u2026",
+      "modal.update.summary": "\u041F\u0440\u0430\u0432\u043E\u043A \u2014 {links} \u0432 \u0437\u0430\u043C\u0435\u0442\u043A\u0430\u0445: {files}. \u0421\u043D\u0438\u043C\u0438\u0442\u0435 \u0433\u0430\u043B\u043E\u0447\u043A\u0443 \u0441 \u043F\u0440\u0430\u0432\u043A\u0438, \u0447\u0442\u043E\u0431\u044B \u043F\u0440\u043E\u043F\u0443\u0441\u0442\u0438\u0442\u044C \u0435\u0451, \u0438\u043B\u0438 \u0441 \u0437\u0430\u043C\u0435\u0442\u043A\u0438 \u2014 \u0447\u0442\u043E\u0431\u044B \u043F\u0440\u043E\u043F\u0443\u0441\u0442\u0438\u0442\u044C \u0432\u0441\u0435 \u0435\u0451 \u043F\u0440\u0430\u0432\u043A\u0438.",
+      "modal.update.upToDate": "\u0412\u0441\u0451 \u0430\u043A\u0442\u0443\u0430\u043B\u044C\u043D\u043E \u2014 \u043E\u0431\u043D\u043E\u0432\u043B\u044F\u0442\u044C \u043D\u0435\u0447\u0435\u0433\u043E.",
+      "btn.close": "\u0417\u0430\u043A\u0440\u044B\u0442\u044C",
+      "label.thisNote": "\u042D\u0442\u0430 \u0437\u0430\u043C\u0435\u0442\u043A\u0430",
+      "set.heading.suggestions": "\u041F\u043E\u0434\u0441\u043A\u0430\u0437\u043A\u0438 \u0438 \u0441\u0441\u044B\u043B\u043A\u0438",
+      "set.heading.hover": "\u041F\u0440\u0435\u0432\u044C\u044E \u043F\u0440\u0438 \u043D\u0430\u0432\u0435\u0434\u0435\u043D\u0438\u0438",
+      "set.heading.links": "\u0421\u0441\u044B\u043B\u043A\u0438",
+      "set.codeRoot.desc": "\u0411\u0430\u0437\u043E\u0432\u0430\u044F \u043F\u0430\u043F\u043A\u0430, \u043E\u0442\u043D\u043E\u0441\u0438\u0442\u0435\u043B\u044C\u043D\u043E \u043A\u043E\u0442\u043E\u0440\u043E\u0439 \u0437\u0430\u0434\u0430\u044E\u0442\u0441\u044F \u043F\u0443\u0442\u0438 \u0441\u043A\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F. \u041F\u0443\u0441\u0442\u043E = \u043F\u0430\u043F\u043A\u0430, \u0441\u043E\u0434\u0435\u0440\u0436\u0430\u0449\u0430\u044F \u044D\u0442\u043E \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435.",
+      "set.scanFolders.name": "\u041F\u0430\u043F\u043A\u0438 \u0441\u043A\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F",
+      "set.folderList.add": "\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u043F\u0430\u043F\u043A\u0443\u2026",
+      "set.folderList.remove": "\u0423\u0434\u0430\u043B\u0438\u0442\u044C",
+      "set.folderList.addAria": "\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C",
+      "set.skipFolders.name": "\u041F\u0440\u043E\u043F\u0443\u0441\u043A\u0430\u0435\u043C\u044B\u0435 \u043F\u0430\u043F\u043A\u0438",
+      "set.trigger.name": "\u0422\u0440\u0438\u0433\u0433\u0435\u0440",
+      "set.preset.file": "file://",
+      "set.preset.ask": "\u0412\u0441\u0435\u0433\u0434\u0430 \u0441\u043F\u0440\u0430\u0448\u0438\u0432\u0430\u0442\u044C",
+      "set.editors.count": "\u0434\u043E\u0431\u0430\u0432\u043B\u0435\u043D\u043E: {n}",
+      "set.editors.collapse": "\u0421\u0432\u0435\u0440\u043D\u0443\u0442\u044C",
+      "set.editors.expand": "\u0420\u0430\u0437\u0432\u0435\u0440\u043D\u0443\u0442\u044C",
+      "set.editors.namePlaceholder": "\u041D\u0430\u0437\u0432\u0430\u043D\u0438\u0435",
+      "set.editors.remove": "\u0423\u0434\u0430\u043B\u0438\u0442\u044C",
+      "set.minChars.name": "\u041C\u0438\u043D\u0438\u043C\u0443\u043C \u0441\u0438\u043C\u0432\u043E\u043B\u043E\u0432",
+      "set.minChars.desc": "\u0421\u043A\u043E\u043B\u044C\u043A\u043E \u0441\u0438\u043C\u0432\u043E\u043B\u043E\u0432 \u0432\u0432\u0435\u0441\u0442\u0438, \u043F\u0440\u0435\u0436\u0434\u0435 \u0447\u0435\u043C \u043F\u043E\u044F\u0432\u044F\u0442\u0441\u044F \u043F\u043E\u0434\u0441\u043A\u0430\u0437\u043A\u0438.",
+      "set.maxResults.name": "\u041C\u0430\u043A\u0441\u0438\u043C\u0443\u043C \u0440\u0435\u0437\u0443\u043B\u044C\u0442\u0430\u0442\u043E\u0432",
+      "set.maxResults.desc": "\u0421\u043A\u043E\u043B\u044C\u043A\u043E \u043F\u043E\u0434\u0441\u043A\u0430\u0437\u043E\u043A \u043F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0442\u044C \u043E\u0434\u043D\u043E\u0432\u0440\u0435\u043C\u0435\u043D\u043D\u043E.",
+      "set.autoRefresh.name": "\u0410\u0432\u0442\u043E\u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0435 \u0438\u043D\u0434\u0435\u043A\u0441\u0430",
+      "set.autoRefresh.unsupported": "\u0420\u0435\u043A\u0443\u0440\u0441\u0438\u0432\u043D\u043E\u0435 \u0441\u043B\u0435\u0436\u0435\u043D\u0438\u0435 \u0437\u0430 \u043F\u0430\u043F\u043A\u0430\u043C\u0438 \u043D\u0435 \u043F\u043E\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0435\u0442\u0441\u044F \u043D\u0430 \u044D\u0442\u043E\u0439 \u043F\u043B\u0430\u0442\u0444\u043E\u0440\u043C\u0435 (Linux); \u043F\u0435\u0440\u0435\u0441\u0442\u0440\u0430\u0438\u0432\u0430\u0439\u0442\u0435 \u0432\u0440\u0443\u0447\u043D\u0443\u044E.",
+      "set.contextMenu.name": "\u041A\u043E\u043D\u0442\u0435\u043A\u0441\u0442\u043D\u043E\u0435 \u043C\u0435\u043D\u044E \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440\u0430",
+      "set.markStaleLinks.name": "\u041E\u0442\u043C\u0435\u0447\u0430\u0442\u044C \u0443\u0441\u0442\u0430\u0440\u0435\u0432\u0448\u0438\u0435 \u0441\u0441\u044B\u043B\u043A\u0438",
+      "set.info.unknownRoot": "(\u043D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u043E)",
+      "plural.entry": { one: "{n} \u0437\u0430\u043F\u0438\u0441\u044C", few: "{n} \u0437\u0430\u043F\u0438\u0441\u0438", many: "{n} \u0437\u0430\u043F\u0438\u0441\u0435\u0439", other: "{n} \u0437\u0430\u043F\u0438\u0441\u0435\u0439" }
+    };
+    module2.exports = { en, ru };
+  }
+});
+
 // src/shared/i18n.js
 var require_i18n = __commonJS({
   "src/shared/i18n.js"(exports2, module2) {
@@ -1093,7 +1433,21 @@ var require_i18n = __commonJS({
       const tpl = forms[cat] != null ? forms[cat] : forms.other != null ? forms.other : Object.values(forms)[0];
       return interpolate(tpl, { n });
     }
-    module2.exports = { initI18n: initI18n2, t: t2, plural: plural2 };
+    var FAMILY = {
+      common: require_common(),
+      prose: require_prose(),
+      sigil: require_sigil()
+    };
+    function withFamily2(kind, pluginLocales) {
+      const common = FAMILY.common;
+      const pair = FAMILY[kind] || {};
+      const out = {};
+      for (const lang of Object.keys(pluginLocales)) {
+        out[lang] = Object.assign({}, common[lang], pair[lang], pluginLocales[lang]);
+      }
+      return out;
+    }
+    module2.exports = { initI18n: initI18n2, t: t2, plural: plural2, withFamily: withFamily2 };
   }
 });
 
@@ -2124,7 +2478,7 @@ var require_settings_tab = __commonJS({
           app: this.app,
           provider: this.plugin.api && this.plugin.api.linker,
           Setting,
-          cls: "reference",
+          cls: "reference-linker",
           name: t2("set.precedence.name"),
           desc: t2("set.precedence.desc"),
           otherDesc: t2("set.precedence.other"),
@@ -2213,7 +2567,17 @@ var require_api = __commonJS({
           byKind[e.kind] = (byKind[e.kind] || 0) + 1;
         }
         return { files: this.fileCache.size, entries: this.index.length, byExt, byKind };
-      },
+      }
+    };
+  }
+});
+
+// src/shared/index-events.js
+var require_index_events = __commonJS({
+  "src/shared/index-events.js"(exports2, module2) {
+    "use strict";
+    module2.exports = {
+      // Returns an unsubscribe function.
       onIndexChange(cb) {
         if (typeof cb !== "function")
           return () => {
@@ -2228,6 +2592,7 @@ var require_api = __commonJS({
           try {
             cb();
           } catch (e) {
+            console.error(`${this.manifest.id}: index listener failed`, e);
           }
         }
       }
@@ -2254,16 +2619,13 @@ var require_en = __commonJS({
       "cmd.pinLinksNote": "Pin unpinned reference links in this note",
       "cmd.pinLinksVault": "Pin unpinned reference links in the whole vault",
       // Editor context menu
-      "menu.convert": "Find and convert to link",
       // Selection actions. `.solo` is the flat wording used when no sibling linker offers the
       // same verb; `.group` labels the shared submenu when one does, and `.item` names our
       // destination inside it. The `.group` wording must match the sibling's word for word —
       // whichever plugin is called first creates the group and its label is the one shown.
       "menu.convert.solo": "Find and convert to reference link",
-      "menu.convert.group": "Find and convert to link",
       "menu.convert.item": "Document",
       "menu.open.solo": "Find and open document",
-      "menu.open.group": "Find and open",
       "menu.open.item": "Document",
       "menu.copyLink": "Copy reference link",
       "menu.fixLink": "Update this reference link",
@@ -2281,17 +2643,9 @@ var require_en = __commonJS({
       "notice.watchUnsupported": "Reference Linker: auto-refresh is unavailable on this platform \u2014 rebuild manually",
       "notice.linksUpdated": "Reference Linker: {n} link(s) updated",
       "notice.linksUpdatedVault": "Reference Linker: {n} link(s) updated across {files} note(s)",
-      "notice.updateSkipped": "({n} note(s) skipped \u2014 changed since the preview)",
-      "label.thisNote": "This note",
       "modal.update.title": "Update reference links",
-      "modal.update.summary": "{links} change(s) across {files} note(s). Uncheck any change to skip it, or a note to skip all of its changes.",
-      "modal.update.upToDate": "Everything is up to date \u2014 nothing to update.",
       "modal.update.attention": "{n} link(s) need attention: their section is gone (renamed, or the outline changed), so there\u2019s no page to fix.",
       "modal.update.brokenRow": "{label} \u2014 no fix (section renamed or removed)",
-      "modal.andMore": "\u2026and {n} more",
-      "btn.apply": "Apply",
-      "btn.cancel": "Cancel",
-      "btn.close": "Close",
       "notice.linksPinned": "Reference Linker: {n} link(s) pinned",
       "notice.linksPinnedVault": "Reference Linker: {n} link(s) pinned across {files} note(s)",
       "notice.pinned": "Reference Linker: link pinned to section \u201C{sec}\u201D",
@@ -2303,7 +2657,6 @@ var require_en = __commonJS({
       "embed.fmt.section": "Section page ({page})",
       "embed.unsupported": "Reference Linker: no inline preview for {path}",
       "embed.menu.open": "Open document",
-      "embed.menu.refresh": "Refresh embed",
       "embed.notFound": "Reference Linker: no document matches \u201C{query}\u201D",
       "embed.ambiguous": "Reference Linker: {n} documents match \u201C{query}\u201D \u2014 add a path to pick one",
       "embed.unreadable": "Reference Linker: can\u2019t read {path}",
@@ -2313,68 +2666,32 @@ var require_en = __commonJS({
       // Command-palette modal
       "modal.searchPlaceholder": "Search documents\u2026",
       "modal.formatPlaceholder": "Choose a viewer format for this link\u2026",
-      "modal.embedPlaceholder": "Choose an embed format\u2026",
       // Settings — headings
       "set.heading.index": "Reference index",
-      "set.heading.suggestions": "Suggestions & links",
-      "set.heading.hover": "Hover preview",
-      "set.heading.links": "Links",
-      "set.heading.maintenance": "Maintenance",
       // Settings — reference index
       "set.codeRoot.name": "Reference root",
-      "set.codeRoot.desc": "Base folder the scan paths are relative to. Empty = the folder containing this vault.",
-      "set.scanFolders.name": "Scan folders",
       "set.scanFolders.desc": "Folders scanned for documents, relative to the reference root. Leave empty to scan the whole root.",
       "set.scanFolders.notFound": "\u26A0 Not found under the reference root \u2014 {folders}",
-      "set.folderList.add": "Add folder\u2026",
-      "set.folderList.remove": "Remove",
-      "set.folderList.addAria": "Add",
       "set.extensions.name": "File extensions",
       "set.extensions.desc": "Which file types to index, space- or comma-separated (e.g. .pdf .docx .png). Empty = nothing is indexed.",
-      "set.skipFolders.name": "Skip folders",
       "set.skipFolders.desc": "A bare name (node_modules) is skipped at any depth; a path with a slash (archive/raw) skips only that folder, relative to the reference root.",
-      "set.autoRefresh.name": "Auto-refresh index",
       "set.autoRefresh.desc": "Watch the scan folders and rebuild the index when documents change.",
-      "set.autoRefresh.unsupported": "Recursive folder watching isn\u2019t supported on this platform (Linux); rebuild manually instead.",
       "set.info": "Reference root: {root} \xB7 {entries} indexed",
-      "set.info.unknownRoot": "(unknown)",
       "set.rebuild.name": "Rebuild reference index",
       "set.rebuild.desc": "Re-scan the document folders now.",
-      "set.rebuild.button": "Rebuild",
       // Settings — suggestions & links
-      "set.trigger.name": "Trigger",
       "set.trigger.desc": "Type this to start a reference suggestion. Default @! (Code Linker uses @@).",
-      "set.minChars.name": "Min characters",
-      "set.minChars.desc": "How many characters to type before suggestions appear.",
-      "set.maxResults.name": "Max results",
-      "set.maxResults.desc": "Most suggestions to show at once.",
       "set.editorPreset.name": "Viewer link preset",
       "set.editorPreset.desc": "How inserted links open. file:// uses the OS default app. Add your own under \u201CYour viewers\u201D.",
-      "set.preset.file": "file://",
-      "set.preset.ask": "Always ask",
       "set.editors.name": "Your viewers",
-      "set.editors.count": "{n} added",
-      "set.editors.collapse": "Collapse",
-      "set.editors.expand": "Expand",
       "set.editors.desc": "Named URL/command templates for the dropdown above. Placeholders: {abs} {path} {page} {name} {root}.",
-      "set.editors.namePlaceholder": "Name",
-      "set.editors.remove": "Remove",
       "set.editors.add": "+ Add viewer",
-      "set.contextMenu.name": "Editor context menu",
       "set.contextMenu.desc": "Add \u201CFind and convert to link\u201D and \u201CFind and open document\u201D to the editor right-click menu \u2014 plus \u201CCopy reference link\u201D when you right-click a reference link.",
       // Settings — hover preview
       "set.hoverPreview.name": "Preview on hover",
       "set.hoverPreview.desc": "Preview the referenced document when you hover a link. In live preview, hold Ctrl/Cmd; in reading view a plain hover is enough.",
       // Settings — links
-      "set.markStaleLinks.name": "Mark stale links",
-      "set.markStaleLinks.desc": "Underline a reference link when its document moved (warning colour, fixable with \u201CUpdate reference links\u201D) or is gone from disk (error colour). A link you edited by hand is left alone: the page you typed and the text you wrote are yours.",
-      // Plural noun phrases
-      "plural.entry": { one: "{n} entry", other: "{n} entries" },
-      "set.precedence.name": "Priority among linker plugins",
-      "set.precedence.desc": "A word or link several linkers claim goes to the one highest in this list. You can only move this plugin \u2014 move the others from their own settings.",
-      "set.precedence.other": "Moved from its own settings",
-      "set.precedence.up": "Move up",
-      "set.precedence.down": "Move down"
+      "set.markStaleLinks.desc": "Underline a reference link when its document moved (warning colour, fixable with \u201CUpdate reference links\u201D) or is gone from disk (error colour). A link you edited by hand is left alone: the page you typed and the text you wrote are yours."
     };
   }
 });
@@ -2398,12 +2715,9 @@ var require_ru = __commonJS({
       "cmd.pinLinksNote": "\u0417\u0430\u043A\u0440\u0435\u043F\u0438\u0442\u044C \u043D\u0435\u0437\u0430\u043A\u0440\u0435\u043F\u043B\u0451\u043D\u043D\u044B\u0435 \u0441\u0441\u044B\u043B\u043A\u0438 \u0432 \u044D\u0442\u043E\u0439 \u0437\u0430\u043C\u0435\u0442\u043A\u0435",
       "cmd.pinLinksVault": "\u0417\u0430\u043A\u0440\u0435\u043F\u0438\u0442\u044C \u043D\u0435\u0437\u0430\u043A\u0440\u0435\u043F\u043B\u0451\u043D\u043D\u044B\u0435 \u0441\u0441\u044B\u043B\u043A\u0438 \u0432\u043E \u0432\u0441\u0451\u043C \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435",
       // Editor context menu
-      "menu.convert": "\u041D\u0430\u0439\u0442\u0438 \u0438 \u043F\u0440\u0435\u0432\u0440\u0430\u0442\u0438\u0442\u044C \u0432 \u0441\u0441\u044B\u043B\u043A\u0443",
       "menu.convert.solo": "\u041D\u0430\u0439\u0442\u0438 \u0438 \u043F\u0440\u0435\u0432\u0440\u0430\u0442\u0438\u0442\u044C \u0432 \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442",
-      "menu.convert.group": "\u041D\u0430\u0439\u0442\u0438 \u0438 \u043F\u0440\u0435\u0432\u0440\u0430\u0442\u0438\u0442\u044C \u0432 \u0441\u0441\u044B\u043B\u043A\u0443",
       "menu.convert.item": "\u0414\u043E\u043A\u0443\u043C\u0435\u043D\u0442",
       "menu.open.solo": "\u041D\u0430\u0439\u0442\u0438 \u0438 \u043E\u0442\u043A\u0440\u044B\u0442\u044C \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442",
-      "menu.open.group": "\u041D\u0430\u0439\u0442\u0438 \u0438 \u043E\u0442\u043A\u0440\u044B\u0442\u044C",
       "menu.open.item": "\u0414\u043E\u043A\u0443\u043C\u0435\u043D\u0442",
       "menu.copyLink": "\u0421\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442",
       "menu.fixLink": "\u0410\u043A\u0442\u0443\u0430\u043B\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u044D\u0442\u0443 \u0441\u0441\u044B\u043B\u043A\u0443",
@@ -2421,17 +2735,9 @@ var require_ru = __commonJS({
       "notice.watchUnsupported": "Reference Linker: \u0430\u0432\u0442\u043E\u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0435 \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u043D\u043E \u043D\u0430 \u044D\u0442\u043E\u0439 \u043F\u043B\u0430\u0442\u0444\u043E\u0440\u043C\u0435 \u2014 \u043F\u0435\u0440\u0435\u0441\u0442\u0440\u0430\u0438\u0432\u0430\u0439\u0442\u0435 \u0432\u0440\u0443\u0447\u043D\u0443\u044E",
       "notice.linksUpdated": "Reference Linker: \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u043E \u0441\u0441\u044B\u043B\u043E\u043A \u2014 {n}",
       "notice.linksUpdatedVault": "Reference Linker: \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u043E \u0441\u0441\u044B\u043B\u043E\u043A \u2014 {n} \u0432 \u0437\u0430\u043C\u0435\u0442\u043A\u0430\u0445: {files}",
-      "notice.updateSkipped": "(\u043F\u0440\u043E\u043F\u0443\u0449\u0435\u043D\u043E \u0437\u0430\u043C\u0435\u0442\u043E\u043A \u2014 {n}: \u0438\u0437\u043C\u0435\u043D\u0438\u043B\u0438\u0441\u044C \u043F\u043E\u0441\u043B\u0435 \u043F\u0440\u0435\u0434\u043F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0430)",
-      "label.thisNote": "\u042D\u0442\u0430 \u0437\u0430\u043C\u0435\u0442\u043A\u0430",
       "modal.update.title": "\u0410\u043A\u0442\u0443\u0430\u043B\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0438 \u043D\u0430 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u044B",
-      "modal.update.summary": "\u041F\u0440\u0430\u0432\u043E\u043A \u2014 {links} \u0432 \u0437\u0430\u043C\u0435\u0442\u043A\u0430\u0445: {files}. \u0421\u043D\u0438\u043C\u0438\u0442\u0435 \u0433\u0430\u043B\u043E\u0447\u043A\u0443 \u0441 \u043F\u0440\u0430\u0432\u043A\u0438, \u0447\u0442\u043E\u0431\u044B \u043F\u0440\u043E\u043F\u0443\u0441\u0442\u0438\u0442\u044C \u0435\u0451, \u0438\u043B\u0438 \u0441 \u0437\u0430\u043C\u0435\u0442\u043A\u0438 \u2014 \u0447\u0442\u043E\u0431\u044B \u043F\u0440\u043E\u043F\u0443\u0441\u0442\u0438\u0442\u044C \u0432\u0441\u0435 \u0435\u0451 \u043F\u0440\u0430\u0432\u043A\u0438.",
-      "modal.update.upToDate": "\u0412\u0441\u0451 \u0430\u043A\u0442\u0443\u0430\u043B\u044C\u043D\u043E \u2014 \u043E\u0431\u043D\u043E\u0432\u043B\u044F\u0442\u044C \u043D\u0435\u0447\u0435\u0433\u043E.",
       "modal.update.attention": "\u0422\u0440\u0435\u0431\u0443\u044E\u0442 \u0432\u043D\u0438\u043C\u0430\u043D\u0438\u044F \u2014 {n}: \u0438\u0445 \u0440\u0430\u0437\u0434\u0435\u043B \u043F\u0440\u043E\u043F\u0430\u043B (\u043F\u0435\u0440\u0435\u0438\u043C\u0435\u043D\u043E\u0432\u0430\u043D, \u0438\u043B\u0438 \u0438\u0437\u043C\u0435\u043D\u0438\u043B\u043E\u0441\u044C \u043E\u0433\u043B\u0430\u0432\u043B\u0435\u043D\u0438\u0435), \u043F\u043E\u044D\u0442\u043E\u043C\u0443 \u0447\u0438\u043D\u0438\u0442\u044C \u043D\u0435\u0447\u0435\u0433\u043E.",
       "modal.update.brokenRow": "{label} \u2014 \u043D\u0435 \u043F\u043E\u0447\u0438\u043D\u0438\u0442\u044C (\u0440\u0430\u0437\u0434\u0435\u043B \u043F\u0435\u0440\u0435\u0438\u043C\u0435\u043D\u043E\u0432\u0430\u043D \u0438\u043B\u0438 \u0443\u0434\u0430\u043B\u0451\u043D)",
-      "modal.andMore": "\u2026\u0438 \u0435\u0449\u0451 {n}",
-      "btn.apply": "\u041F\u0440\u0438\u043C\u0435\u043D\u0438\u0442\u044C",
-      "btn.cancel": "\u041E\u0442\u043C\u0435\u043D\u0430",
-      "btn.close": "\u0417\u0430\u043A\u0440\u044B\u0442\u044C",
       "notice.linksPinned": "Reference Linker: \u0437\u0430\u043A\u0440\u0435\u043F\u043B\u0435\u043D\u043E \u0441\u0441\u044B\u043B\u043E\u043A \u2014 {n}",
       "notice.linksPinnedVault": "Reference Linker: \u0437\u0430\u043A\u0440\u0435\u043F\u043B\u0435\u043D\u043E \u0441\u0441\u044B\u043B\u043E\u043A \u2014 {n} \u0432 \u0437\u0430\u043C\u0435\u0442\u043A\u0430\u0445: {files}",
       "notice.pinned": "Reference Linker: \u0441\u0441\u044B\u043B\u043A\u0430 \u0437\u0430\u043A\u0440\u0435\u043F\u043B\u0435\u043D\u0430 \u0437\u0430 \u0440\u0430\u0437\u0434\u0435\u043B\u043E\u043C \xAB{sec}\xBB",
@@ -2443,7 +2749,6 @@ var require_ru = __commonJS({
       "embed.fmt.section": "\u0421\u0442\u0440\u0430\u043D\u0438\u0446\u0430 \u0440\u0430\u0437\u0434\u0435\u043B\u0430 ({page})",
       "embed.unsupported": "Reference Linker: \u043D\u0435\u0442 \u0438\u043D\u043B\u0430\u0439\u043D-\u043F\u0440\u0435\u0432\u044C\u044E \u0434\u043B\u044F {path}",
       "embed.menu.open": "\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442",
-      "embed.menu.refresh": "\u041E\u0431\u043D\u043E\u0432\u0438\u0442\u044C embed",
       "embed.notFound": "Reference Linker: \u043D\u0435\u0442 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430 \u0434\u043B\u044F \xAB{query}\xBB",
       "embed.ambiguous": "Reference Linker: \u043F\u043E\u0434 \xAB{query}\xBB \u043F\u043E\u0434\u0445\u043E\u0434\u0438\u0442 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u043E\u0432: {n} \u2014 \u0443\u0442\u043E\u0447\u043D\u0438\u0442\u0435 \u043F\u0443\u0442\u0451\u043C",
       "embed.unreadable": "Reference Linker: \u043D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u0440\u043E\u0447\u0438\u0442\u0430\u0442\u044C {path}",
@@ -2453,68 +2758,32 @@ var require_ru = __commonJS({
       // Command-palette modal
       "modal.searchPlaceholder": "\u041F\u043E\u0438\u0441\u043A \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u043E\u0432\u2026",
       "modal.formatPlaceholder": "\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0444\u043E\u0440\u043C\u0430\u0442 \u043F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0449\u0438\u043A\u0430 \u0434\u043B\u044F \u044D\u0442\u043E\u0439 \u0441\u0441\u044B\u043B\u043A\u0438\u2026",
-      "modal.embedPlaceholder": "\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0444\u043E\u0440\u043C\u0430\u0442 embed\u2026",
       // Settings — headings
       "set.heading.index": "\u0418\u043D\u0434\u0435\u043A\u0441 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u043E\u0432",
-      "set.heading.suggestions": "\u041F\u043E\u0434\u0441\u043A\u0430\u0437\u043A\u0438 \u0438 \u0441\u0441\u044B\u043B\u043A\u0438",
-      "set.heading.hover": "\u041F\u0440\u0435\u0432\u044C\u044E \u043F\u0440\u0438 \u043D\u0430\u0432\u0435\u0434\u0435\u043D\u0438\u0438",
-      "set.heading.links": "\u0421\u0441\u044B\u043B\u043A\u0438",
-      "set.heading.maintenance": "\u041E\u0431\u0441\u043B\u0443\u0436\u0438\u0432\u0430\u043D\u0438\u0435",
       // Settings — reference index
       "set.codeRoot.name": "\u041A\u043E\u0440\u0435\u043D\u044C \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u043E\u0432",
-      "set.codeRoot.desc": "\u0411\u0430\u0437\u043E\u0432\u0430\u044F \u043F\u0430\u043F\u043A\u0430, \u043E\u0442\u043D\u043E\u0441\u0438\u0442\u0435\u043B\u044C\u043D\u043E \u043A\u043E\u0442\u043E\u0440\u043E\u0439 \u0437\u0430\u0434\u0430\u044E\u0442\u0441\u044F \u043F\u0443\u0442\u0438 \u0441\u043A\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F. \u041F\u0443\u0441\u0442\u043E = \u043F\u0430\u043F\u043A\u0430, \u0441\u043E\u0434\u0435\u0440\u0436\u0430\u0449\u0430\u044F \u044D\u0442\u043E \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435.",
-      "set.scanFolders.name": "\u041F\u0430\u043F\u043A\u0438 \u0441\u043A\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F",
       "set.scanFolders.desc": "\u041F\u0430\u043F\u043A\u0438, \u0441\u043A\u0430\u043D\u0438\u0440\u0443\u0435\u043C\u044B\u0435 \u043D\u0430 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u044B, \u043E\u0442\u043D\u043E\u0441\u0438\u0442\u0435\u043B\u044C\u043D\u043E \u043A\u043E\u0440\u043D\u044F. \u041E\u0441\u0442\u0430\u0432\u044C\u0442\u0435 \u043F\u0443\u0441\u0442\u044B\u043C, \u0447\u0442\u043E\u0431\u044B \u0441\u043A\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0432\u0435\u0441\u044C \u043A\u043E\u0440\u0435\u043D\u044C.",
       "set.scanFolders.notFound": "\u26A0 \u041D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u043E \u0432 \u043A\u043E\u0440\u043D\u0435 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u043E\u0432 \u2014 {folders}",
-      "set.folderList.add": "\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u043F\u0430\u043F\u043A\u0443\u2026",
-      "set.folderList.remove": "\u0423\u0434\u0430\u043B\u0438\u0442\u044C",
-      "set.folderList.addAria": "\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C",
       "set.extensions.name": "\u0420\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u044F \u0444\u0430\u0439\u043B\u043E\u0432",
       "set.extensions.desc": "\u041A\u0430\u043A\u0438\u0435 \u0442\u0438\u043F\u044B \u0444\u0430\u0439\u043B\u043E\u0432 \u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u0442\u044C, \u0447\u0435\u0440\u0435\u0437 \u043F\u0440\u043E\u0431\u0435\u043B \u0438\u043B\u0438 \u0437\u0430\u043F\u044F\u0442\u0443\u044E (\u043D\u0430\u043F\u0440. .pdf .docx .png). \u041F\u0443\u0441\u0442\u043E = \u043D\u0438\u0447\u0435\u0433\u043E \u043D\u0435 \u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u0443\u0435\u0442\u0441\u044F.",
-      "set.skipFolders.name": "\u041F\u0440\u043E\u043F\u0443\u0441\u043A\u0430\u0435\u043C\u044B\u0435 \u043F\u0430\u043F\u043A\u0438",
       "set.skipFolders.desc": "\u041F\u0440\u043E\u0441\u0442\u043E \u0438\u043C\u044F (node_modules) \u043F\u0440\u043E\u043F\u0443\u0441\u043A\u0430\u0435\u0442\u0441\u044F \u043D\u0430 \u043B\u044E\u0431\u043E\u0439 \u0433\u043B\u0443\u0431\u0438\u043D\u0435; \u043F\u0443\u0442\u044C \u0441\u043E \u0441\u043B\u044D\u0448\u0435\u043C (archive/raw) \u043F\u0440\u043E\u043F\u0443\u0441\u043A\u0430\u0435\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u044D\u0442\u0443 \u043F\u0430\u043F\u043A\u0443 \u043E\u0442\u043D\u043E\u0441\u0438\u0442\u0435\u043B\u044C\u043D\u043E \u043A\u043E\u0440\u043D\u044F.",
-      "set.autoRefresh.name": "\u0410\u0432\u0442\u043E\u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0435 \u0438\u043D\u0434\u0435\u043A\u0441\u0430",
       "set.autoRefresh.desc": "\u0421\u043B\u0435\u0434\u0438\u0442\u044C \u0437\u0430 \u043F\u0430\u043F\u043A\u0430\u043C\u0438 \u0441\u043A\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F \u0438 \u043F\u0435\u0440\u0435\u0441\u0442\u0440\u0430\u0438\u0432\u0430\u0442\u044C \u0438\u043D\u0434\u0435\u043A\u0441 \u043F\u0440\u0438 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0438 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u043E\u0432.",
-      "set.autoRefresh.unsupported": "\u0420\u0435\u043A\u0443\u0440\u0441\u0438\u0432\u043D\u043E\u0435 \u0441\u043B\u0435\u0436\u0435\u043D\u0438\u0435 \u0437\u0430 \u043F\u0430\u043F\u043A\u0430\u043C\u0438 \u043D\u0435 \u043F\u043E\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0435\u0442\u0441\u044F \u043D\u0430 \u044D\u0442\u043E\u0439 \u043F\u043B\u0430\u0442\u0444\u043E\u0440\u043C\u0435 (Linux); \u043F\u0435\u0440\u0435\u0441\u0442\u0440\u0430\u0438\u0432\u0430\u0439\u0442\u0435 \u0432\u0440\u0443\u0447\u043D\u0443\u044E.",
       "set.info": "\u041A\u043E\u0440\u0435\u043D\u044C \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u043E\u0432: {root} \xB7 \u043F\u0440\u043E\u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043E {entries}",
-      "set.info.unknownRoot": "(\u043D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u043E)",
       "set.rebuild.name": "\u041F\u0435\u0440\u0435\u0441\u0442\u0440\u043E\u0438\u0442\u044C \u0438\u043D\u0434\u0435\u043A\u0441 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u043E\u0432",
       "set.rebuild.desc": "\u041F\u0435\u0440\u0435\u0441\u043A\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u043F\u0430\u043F\u043A\u0438 \u0441 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430\u043C\u0438 \u0441\u0435\u0439\u0447\u0430\u0441.",
-      "set.rebuild.button": "\u041F\u0435\u0440\u0435\u0441\u0442\u0440\u043E\u0438\u0442\u044C",
       // Settings — suggestions & links
-      "set.trigger.name": "\u0422\u0440\u0438\u0433\u0433\u0435\u0440",
       "set.trigger.desc": "\u0412\u0432\u0435\u0434\u0438\u0442\u0435 \u044D\u0442\u043E, \u0447\u0442\u043E\u0431\u044B \u043D\u0430\u0447\u0430\u0442\u044C \u043F\u043E\u0434\u0441\u043A\u0430\u0437\u043A\u0443. \u041F\u043E \u0443\u043C\u043E\u043B\u0447\u0430\u043D\u0438\u044E @! (Code Linker \u0437\u0430\u043D\u0438\u043C\u0430\u0435\u0442 @@).",
-      "set.minChars.name": "\u041C\u0438\u043D\u0438\u043C\u0443\u043C \u0441\u0438\u043C\u0432\u043E\u043B\u043E\u0432",
-      "set.minChars.desc": "\u0421\u043A\u043E\u043B\u044C\u043A\u043E \u0441\u0438\u043C\u0432\u043E\u043B\u043E\u0432 \u0432\u0432\u0435\u0441\u0442\u0438, \u043F\u0440\u0435\u0436\u0434\u0435 \u0447\u0435\u043C \u043F\u043E\u044F\u0432\u044F\u0442\u0441\u044F \u043F\u043E\u0434\u0441\u043A\u0430\u0437\u043A\u0438.",
-      "set.maxResults.name": "\u041C\u0430\u043A\u0441\u0438\u043C\u0443\u043C \u0440\u0435\u0437\u0443\u043B\u044C\u0442\u0430\u0442\u043E\u0432",
-      "set.maxResults.desc": "\u0421\u043A\u043E\u043B\u044C\u043A\u043E \u043F\u043E\u0434\u0441\u043A\u0430\u0437\u043E\u043A \u043F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0442\u044C \u043E\u0434\u043D\u043E\u0432\u0440\u0435\u043C\u0435\u043D\u043D\u043E.",
       "set.editorPreset.name": "\u041F\u0440\u0435\u0441\u0435\u0442 \u043E\u0442\u043A\u0440\u044B\u0442\u0438\u044F",
       "set.editorPreset.desc": "\u041A\u0430\u043A \u043E\u0442\u043A\u0440\u044B\u0432\u0430\u044E\u0442\u0441\u044F \u0432\u0441\u0442\u0430\u0432\u043B\u0435\u043D\u043D\u044B\u0435 \u0441\u0441\u044B\u043B\u043A\u0438. file:// \u2014 \u043F\u0440\u0438\u043B\u043E\u0436\u0435\u043D\u0438\u0435 \u041E\u0421 \u043F\u043E \u0443\u043C\u043E\u043B\u0447\u0430\u043D\u0438\u044E. \u0421\u0432\u043E\u0438 \u2014 \u0432 \xAB\u0412\u0430\u0448\u0438 \u043F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0449\u0438\u043A\u0438\xBB.",
-      "set.preset.file": "file://",
-      "set.preset.ask": "\u0412\u0441\u0435\u0433\u0434\u0430 \u0441\u043F\u0440\u0430\u0448\u0438\u0432\u0430\u0442\u044C",
       "set.editors.name": "\u0412\u0430\u0448\u0438 \u043F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0449\u0438\u043A\u0438",
-      "set.editors.count": "\u0434\u043E\u0431\u0430\u0432\u043B\u0435\u043D\u043E: {n}",
-      "set.editors.collapse": "\u0421\u0432\u0435\u0440\u043D\u0443\u0442\u044C",
-      "set.editors.expand": "\u0420\u0430\u0437\u0432\u0435\u0440\u043D\u0443\u0442\u044C",
       "set.editors.desc": "\u0418\u043C\u0435\u043D\u043E\u0432\u0430\u043D\u043D\u044B\u0435 \u0448\u0430\u0431\u043B\u043E\u043D\u044B URL/\u043A\u043E\u043C\u0430\u043D\u0434 \u0434\u043B\u044F \u0441\u043F\u0438\u0441\u043A\u0430 \u0432\u044B\u0448\u0435. \u041F\u043B\u0435\u0439\u0441\u0445\u043E\u043B\u0434\u0435\u0440\u044B: {abs} {path} {page} {name} {root}.",
-      "set.editors.namePlaceholder": "\u041D\u0430\u0437\u0432\u0430\u043D\u0438\u0435",
-      "set.editors.remove": "\u0423\u0434\u0430\u043B\u0438\u0442\u044C",
       "set.editors.add": "+ \u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u043F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0449\u0438\u043A",
-      "set.contextMenu.name": "\u041A\u043E\u043D\u0442\u0435\u043A\u0441\u0442\u043D\u043E\u0435 \u043C\u0435\u043D\u044E \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440\u0430",
       "set.contextMenu.desc": "\u0414\u043E\u0431\u0430\u0432\u043B\u044F\u0442\u044C \xAB\u041D\u0430\u0439\u0442\u0438 \u0438 \u043F\u0440\u0435\u0432\u0440\u0430\u0442\u0438\u0442\u044C \u0432 \u0441\u0441\u044B\u043B\u043A\u0443\xBB \u0438 \xAB\u041D\u0430\u0439\u0442\u0438 \u0438 \u043E\u0442\u043A\u0440\u044B\u0442\u044C \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\xBB \u0432 \u043C\u0435\u043D\u044E \u043F\u043E \u043F\u0440\u0430\u0432\u043E\u043C\u0443 \u043A\u043B\u0438\u043A\u0443 \u2014 \u043F\u043B\u044E\u0441 \xAB\u0421\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\xBB \u043F\u0440\u0438 \u043A\u043B\u0438\u043A\u0435 \u043F\u043E \u0441\u0441\u044B\u043B\u043A\u0435.",
       // Settings — hover preview
       "set.hoverPreview.name": "\u041F\u0440\u0435\u0432\u044C\u044E \u043F\u0440\u0438 \u043D\u0430\u0432\u0435\u0434\u0435\u043D\u0438\u0438",
       "set.hoverPreview.desc": "\u041F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0442\u044C \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442 \u043F\u0440\u0438 \u043D\u0430\u0432\u0435\u0434\u0435\u043D\u0438\u0438 \u043D\u0430 \u0441\u0441\u044B\u043B\u043A\u0443. \u0412 \u0440\u0435\u0436\u0438\u043C\u0435 live preview \u0443\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0439\u0442\u0435 Ctrl/Cmd; \u0432 \u0440\u0435\u0436\u0438\u043C\u0435 \u0447\u0442\u0435\u043D\u0438\u044F \u0434\u043E\u0441\u0442\u0430\u0442\u043E\u0447\u043D\u043E \u043F\u0440\u043E\u0441\u0442\u043E\u0433\u043E \u043D\u0430\u0432\u0435\u0434\u0435\u043D\u0438\u044F.",
       // Settings — links
-      "set.markStaleLinks.name": "\u041E\u0442\u043C\u0435\u0447\u0430\u0442\u044C \u0443\u0441\u0442\u0430\u0440\u0435\u0432\u0448\u0438\u0435 \u0441\u0441\u044B\u043B\u043A\u0438",
-      "set.markStaleLinks.desc": "\u041F\u043E\u0434\u0447\u0451\u0440\u043A\u0438\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0443, \u0435\u0441\u043B\u0438 \u0435\u0451 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442 \u043F\u0435\u0440\u0435\u0435\u0445\u0430\u043B (\u0446\u0432\u0435\u0442 \u043F\u0440\u0435\u0434\u0443\u043F\u0440\u0435\u0436\u0434\u0435\u043D\u0438\u044F, \u0447\u0438\u043D\u0438\u0442\u0441\u044F \u043A\u043E\u043C\u0430\u043D\u0434\u043E\u0439 \xAB\u0410\u043A\u0442\u0443\u0430\u043B\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0438\xBB) \u0438\u043B\u0438 \u043F\u0440\u043E\u043F\u0430\u043B \u0441 \u0434\u0438\u0441\u043A\u0430 (\u0446\u0432\u0435\u0442 \u043E\u0448\u0438\u0431\u043A\u0438). \u0421\u0441\u044B\u043B\u043A\u0443, \u043F\u043E\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u043D\u0443\u044E \u0440\u0443\u043A\u0430\u043C\u0438, \u043F\u043B\u0430\u0433\u0438\u043D \u043D\u0435 \u0442\u0440\u043E\u0433\u0430\u0435\u0442: \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0430 \u0438 \u0442\u0435\u043A\u0441\u0442 \u2014 \u0442\u0432\u043E\u0438.",
-      // Plural noun phrases
-      "plural.entry": { one: "{n} \u0437\u0430\u043F\u0438\u0441\u044C", few: "{n} \u0437\u0430\u043F\u0438\u0441\u0438", many: "{n} \u0437\u0430\u043F\u0438\u0441\u0435\u0439", other: "{n} \u0437\u0430\u043F\u0438\u0441\u0435\u0439" },
-      "set.precedence.name": "\u041F\u0440\u0438\u043E\u0440\u0438\u0442\u0435\u0442 \u0441\u0440\u0435\u0434\u0438 \u043F\u043B\u0430\u0433\u0438\u043D\u043E\u0432-\u043B\u0438\u043D\u043A\u0435\u0440\u043E\u0432",
-      "set.precedence.desc": "\u0421\u043B\u043E\u0432\u043E \u0438\u043B\u0438 \u0441\u0441\u044B\u043B\u043A\u0443, \u043D\u0430 \u043A\u043E\u0442\u043E\u0440\u044B\u0435 \u043F\u0440\u0435\u0442\u0435\u043D\u0434\u0443\u044E\u0442 \u043D\u0435\u0441\u043A\u043E\u043B\u044C\u043A\u043E \u043B\u0438\u043D\u043A\u0435\u0440\u043E\u0432, \u0437\u0430\u0431\u0438\u0440\u0430\u0435\u0442 \u0442\u043E\u0442, \u043A\u0442\u043E \u0432\u044B\u0448\u0435 \u0432 \u0441\u043F\u0438\u0441\u043A\u0435. \u041E\u0442\u0441\u044E\u0434\u0430 \u0434\u0432\u0438\u0433\u0430\u0435\u0442\u0441\u044F \u0442\u043E\u043B\u044C\u043A\u043E \u044D\u0442\u043E\u0442 \u043F\u043B\u0430\u0433\u0438\u043D \u2014 \u043E\u0441\u0442\u0430\u043B\u044C\u043D\u044B\u0435 \u0438\u0437 \u0441\u0432\u043E\u0438\u0445 \u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043A.",
-      "set.precedence.other": "\u0414\u0432\u0438\u0433\u0430\u0435\u0442\u0441\u044F \u0438\u0437 \u0441\u0432\u043E\u0438\u0445 \u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043A",
-      "set.precedence.up": "\u0412\u044B\u0448\u0435",
-      "set.precedence.down": "\u041D\u0438\u0436\u0435"
+      "set.markStaleLinks.desc": "\u041F\u043E\u0434\u0447\u0451\u0440\u043A\u0438\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0443, \u0435\u0441\u043B\u0438 \u0435\u0451 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442 \u043F\u0435\u0440\u0435\u0435\u0445\u0430\u043B (\u0446\u0432\u0435\u0442 \u043F\u0440\u0435\u0434\u0443\u043F\u0440\u0435\u0436\u0434\u0435\u043D\u0438\u044F, \u0447\u0438\u043D\u0438\u0442\u0441\u044F \u043A\u043E\u043C\u0430\u043D\u0434\u043E\u0439 \xAB\u0410\u043A\u0442\u0443\u0430\u043B\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0438\xBB) \u0438\u043B\u0438 \u043F\u0440\u043E\u043F\u0430\u043B \u0441 \u0434\u0438\u0441\u043A\u0430 (\u0446\u0432\u0435\u0442 \u043E\u0448\u0438\u0431\u043A\u0438). \u0421\u0441\u044B\u043B\u043A\u0443, \u043F\u043E\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u043D\u0443\u044E \u0440\u0443\u043A\u0430\u043C\u0438, \u043F\u043B\u0430\u0433\u0438\u043D \u043D\u0435 \u0442\u0440\u043E\u0433\u0430\u0435\u0442: \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0430 \u0438 \u0442\u0435\u043A\u0441\u0442 \u2014 \u0442\u0432\u043E\u0438."
     };
   }
 });
@@ -2533,7 +2802,7 @@ var { fillRoot: fillRootToken, ownsRootToken } = require_root_token();
 var { sharedSection } = require_menu();
 var { peersOffering } = require_discover();
 var { ownsLink } = require_link_owner();
-var { ReferenceSuggest } = require_suggest();
+var { ReferenceSuggest } = require_suggest2();
 var filter = require_filter();
 var { HoverPreview } = require_hover();
 var { registerEmbed } = require_embed();
@@ -2541,8 +2810,9 @@ var actualize = require_actualize2();
 var { ReferenceLinkModal, PresetPickerModal } = require_modal();
 var { ReferenceLinkerSettingTab } = require_settings_tab();
 var { readOutline } = require_pdf();
-var { initI18n, t, plural } = require_i18n();
+var { initI18n, withFamily, t, plural } = require_i18n();
 var api = require_api();
+var indexEvents = require_index_events();
 function openExternal(uri) {
   try {
     require("electron").shell.openExternal(uri);
@@ -2574,7 +2844,7 @@ var previewEntry = (plugin, ref, title, url) => {
 };
 var ReferenceLinkerPlugin = class extends Plugin {
   async onload() {
-    initI18n({ en: require_en(), ru: require_ru() });
+    initI18n(withFamily("sigil", { en: require_en(), ru: require_ru() }));
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
     this.setIndex([]);
     this.watchers = [];
@@ -3445,6 +3715,6 @@ var ReferenceLinkerPlugin = class extends Plugin {
     await this.saveData(this.settings);
   }
 };
-Object.assign(ReferenceLinkerPlugin.prototype, api);
+Object.assign(ReferenceLinkerPlugin.prototype, api, indexEvents);
 Object.assign(ReferenceLinkerPlugin.prototype, actualize.methods);
 module.exports = ReferenceLinkerPlugin;

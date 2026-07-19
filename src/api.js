@@ -83,17 +83,4 @@ module.exports = {
     }
     return { files: this.fileCache.size, entries: this.index.length, byExt, byKind };
   },
-
-  onIndexChange(cb) {
-    if (typeof cb !== 'function') return () => {};
-    if (!this._indexListeners) this._indexListeners = new Set();
-    this._indexListeners.add(cb);
-    return () => this._indexListeners.delete(cb);
-  },
-
-  notifyIndexChange() {
-    for (const cb of this._indexListeners || []) {
-      try { cb(); } catch (e) { /* subscriber threw */ }
-    }
-  },
 };
