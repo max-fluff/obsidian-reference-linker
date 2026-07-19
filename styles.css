@@ -309,8 +309,17 @@ settings:
   text-overflow: ellipsis;
 }
 
+.reference-linker-embed {
+  width: fit-content;
+  max-width: 100%;
+}
+
+/* The header must not widen the frame, or a long title leaves the page floating in dead
+   space; zero intrinsic width + min-width lets it fill and ellipsize instead. */
 .reference-linker-embed-header {
   cursor: pointer;
+  width: 0;
+  min-width: 100%;
 }
 
 .reference-linker-hover-body,
