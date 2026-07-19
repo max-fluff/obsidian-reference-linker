@@ -1,4 +1,4 @@
-/* Reference Linker 1.0.0 — assembled from the shared styles and src/styles.css by "npm run build". Do not edit directly. */
+/* Reference Linker 1.0.1 — assembled from the shared styles and src/styles.css by "npm run build". Do not edit directly. */
 
 /* Styles every linker plugin uses. The token below stands for the plugin class prefix;
    build.mjs substitutes it when it assembles styles.css. See CONTRIBUTING.md. */
@@ -347,4 +347,4 @@ settings:
   gap: 6px;
 }
 
-/* Reference Linker 1.0.0 */
+/* Reference Linker 1.0.1 */

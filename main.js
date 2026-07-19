@@ -1,4 +1,4 @@
-/* Reference Linker 1.0.0 — bundled from src/ by esbuild. Do not edit directly; edit src/ and run "npm run build". */
+/* Reference Linker 1.0.1 — bundled from src/ by esbuild. Do not edit directly; edit src/ and run "npm run build". */
 "use strict";
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __commonJS = (cb, mod) => function __require() {
