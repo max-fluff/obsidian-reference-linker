@@ -22,7 +22,7 @@ The plugin ships as `main.js`, `manifest.json` and `styles.css`. It scans the fo
 - [What it does](#what-it-does)
   - [Autocomplete as you type](#autocomplete-as-you-type)
   - [PDF sections](#pdf-sections)
-  - [Portable `{root}` links](#portable-root-links)
+  - [Portable `{ref-root}` links](#portable-ref-root-links)
   - [Opening at a page](#opening-at-a-page)
   - [Hover preview](#hover-preview)
   - [Inline embeds](#inline-embeds)
@@ -46,7 +46,7 @@ Type a trigger (default `@!`) followed by a document name and pick a match. The 
 The inserted link looks like:
 
 ```markdown
-[paper-with-outline](file:///{root}/papers/paper-with-outline.pdf)
+[paper-with-outline](file:///{ref-root}/papers/paper-with-outline.pdf)
 ```
 
 Filter a common name by an inline prefix: an extension (`pdf:`, `png:`) or `sec:` to match only PDF sections.
@@ -56,14 +56,16 @@ Filter a common name by an inline prefix: an extension (`pdf:`, `png:`) or `sec:
 For a PDF, the plugin reads its outline (bookmarks) and indexes each section with its page number. It's the same idea as Code Linker indexing a symbol on its line, with a section on its page instead. So `@!intro` finds the *Introduction* section of a paper, and the inserted link carries that page, plus a `sec:` binding in the title that pins it to the section (see [Keeping links current](#keeping-links-current)):
 
 ```markdown
-[Introduction](file:///{root}/papers/paper-with-outline.pdf#page=1 "sec:Introduction")
+[Introduction](file:///{ref-root}/papers/paper-with-outline.pdf#page=1 "sec:Introduction")
 ```
 
 A PDF with no outline is still indexed by file name. Other document types (Office, EPUB, images) are indexed by name too.
 
-### Portable `{root}` links
+### Portable `{ref-root}` links
 
-`{root}` is not expanded when the link is inserted. The note keeps the literal text `{root}` and a relative path, and the absolute base is filled in only when the link is opened or rendered. That keeps notes portable across machines: the file on disk holds a relative path, and each machine supplies its own **Reference root**.
+`{ref-root}` is not expanded when the link is inserted. The note keeps the literal text `{ref-root}` and a relative path, and the absolute base is filled in only when the link is opened or rendered. That keeps notes portable across machines: the file on disk holds a relative path, and each machine supplies its own **Reference root**.
+
+The token is namespaced so a link says which plugin owns it — Code Linker writes `{code-root}` into its own links. Notes written before the namespacing carry a bare `{root}`, which still resolves: it is read as this plugin's when a `sec:` binding or the path itself shows the link is ours, and left alone otherwise.
 
 ### Opening at a page
 
@@ -99,7 +101,7 @@ A note is text first. In `[label](url "title")` the address is the url and the l
 A section link is inserted already pinned to its section:
 
 ```markdown
-[whatever you like](file:///{root}/papers/paper-with-outline.pdf#page=2 "sec:Methods")
+[whatever you like](file:///{ref-root}/papers/paper-with-outline.pdf#page=2 "sec:Methods")
 ```
 
 The `sec:` binding is what the plugin follows. If the PDF is reissued and *Methods* moves to another page, the link gets a warning-coloured underline and can be fixed to the new page. If the section is gone from the outline, or the document isn't indexed, the underline is error-coloured. A link with no binding, or a title that names no section (a plain tooltip), is left alone. **Mark stale links** (on by default) toggles the underlines; they show in reading view and live preview.
@@ -117,7 +119,7 @@ Because the section is named in the title, not read from the label, the label st
 - **Insert reference link** — insert a link at the cursor.
 - **Insert reference link as…** — insert one link with a one-off viewer choice, leaving the default alone.
 - **Open referenced document** — open the picked document without inserting.
-- **Copy reference link** — copy the link with `{root}` resolved to the absolute path (a copied link is usually pasted outside the vault, where the portable token wouldn't resolve).
+- **Copy reference link** — copy the link with `{ref-root}` resolved to the absolute path (a copied link is usually pasted outside the vault, where the portable token wouldn't resolve).
 - **Insert reference embed** — insert a ` ```reference-link ` block.
 - **Convert selection to reference link** / **Find and open document** — resolve the selection against the index, then convert it or open the document (one match acts directly, several open the picker).
 - **Update reference links in this note** / **… in the whole vault**.
@@ -174,7 +176,7 @@ The in-memory index is exposed at `app.plugins.plugins['reference-linker'].api`:
 | `getStats()` | `{ files, entries, byExt, byKind }` |
 | `find(text)` | entries matching a name or path tail |
 | `linkFor(entry)` | the portable `[name](uri)` markdown link |
-| `uriFor(entry)` | a ready-to-open absolute URI (`{root}` resolved) |
+| `uriFor(entry)` | a ready-to-open absolute URI (`{ref-root}` resolved) |
 | `onChange(cb)` | subscribe to rebuilds; returns an unsubscribe function |
 | `version`, `root()` | plugin version; the resolved reference root |
 
