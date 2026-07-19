@@ -17,7 +17,7 @@ const nodePath = require('path');
 const { PRESETS, DEFAULT_SETTINGS, parseExtensions, parseSkip, underSkip } = require('./constants');
 const { splitLines, inTableCell, inCode, inLink, linkRegex, splitTarget, withTitle } = require('./shared/markdown');
 const { parseBinding, formatBinding, bindStateFrom, bindingOwner, ownsBinding } = require('./shared/binding');
-const { fillRoot: fillRootToken, ownsRootToken } = require('./shared/root-token');
+const { fillRoot: fillRootToken, ownsRootToken, namespaceRoot } = require('./shared/root-token');
 const { sharedSection } = require('./shared/menu');
 const { peersOffering } = require('./shared/discover');
 const { ownsLink } = require('./shared/link-owner');
@@ -212,6 +212,14 @@ class ReferenceLinkerPlugin extends Plugin {
   migrateSettings() {
     // Normalize the skip list to one folder per line (older saves were comma-separated).
     this.settings.skipDirs = (this.settings.skipDirs || '').split(/[\n,]+/).map((s) => s.trim()).filter(Boolean).join('\n');
+    // {root} became {ref-root} so a link says whose it is. Templates are our own setting,
+    // so a {root} in one can only ever have meant our root — rewriting it is safe, and it
+    // has to happen before the preset check below or a migrated preset would be filed as
+    // "Custom". Notes already written keep their bare {root}: it still resolves, and
+    // rewriting someone's vault is not a migration anyone asked for.
+    this.settings.uriTemplate = namespaceRoot(this.settings.uriTemplate, OWNER);
+    for (const e of this.settings.editors || []) e.template = namespaceRoot(e.template, OWNER);
+
     // Preserve a non-preset template as a named viewer so it stays selectable.
     const tpl = this.settings.uriTemplate;
     const editors = this.settings.editors || (this.settings.editors = []);

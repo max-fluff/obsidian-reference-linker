@@ -138,9 +138,11 @@ var require_constants = __commonJS({
     "use strict";
     var { splitLines: splitLines2 } = require_markdown();
     var PRESETS2 = {
-      // {root} keeps the note portable: the file holds a relative path, the absolute
-      // reference root is filled in on render/click. Opens in the OS default app.
-      file: "file:///{root}/{path}"
+      // {ref-root} keeps the note portable: the file holds a relative path, the absolute
+      // reference root is filled in on render/click. Opens in the OS default app. Namespaced,
+      // so a link says which linker owns it — the bare {root} it replaces was filled by the
+      // code linker too.
+      file: "file:///{ref-root}/{path}"
     };
     var DEFAULT_SETTINGS2 = {
       // @@ is Code Linker's default; @! avoids a clash when both are installed.
@@ -311,7 +313,7 @@ var require_root_token = __commonJS({
         out = out.replace(tokenRe(LEGACY_TOKEN), root);
       return out;
     }
-    function namespaceRoot(url, owner) {
+    function namespaceRoot2(url, owner) {
       const s = String(url == null ? "" : url);
       if (!owner || !OWNER_TOKENS[owner])
         return s;
@@ -319,7 +321,7 @@ var require_root_token = __commonJS({
         return s;
       return s.replace(tokenRe(LEGACY_TOKEN), "{" + OWNER_TOKENS[owner] + "}");
     }
-    module2.exports = { OWNER_TOKENS, LEGACY_TOKEN, rootTokenIn, ownsRootToken: ownsRootToken2, fillRoot, namespaceRoot };
+    module2.exports = { OWNER_TOKENS, LEGACY_TOKEN, rootTokenIn, ownsRootToken: ownsRootToken2, fillRoot, namespaceRoot: namespaceRoot2 };
   }
 });
 
@@ -2798,7 +2800,7 @@ var nodePath = require("path");
 var { PRESETS, DEFAULT_SETTINGS, parseExtensions, parseSkip, underSkip } = require_constants();
 var { splitLines, inTableCell, inCode, inLink, linkRegex, splitTarget, withTitle } = require_markdown();
 var { parseBinding, formatBinding, bindStateFrom, bindingOwner, ownsBinding } = require_binding();
-var { fillRoot: fillRootToken, ownsRootToken } = require_root_token();
+var { fillRoot: fillRootToken, ownsRootToken, namespaceRoot } = require_root_token();
 var { sharedSection } = require_menu();
 var { peersOffering } = require_discover();
 var { ownsLink } = require_link_owner();
@@ -2937,6 +2939,9 @@ var ReferenceLinkerPlugin = class extends Plugin {
   }
   migrateSettings() {
     this.settings.skipDirs = (this.settings.skipDirs || "").split(/[\n,]+/).map((s) => s.trim()).filter(Boolean).join("\n");
+    this.settings.uriTemplate = namespaceRoot(this.settings.uriTemplate, OWNER);
+    for (const e of this.settings.editors || [])
+      e.template = namespaceRoot(e.template, OWNER);
     const tpl = this.settings.uriTemplate;
     const editors = this.settings.editors || (this.settings.editors = []);
     const known = Object.values(PRESETS).includes(tpl) || editors.some((e) => e.template === tpl);

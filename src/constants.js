@@ -3,9 +3,11 @@
 const { splitLines } = require('./shared/markdown');
 
 const PRESETS = {
-  // {root} keeps the note portable: the file holds a relative path, the absolute
-  // reference root is filled in on render/click. Opens in the OS default app.
-  file: 'file:///{root}/{path}',
+  // {ref-root} keeps the note portable: the file holds a relative path, the absolute
+  // reference root is filled in on render/click. Opens in the OS default app. Namespaced,
+  // so a link says which linker owns it — the bare {root} it replaces was filled by the
+  // code linker too.
+  file: 'file:///{ref-root}/{path}',
 };
 
 const DEFAULT_SETTINGS = {
