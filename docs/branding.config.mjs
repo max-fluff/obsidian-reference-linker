@@ -39,5 +39,16 @@ export default {
   },
 
   // Screenshots aren't shot yet — fill in once the demo vault is captured, then npm run plates.
-  plates: [],
+  plates: [
+    { src: 'hero.png',       title: 'Jump straight to the page',
+      caption: 'Documents outside your vault become links that open at the exact page.' },
+    { src: 'hover.png',      title: 'Preview on hover',
+      caption: 'Hover a link to read the page itself, without leaving your notes.' },
+    { src: 'embed.png',      title: 'Embed a page in your notes',
+      caption: 'A reference-link block renders a page or an image inline, and follows the file.' },
+    { src: 'stale.png',      title: 'Notice when a link drifts',
+      caption: 'A reissued document moves its sections — the links say so, and repair themselves.' },
+    { src: 'commands.png',   title: 'Insert, open, repair',
+      caption: 'Every action is a command: link a document, embed a page, fix a whole vault.' },
+  ],
 };

@@ -15,6 +15,10 @@ It's the document counterpart to [Code Linker](https://github.com/max-fluff/obsi
 
 > Desktop only. It reads files from disk through Node's filesystem API, which isn't available on mobile.
 
+<p align="center">
+  <img src="docs/images/hero.png" alt="A note linking to sections of a PDF that lives outside the vault, with one page embedded inline" width="700">
+</p>
+
 The plugin ships as `main.js`, `manifest.json` and `styles.css`. It scans the folders you configure and keeps the index in memory, so there's no index file to commit and nothing to generate: the index is rebuilt on startup and on demand. PDF outlines and page previews use the pdf.js that Obsidian already ships, so no second copy is bundled. `main.js` is built from `src/` with esbuild (see [Development](#development)).
 
 ## Contents
@@ -43,6 +47,10 @@ The plugin ships as `main.js`, `manifest.json` and `styles.css`. It scans the fo
 
 Type a trigger (default `@!`) followed by a document name and pick a match. The plugin indexes the files under your **Reference root** by name, with fuzzy matching. Suggestions are suppressed inside code blocks, inline code, frontmatter and existing links (see [Skipped contexts](#skipped-contexts)).
 
+<p align="center">
+  <img src="docs/images/suggest.png" alt="The autocomplete dropdown after typing the trigger and a document name" width="560">
+</p>
+
 The inserted link looks like:
 
 ```markdown
@@ -59,6 +67,10 @@ For a PDF, the plugin reads its outline (bookmarks) and indexes each section wit
 [Introduction](file:///{ref-root}/papers/paper-with-outline.pdf#page=1 "sec:Introduction")
 ```
 
+<p align="center">
+  <img src="docs/images/sections.png" alt="Suggestions filtered to sections only: the same section name in two documents, told apart by its path" width="560">
+</p>
+
 A PDF with no outline is still indexed by file name. Other document types (Office, EPUB, images) are indexed by name too.
 
 ### Portable `{ref-root}` links
@@ -74,6 +86,10 @@ Click a link and the document opens in your OS default app. When that app is a b
 The link is handed to the OS through the shell, so the `#page=` fragment survives intact. Obsidian's own external-link opener mangles it, so the plugin routes clicks on PDF-page links itself. The commands and the hover/embed headers open the same way.
 
 ### Hover preview
+
+<p align="center">
+  <img src="docs/images/hover.png" alt="The hover popover over a reference link, showing the target PDF page rendered" width="560">
+</p>
 
 Hover a reference link to preview it without leaving your notes: for a PDF, the target page rendered to a canvas; for an image, the image itself. Rendering uses the pdf.js that Obsidian already ships, so no second copy is bundled. In live preview, hold Ctrl/Cmd to show it, the way a note preview works; in reading view a plain hover is enough. Toggle it with **Preview on hover** in settings.
 
@@ -92,6 +108,10 @@ papers/paper-with-outline.pdf#page=3
 - An image path shows the image.
 - Optional `key: value` lines after the target tune it: `page: N`, `width: N`, `title: …`.
 
+<p align="center">
+  <img src="docs/images/embed.png" alt="Two rendered reference-link embeds: a PDF page with a title, and an image" width="640">
+</p>
+
 The header is clickable and opens the document at that page; right-click an embed for **Open** / **Refresh**. Embeds re-render when the index rebuilds, so an open embed follows changes on disk. The command **Insert reference embed** picks an entry and inserts the block.
 
 ### Keeping links current
@@ -106,11 +126,19 @@ A section link is inserted already pinned to its section:
 
 The `sec:` binding is what the plugin follows. If the PDF is reissued and *Methods* moves to another page, the link gets a warning-coloured underline and can be fixed to the new page. If the section is gone from the outline, or the document isn't indexed, the underline is error-coloured. A link with no binding, or a title that names no section (a plain tooltip), is left alone. **Mark stale links** (on by default) toggles the underlines; they show in reading view and live preview.
 
+<p align="center">
+  <img src="docs/images/stale.png" alt="Two marked links: a drifted one underlined in the warning colour, a link to a missing section in the error colour" width="560">
+</p>
+
 To fix drift:
 
 - **Update reference links in this note** / **… in the whole vault** rewrite each drifted link's page, keeping its binding.
 - Right-click a link for **Update this reference link** (when drifted), **Pin to section** (an unpinned link whose page begins a section), or **Unpin**.
 - **Pin unpinned reference links in this note** / **… in the whole vault** retrofit notes written before pinning.
+
+<p align="center">
+  <img src="docs/images/update-preview.png" alt="The update preview: each drifted link with its page-to-page change, checkable before anything is written" width="540">
+</p>
 
 Because the section is named in the title, not read from the label, the label stays yours to write however you like. A multi-word or non-ASCII section name is escaped in the binding (`sec:Chapter%201`) and shown in full again on hover.
 
@@ -126,6 +154,9 @@ Because the section is named in the title, not read from the label, the label st
 - **Pin unpinned reference links in this note** / **… in the whole vault** — attach a `sec:` binding to links whose page begins a section.
 - **Rebuild reference index**.
 
+<p align="center">
+  <img src="docs/images/commands.png" alt="The command palette filtered to the Reference Linker commands" width="560">
+</p>
 
 ### Priority among linker plugins
 
@@ -134,6 +165,10 @@ Install more than one linker and they will sometimes claim the same word or the 
 The list appears only when another linker is installed. Each plugin moves itself, so reordering may take a move from more than one settings tab; every arrangement is reachable that way.
 
 The selection commands are also in the editor's right-click menu. Right-clicking an existing reference link adds link-specific items: **Copy reference link**, **Pin to section** / **Unpin**, and **Update this reference link** when its section has drifted.
+
+<p align="center">
+  <img src="docs/images/context-menu.png" alt="The right-click menu on a reference link, showing the link-specific items" width="420">
+</p>
 
 ## Settings
 
