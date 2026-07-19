@@ -18,8 +18,7 @@ const { PRESETS, DEFAULT_SETTINGS, parseExtensions, parseSkip, underSkip } = req
 const { splitLines, inTableCell, inCode, inLink, linkRegex, splitTarget, withTitle } = require('./shared/markdown');
 const { parseBinding, formatBinding, bindStateFrom, bindingOwner, ownsBinding } = require('./shared/binding');
 const { fillRoot: fillRootToken, ownsRootToken, namespaceRoot } = require('./shared/root-token');
-const { sharedSection } = require('./shared/menu');
-const { peersOffering } = require('./shared/discover');
+const { buildMenu } = require('./shared/menu-verbs');
 const { ownsLink } = require('./shared/link-owner');
 const { ReferenceSuggest } = require('./suggest');
 const filter = require('./filter');
@@ -156,7 +155,7 @@ class ReferenceLinkerPlugin extends Plugin {
     this.addCommand({ id: 'pin-links-vault', name: t('cmd.pinLinksVault'), callback: () => this.pinLinksInVault() });
 
     this.registerEvent(
-      this.app.workspace.on('editor-menu', (menu, editor) => {
+      this.app.workspace.on('editor-menu', (nativeMenu, editor) => buildMenu(this, nativeMenu, (menu) => {
         if (!this.settings.contextMenu) return;
         // Convert writes a link, so it's offered only where that's safe (not in a link,
         // code, or frontmatter); open is read-only, so it's offered anywhere but a link.
@@ -189,7 +188,7 @@ class ReferenceLinkerPlugin extends Plugin {
             menu.addItem((item) => item.setTitle(t('menu.pin', { sec: pin.value })).setIcon('pin').onClick(() => this.pinLinkAtCursor(editor, link)));
           }
         }
-      })
+      }))
     );
 
     // The disk cache (loaded above) gives an instant index on startup; this
@@ -927,16 +926,11 @@ class ReferenceLinkerPlugin extends Plugin {
     new Notice(t('notice.unpinned'));
   }
 
-  // One of the two selection verbs, nested under the verb itself when the code linker will
-  // offer the same one. Whether to nest has to be settled before anything is written: an item
-  // already in Obsidian's menu can't be pulled back out and reparented, so we ask the sibling
-  // first rather than discovering the clash afterwards.
+  // One of the two selection verbs. The builder decides whether it ends up under the verb
+  // or on its own; the wording follows, since inside the submenu the verb is already named.
   selectionItem(menu, kind, icon, run) {
-    const provider = this.api && this.api.linker;
-    const shared = !!provider && peersOffering(this.app, provider, kind).length > 0;
-    const where = shared ? sharedSection(menu, 'linker:' + kind, t('menu.' + kind + '.group'), icon) : menu;
-    where.addItem((item) => item
-      .setTitle(t(shared ? 'menu.' + kind + '.item' : 'menu.' + kind + '.solo'))
+    menu.tagged(kind, {}, (item, grouped) => item
+      .setTitle(t('menu.' + kind + (grouped ? '.item' : '.solo')))
       .setIcon(icon)
       .onClick(run));
   }
