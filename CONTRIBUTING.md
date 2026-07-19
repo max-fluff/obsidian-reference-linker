@@ -13,11 +13,17 @@ npm install      # once, installs esbuild
 npm run build    # bundle src/ -> main.js
 ```
 
-`main.js` is generated. Edit the modules in `src/` and rebuild; don't edit `main.js` by hand. The [Development](README.md#development) section explains how `src/` is laid out.
+`main.js` is generated. Edit the modules in `src/` and rebuild; don't edit `main.js` by hand.
+
+`npm test` runs everything. CI runs `npm run test:core` — the tests a push has to pass, which are the ones whose failure you cannot see for yourself: the cross-plugin contract, and whether the built bundle loads at all. The rest pin behaviour, and behaviour is what most commits are meant to change. The [Development](README.md#development) section explains how `src/` is laid out.
 
 ## Adding a viewer preset
 
 Built-in viewer presets live in `src/constants.js` (`PRESETS`) with their labels in `src/locales/`. A preset is a URL template built from the placeholders `{root}` `{path}` `{abs}` `{page}` `{name}`. Links are opened by handing that URL to the OS (`shell.openExternal`), which is what keeps a PDF's `#page=` fragment intact. The plugin deliberately doesn't spawn viewer processes. If you need a specific app, add a named template under *Your viewers* with a URL scheme it registers.
+
+## The shared submodule
+
+`src/shared/` is a git submodule shared with the three sibling linkers, and most of the interesting code lives there. Read [`src/shared/CONTRIBUTING.md`](src/shared/CONTRIBUTING.md) before changing anything under it: it has the architecture, the `api.linker` contract that lets the plugins coexist, the rules for menus, CSS and locales, and the order commits have to go in.
 
 ## Pull requests
 

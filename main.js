@@ -453,12 +453,22 @@ var require_discover = __commonJS({
         return (a.precedence || 0) > (b.precedence || 0);
       return String(a.id) < String(b.id);
     }
-    function foreignRanges(app, self, text) {
+    function drawsHere(peer, where) {
+      if (typeof peer.drawsIn !== "function")
+        return true;
+      const w = where || {};
+      try {
+        return peer.drawsIn(w.path, w.surface) !== false;
+      } catch (e) {
+        return true;
+      }
+    }
+    function foreignRanges(app, self, text, where) {
       const ranges = [];
       for (const peer of discoverLinkers(app)) {
         if (peer.id === self.id || !outranks(peer, self))
           continue;
-        if (typeof peer.matches !== "function")
+        if (typeof peer.matches !== "function" || !drawsHere(peer, where))
           continue;
         let matches;
         try {
@@ -482,20 +492,20 @@ var require_discover = __commonJS({
       }
       return false;
     }
-    function ownedMatches(app, self, text, matches) {
+    function ownedMatches(app, self, text, matches, where) {
       if (!matches.length)
         return matches;
-      const foreign = foreignRanges(app, self, text);
+      const foreign = foreignRanges(app, self, text, where);
       if (!foreign.length)
         return matches;
       return matches.filter((m) => !overlaps(foreign, m.start, m.end));
     }
-    function yieldedCandidates(app, self, text) {
+    function yieldedCandidates(app, self, text, where) {
       const out = [];
       for (const peer of discoverLinkers(app)) {
         if (peer.id === self.id || outranks(peer, self))
           continue;
-        if (typeof peer.matches !== "function")
+        if (typeof peer.matches !== "function" || !drawsHere(peer, where))
           continue;
         let matches;
         try {
@@ -515,6 +525,17 @@ var require_discover = __commonJS({
             // again at click time.
             id: peer.id,
             source: peer.displayName || peer.id,
+            // How this row reads in an ambiguity list, asked of its owner and only when a list is
+            // actually drawn — every span on screen produces candidates, few are ever looked at.
+            describe: (display) => {
+              if (typeof peer.describe !== "function")
+                return null;
+              try {
+                return peer.describe(m.target, display);
+              } catch (e) {
+                return null;
+              }
+            },
             open: (sourcePath, newTab) => {
               if (typeof peer.open === "function")
                 peer.open(m.target, sourcePath, newTab);
@@ -531,14 +552,14 @@ var require_discover = __commonJS({
     function candidatesFor(candidates, s, e) {
       return candidates.filter((c) => c.start < e && c.end > s);
     }
-    function peerSuggestions(app, self, query) {
+    function peerSuggestions(app, self, query, sourcePath) {
       const out = [];
       for (const peer of discoverLinkers(app)) {
         if (peer.id === self.id || typeof peer.suggest !== "function")
           continue;
         let items;
         try {
-          items = peer.suggest(String(query || "")) || [];
+          items = peer.suggest(String(query || ""), sourcePath) || [];
         } catch (e) {
           items = [];
         }
@@ -555,7 +576,14 @@ var require_discover = __commonJS({
             id: peer.id,
             source: peer.displayName || peer.id,
             precedence: peer.precedence || 0,
-            insert: (display, inTable) => typeof peer.linkFor === "function" ? peer.linkFor(it.target, display, inTable) : null
+            // Answered by the row's owner, including whether to compose a link at all. A peer
+            // that predates `insertFor` has only `linkFor`, which always links — the right
+            // reading for a plugin with no plain-text mode to consult.
+            insert: (display, inTable) => {
+              if (typeof peer.insertFor === "function")
+                return peer.insertFor(it.target, display, inTable);
+              return typeof peer.linkFor === "function" ? peer.linkFor(it.target, display, inTable) : null;
+            }
           });
         }
       }
@@ -580,7 +608,7 @@ var require_discover = __commonJS({
     function siblingLinkers(app, self) {
       return discoverLinkers(app).filter((p) => p.id !== self.id);
     }
-    module2.exports = { LINKER_API, discoverLinkers, outranks, foreignRanges, overlaps, ownedMatches, yieldedCandidates, candidatesFor, peerSuggestions, peersOffering, siblingLinkers };
+    module2.exports = { LINKER_API, discoverLinkers, outranks, drawsHere, foreignRanges, overlaps, ownedMatches, yieldedCandidates, candidatesFor, peerSuggestions, peersOffering, siblingLinkers };
   }
 });
 
@@ -676,6 +704,8 @@ var require_prose = __commonJS({
       "set.linkSuggest.name": "Suggest links while typing",
       "set.suggestMinChars.desc": "How many characters to type before suggestions appear.",
       "set.suggestSkipAfter.name": "Skip after characters",
+      "set.suggestPlainText.name": "Insert plain text",
+      "set.suggestPlainText.desc": "Suggestions complete the word without turning it into a link.",
       "set.heading.contextMenu": "Context menu",
       // The shared submenu the exclusion items collect into, and their wording inside it, where
       // the parent already names the word.
@@ -699,6 +729,11 @@ var require_prose = __commonJS({
       "set.matchMode.exact": "Exact (case-insensitive)",
       "set.matchMode.endingStrip": "Light ending strip",
       "set.matchMode.stemmer": "Stemmer (best across forms)",
+      "kind.heading": "Heading",
+      "kind.term": "Term",
+      "kind.viaAlias": "via alias \u201C{form}\u201D",
+      "set.smartCase.name": "Smart case for acronyms",
+      "set.smartCase.desc": "Match mostly-uppercase terms (like \u201CIT\u201D or \u201CNASA\u201D) case-sensitively, so they don\u2019t link ordinary words.",
       "set.scopeMode.name": "Where to link",
       "set.scopeMode.vault": "The whole vault",
       "set.scopeMode.folders": "Only chosen folders",
@@ -736,6 +771,8 @@ var require_prose = __commonJS({
       "set.linkSuggest.name": "\u041F\u043E\u0434\u0441\u043A\u0430\u0437\u044B\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0438 \u043F\u0440\u0438 \u043D\u0430\u0431\u043E\u0440\u0435",
       "set.suggestMinChars.desc": "\u0421\u043A\u043E\u043B\u044C\u043A\u043E \u0441\u0438\u043C\u0432\u043E\u043B\u043E\u0432 \u043D\u0430\u0431\u0440\u0430\u0442\u044C, \u043F\u0440\u0435\u0436\u0434\u0435 \u0447\u0435\u043C \u043F\u043E\u044F\u0432\u044F\u0442\u0441\u044F \u043F\u043E\u0434\u0441\u043A\u0430\u0437\u043A\u0438.",
       "set.suggestSkipAfter.name": "\u041F\u0440\u043E\u043F\u0443\u0441\u043A\u0430\u0442\u044C \u043F\u043E\u0441\u043B\u0435 \u0441\u0438\u043C\u0432\u043E\u043B\u043E\u0432",
+      "set.suggestPlainText.name": "\u0412\u0441\u0442\u0430\u0432\u043B\u044F\u0442\u044C \u043F\u0440\u043E\u0441\u0442\u043E\u0439 \u0442\u0435\u043A\u0441\u0442",
+      "set.suggestPlainText.desc": "\u041F\u043E\u0434\u0441\u043A\u0430\u0437\u043A\u0430 \u0434\u043E\u043F\u0438\u0441\u044B\u0432\u0430\u0435\u0442 \u0441\u043B\u043E\u0432\u043E, \u043D\u0435 \u043F\u0440\u0435\u0432\u0440\u0430\u0449\u0430\u044F \u0435\u0433\u043E \u0432 \u0441\u0441\u044B\u043B\u043A\u0443.",
       "set.heading.contextMenu": "\u041A\u043E\u043D\u0442\u0435\u043A\u0441\u0442\u043D\u043E\u0435 \u043C\u0435\u043D\u044E",
       "exclude.group": "\u0418\u0441\u043A\u043B\u044E\u0447\u0438\u0442\u044C \xAB{value}\xBB",
       "exclude.addShort": "\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u0432 {noun}",
@@ -757,6 +794,11 @@ var require_prose = __commonJS({
       "set.matchMode.exact": "\u0422\u043E\u0447\u043D\u043E\u0435 (\u0431\u0435\u0437 \u0443\u0447\u0451\u0442\u0430 \u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0430)",
       "set.matchMode.endingStrip": "\u041B\u0451\u0433\u043A\u043E\u0435 \u043E\u0442\u0441\u0435\u0447\u0435\u043D\u0438\u0435 \u043E\u043A\u043E\u043D\u0447\u0430\u043D\u0438\u0439",
       "set.matchMode.stemmer": "\u0421\u0442\u0435\u043C\u043C\u0435\u0440 (\u043B\u0443\u0447\u0448\u0435 \u0434\u043B\u044F \u0432\u0441\u0435\u0445 \u0444\u043E\u0440\u043C)",
+      "kind.heading": "\u0417\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A",
+      "kind.term": "\u0422\u0435\u0440\u043C\u0438\u043D",
+      "kind.viaAlias": "\u043F\u043E \u0430\u043B\u0438\u0430\u0441\u0443 \xAB{form}\xBB",
+      "set.smartCase.name": "\u0423\u043C\u043D\u044B\u0439 \u0440\u0435\u0433\u0438\u0441\u0442\u0440 \u0434\u043B\u044F \u0430\u0431\u0431\u0440\u0435\u0432\u0438\u0430\u0442\u0443\u0440",
+      "set.smartCase.desc": "\u0422\u0435\u0440\u043C\u0438\u043D\u044B \u0438\u0437 \u0437\u0430\u0433\u043B\u0430\u0432\u043D\u044B\u0445 \u0431\u0443\u043A\u0432 (\u043D\u0430\u043F\u0440\u0438\u043C\u0435\u0440 \xABIT\xBB \u0438\u043B\u0438 \xABNASA\xBB) \u0441\u043E\u043F\u043E\u0441\u0442\u0430\u0432\u043B\u044F\u044E\u0442\u0441\u044F \u0441 \u0443\u0447\u0451\u0442\u043E\u043C \u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0430, \u0447\u0442\u043E\u0431\u044B \u043D\u0435 \u0446\u0435\u043F\u043B\u044F\u0442\u044C \u043E\u0431\u044B\u0447\u043D\u044B\u0435 \u0441\u043B\u043E\u0432\u0430.",
       "set.scopeMode.name": "\u0413\u0434\u0435 \u0441\u0432\u044F\u0437\u044B\u0432\u0430\u0442\u044C",
       "set.scopeMode.vault": "\u0412\u0441\u0451 \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435",
       "set.scopeMode.folders": "\u0422\u043E\u043B\u044C\u043A\u043E \u0432\u044B\u0431\u0440\u0430\u043D\u043D\u044B\u0435 \u043F\u0430\u043F\u043A\u0438",
@@ -791,6 +833,8 @@ var require_prose = __commonJS({
       "set.linkSuggest.name": "Links w\xE4hrend der Eingabe vorschlagen",
       "set.suggestMinChars.desc": "Wie viele Zeichen einzugeben sind, bevor Vorschl\xE4ge erscheinen.",
       "set.suggestSkipAfter.name": "Nach Zeichen \xFCberspringen",
+      "set.suggestPlainText.name": "Reinen Text einf\xFCgen",
+      "set.suggestPlainText.desc": "Vorschl\xE4ge vervollst\xE4ndigen das Wort, ohne daraus einen Link zu machen.",
       "set.heading.contextMenu": "Kontextmen\xFC",
       "label.selection": "Auswahl",
       "modal.leftAsText": "\u2014 als Text belassen \u2014",
@@ -809,6 +853,11 @@ var require_prose = __commonJS({
       "set.matchMode.exact": "Exakter Treffer",
       "set.matchMode.endingStrip": "Endungen abschneiden",
       "set.matchMode.stemmer": "Stemmer (empfohlen)",
+      "kind.heading": "\xDCberschrift",
+      "kind.term": "Begriff",
+      "kind.viaAlias": "\xFCber Alias \u201E{form}\u201C",
+      "set.smartCase.name": "Schreibweise von Abk\xFCrzungen beachten",
+      "set.smartCase.desc": "\xDCberwiegend gro\xDFgeschriebene Begriffe (etwa \u201EIT\u201C oder \u201ENASA\u201C) werden nur bei gleicher Schreibweise verkn\xFCpft, damit sie keine gew\xF6hnlichen W\xF6rter erfassen.",
       "set.scopeMode.name": "Verlinkungsbereich",
       "set.scopeMode.vault": "\xDCberall",
       "set.scopeMode.folders": "Nur aufgef\xFChrte Pfade",
@@ -841,6 +890,8 @@ var require_prose = __commonJS({
       "set.linkSuggest.name": "Sugerir enlaces al escribir",
       "set.suggestMinChars.desc": "Cu\xE1ntos caracteres escribir antes de que aparezcan las sugerencias.",
       "set.suggestSkipAfter.name": "Omitir tras caracteres",
+      "set.suggestPlainText.name": "Insertar texto sin enlace",
+      "set.suggestPlainText.desc": "Las sugerencias completan la palabra sin convertirla en un enlace.",
       "set.heading.contextMenu": "Men\xFA contextual",
       "label.selection": "selecci\xF3n",
       "modal.leftAsText": "\u2014 dejado como texto \u2014",
@@ -859,6 +910,11 @@ var require_prose = __commonJS({
       "set.matchMode.exact": "Coincidencia exacta",
       "set.matchMode.endingStrip": "Quitar terminaciones",
       "set.matchMode.stemmer": "Lematizador (recomendado)",
+      "kind.heading": "Encabezado",
+      "kind.term": "T\xE9rmino",
+      "kind.viaAlias": "por el alias \xAB{form}\xBB",
+      "set.smartCase.name": "Distinguir may\xFAsculas en siglas",
+      "set.smartCase.desc": "Los t\xE9rminos escritos casi todo en may\xFAsculas (como \xABIT\xBB o \xABNASA\xBB) solo coinciden con esa misma graf\xEDa, para que no enlacen palabras corrientes.",
       "set.scopeMode.name": "\xC1mbito de enlazado",
       "set.scopeMode.vault": "En todas partes",
       "set.scopeMode.folders": "Solo rutas indicadas",
@@ -891,6 +947,8 @@ var require_prose = __commonJS({
       "set.linkSuggest.name": "Sugg\xE9rer des liens pendant la saisie",
       "set.suggestMinChars.desc": "Combien de caract\xE8res saisir avant que les suggestions apparaissent.",
       "set.suggestSkipAfter.name": "Ignorer apr\xE8s caract\xE8res",
+      "set.suggestPlainText.name": "Ins\xE9rer du texte simple",
+      "set.suggestPlainText.desc": "Les suggestions compl\xE8tent le mot sans en faire un lien.",
       "set.heading.contextMenu": "Menu contextuel",
       "label.selection": "s\xE9lection",
       "modal.leftAsText": "\u2014 laiss\xE9 en texte \u2014",
@@ -909,6 +967,11 @@ var require_prose = __commonJS({
       "set.matchMode.exact": "Correspondance exacte",
       "set.matchMode.endingStrip": "Suppression des terminaisons",
       "set.matchMode.stemmer": "Racinisation (recommand\xE9)",
+      "kind.heading": "Titre",
+      "kind.term": "Terme",
+      "kind.viaAlias": "via l\u2019alias \xAB {form} \xBB",
+      "set.smartCase.name": "Respecter la casse des sigles",
+      "set.smartCase.desc": "Les termes \xE9crits en majuscules (comme \xAB IT \xBB ou \xAB NASA \xBB) ne correspondent qu\u2019\xE0 la m\xEAme graphie, afin de ne pas lier des mots ordinaires.",
       "set.scopeMode.name": "Port\xE9e du liage",
       "set.scopeMode.vault": "Partout",
       "set.scopeMode.folders": "Chemins list\xE9s seulement",
@@ -941,6 +1004,8 @@ var require_prose = __commonJS({
       "set.linkSuggest.name": "\u041F\u0440\u043E\u043F\u043E\u043D\u0443\u0432\u0430\u0442\u0438 \u043F\u043E\u0441\u0438\u043B\u0430\u043D\u043D\u044F \u043F\u0456\u0434 \u0447\u0430\u0441 \u043D\u0430\u0431\u043E\u0440\u0443",
       "set.suggestMinChars.desc": "\u0421\u043A\u0456\u043B\u044C\u043A\u0438 \u0441\u0438\u043C\u0432\u043E\u043B\u0456\u0432 \u043D\u0430\u0431\u0440\u0430\u0442\u0438, \u043F\u0435\u0440\u0448 \u043D\u0456\u0436 \u0437\u2019\u044F\u0432\u043B\u044F\u0442\u044C\u0441\u044F \u043F\u0456\u0434\u043A\u0430\u0437\u043A\u0438.",
       "set.suggestSkipAfter.name": "\u041F\u0440\u043E\u043F\u0443\u0441\u043A\u0430\u0442\u0438 \u043F\u0456\u0441\u043B\u044F \u0441\u0438\u043C\u0432\u043E\u043B\u0456\u0432",
+      "set.suggestPlainText.name": "\u0412\u0441\u0442\u0430\u0432\u043B\u044F\u0442\u0438 \u043F\u0440\u043E\u0441\u0442\u0438\u0439 \u0442\u0435\u043A\u0441\u0442",
+      "set.suggestPlainText.desc": "\u041F\u0456\u0434\u043A\u0430\u0437\u043A\u0430 \u0434\u043E\u043F\u0438\u0441\u0443\u0454 \u0441\u043B\u043E\u0432\u043E, \u043D\u0435 \u043F\u0435\u0440\u0435\u0442\u0432\u043E\u0440\u044E\u044E\u0447\u0438 \u0439\u043E\u0433\u043E \u043D\u0430 \u043F\u043E\u0441\u0438\u043B\u0430\u043D\u043D\u044F.",
       "set.heading.contextMenu": "\u041A\u043E\u043D\u0442\u0435\u043A\u0441\u0442\u043D\u0435 \u043C\u0435\u043D\u044E",
       "label.selection": "\u0432\u0438\u0434\u0456\u043B\u0435\u043D\u043D\u044F",
       "modal.leftAsText": "\u2014 \u0437\u0430\u043B\u0438\u0448\u0435\u043D\u043E \u0442\u0435\u043A\u0441\u0442\u043E\u043C \u2014",
@@ -959,6 +1024,11 @@ var require_prose = __commonJS({
       "set.matchMode.exact": "\u0422\u043E\u0447\u043D\u0438\u0439 \u0437\u0431\u0456\u0433",
       "set.matchMode.endingStrip": "\u0412\u0456\u0434\u0441\u0456\u043A\u0430\u043D\u043D\u044F \u0437\u0430\u043A\u0456\u043D\u0447\u0435\u043D\u044C",
       "set.matchMode.stemmer": "\u0421\u0442\u0435\u043C\u0435\u0440 (\u0440\u0435\u043A\u043E\u043C\u0435\u043D\u0434\u043E\u0432\u0430\u043D\u043E)",
+      "kind.heading": "\u0417\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A",
+      "kind.term": "\u0422\u0435\u0440\u043C\u0456\u043D",
+      "kind.viaAlias": "\u0437\u0430 \u0430\u043B\u0456\u0430\u0441\u043E\u043C \xAB{form}\xBB",
+      "set.smartCase.name": "\u0420\u043E\u0437\u0443\u043C\u043D\u0438\u0439 \u0440\u0435\u0433\u0456\u0441\u0442\u0440 \u0434\u043B\u044F \u0430\u0431\u0440\u0435\u0432\u0456\u0430\u0442\u0443\u0440",
+      "set.smartCase.desc": "\u0422\u0435\u0440\u043C\u0456\u043D\u0438 \u0437 \u0432\u0435\u043B\u0438\u043A\u0438\u0445 \u043B\u0456\u0442\u0435\u0440 (\u043D\u0430\u043F\u0440\u0438\u043A\u043B\u0430\u0434 \xABIT\xBB \u0430\u0431\u043E \xABNASA\xBB) \u0437\u0456\u0441\u0442\u0430\u0432\u043B\u044F\u044E\u0442\u044C\u0441\u044F \u0437 \u0443\u0440\u0430\u0445\u0443\u0432\u0430\u043D\u043D\u044F\u043C \u0440\u0435\u0433\u0456\u0441\u0442\u0440\u0443, \u0449\u043E\u0431 \u043D\u0435 \u0447\u0456\u043F\u043B\u044F\u0442\u0438 \u0437\u0432\u0438\u0447\u0430\u0439\u043D\u0456 \u0441\u043B\u043E\u0432\u0430.",
       "set.scopeMode.name": "\u041E\u0431\u043B\u0430\u0441\u0442\u044C \u0437\u0432\u2019\u044F\u0437\u0443\u0432\u0430\u043D\u043D\u044F",
       "set.scopeMode.vault": "\u0423\u0441\u044E\u0434\u0438",
       "set.scopeMode.folders": "\u041B\u0438\u0448\u0435 \u0432\u043A\u0430\u0437\u0430\u043D\u0456 \u0448\u043B\u044F\u0445\u0438",
@@ -2500,6 +2570,7 @@ var require_precedence = __commonJS({
   "src/shared/precedence.js"(exports2, module2) {
     "use strict";
     var { discoverLinkers, outranks, siblingLinkers } = require_discover();
+    var { t: t2 } = require_i18n();
     var STEP = 10;
     function rankedLinkers(app) {
       return discoverLinkers(app).slice().sort((a, b) => {
@@ -2510,18 +2581,39 @@ var require_precedence = __commonJS({
         return 0;
       });
     }
+    function indexForPrecedence(others, self, value) {
+      const hypothetical = { precedence: value, id: self.id };
+      return others.filter((o) => outranks(o, hypothetical)).length;
+    }
     function precedenceForIndex(app, self, index) {
       const others = rankedLinkers(app).filter((p) => p.id !== self.id);
       if (!others.length)
         return self.precedence || 0;
       const at = Math.max(0, Math.min(index, others.length));
-      const above = at > 0 ? others[at - 1].precedence || 0 : null;
-      const below = at < others.length ? others[at].precedence || 0 : null;
-      if (above === null)
-        return below + STEP;
-      if (below === null)
-        return above - STEP;
-      return (above + below) / 2;
+      const values = others.map((p) => p.precedence || 0);
+      const candidates = [values[0] + STEP, values[values.length - 1] - STEP];
+      for (let i = 1; i < values.length; i++) {
+        if (values[i - 1] !== values[i])
+          candidates.push((values[i - 1] + values[i]) / 2);
+      }
+      for (const v of values)
+        candidates.push(v);
+      const from = currentIndex(app, self);
+      const wanted = Math.sign(at - from);
+      let best = null;
+      let bestLanded = null;
+      for (const v of candidates) {
+        const landed = indexForPrecedence(others, self, v);
+        if (landed === at)
+          return v;
+        if (Math.sign(landed - from) !== wanted)
+          continue;
+        if (best === null || Math.abs(landed - at) < Math.abs(bestLanded - at)) {
+          best = v;
+          bestLanded = landed;
+        }
+      }
+      return best === null ? self.precedence || 0 : best;
     }
     function currentIndex(app, self) {
       return rankedLinkers(app).findIndex((p) => p.id === self.id);
@@ -2567,7 +2659,21 @@ var require_precedence = __commonJS({
       };
       draw();
     }
-    module2.exports = { STEP, rankedLinkers, precedenceForIndex, currentIndex, renderPrecedence };
+    function renderPrecedenceSetting(containerEl, opts) {
+      renderPrecedence(containerEl, {
+        app: opts.app,
+        provider: opts.provider,
+        Setting: opts.Setting,
+        cls: opts.cls,
+        name: t2("set.precedence.name"),
+        desc: t2("set.precedence.desc"),
+        otherDesc: t2("set.precedence.other"),
+        upTooltip: t2("set.precedence.up"),
+        downTooltip: t2("set.precedence.down"),
+        save: opts.save
+      });
+    }
+    module2.exports = { STEP, rankedLinkers, precedenceForIndex, currentIndex, renderPrecedence, renderPrecedenceSetting };
   }
 });
 
@@ -2580,7 +2686,7 @@ var require_settings_tab = __commonJS({
     var { FolderSuggest, folderSuggestAvailable } = require_folder_suggest();
     var { renderFolderList } = require_folder_list();
     var { t: t2, plural: plural2 } = require_i18n();
-    var { renderPrecedence: precedenceSetting } = require_precedence();
+    var { renderPrecedenceSetting: precedenceSetting } = require_precedence();
     var normFolder = (p) => p.replace(/\\/g, "/").replace(/\/+$/, "").trim();
     var ReferenceLinkerSettingTab2 = class extends PluginSettingTab {
       constructor(app, plugin) {
@@ -2771,11 +2877,6 @@ var require_settings_tab = __commonJS({
           provider: this.plugin.api && this.plugin.api.linker,
           Setting,
           cls: "reference-linker",
-          name: t2("set.precedence.name"),
-          desc: t2("set.precedence.desc"),
-          otherDesc: t2("set.precedence.other"),
-          upTooltip: t2("set.precedence.up"),
-          downTooltip: t2("set.precedence.down"),
           save: async (value) => {
             s.linkPrecedence = value;
             await save(false);

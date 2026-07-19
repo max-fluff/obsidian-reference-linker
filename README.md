@@ -124,6 +124,13 @@ Because the section is named in the title, not read from the label, the label st
 - **Pin unpinned reference links in this note** / **… in the whole vault** — attach a `sec:` binding to links whose page begins a section.
 - **Rebuild reference index**.
 
+
+### Priority among linker plugins
+
+Install more than one linker and they will sometimes claim the same word or the same link. It goes to whichever sits highest in **Settings → Maintenance → Priority among linker plugins**, and the loser stands aside — no double highlight, one entry in the right-click menu, one merged list of suggestions while you type.
+
+The list appears only when another linker is installed. Each plugin moves itself, so reordering may take a move from more than one settings tab; every arrangement is reachable that way.
+
 The selection commands are also in the editor's right-click menu. Right-clicking an existing reference link adds link-specific items: **Copy reference link**, **Pin to section** / **Unpin**, and **Update this reference link** when its section has drifted.
 
 ## Settings

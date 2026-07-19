@@ -5,7 +5,7 @@ const { PRESETS } = require('./constants');
 const { FolderSuggest, folderSuggestAvailable } = require('./shared/deeplink/folder-suggest');
 const { renderFolderList } = require('./shared/folder-list');
 const { t, plural } = require('./shared/i18n');
-const { renderPrecedence: precedenceSetting } = require('./shared/precedence');
+const { renderPrecedenceSetting: precedenceSetting } = require('./shared/precedence');
 
 // Path tidy for the folder-list rows: backslashes to slashes, no trailing slash.
 const normFolder = (p) => p.replace(/\\/g, '/').replace(/\/+$/, '').trim();
@@ -185,11 +185,6 @@ class ReferenceLinkerSettingTab extends PluginSettingTab {
       provider: this.plugin.api && this.plugin.api.linker,
       Setting,
       cls: 'reference-linker',
-      name: t('set.precedence.name'),
-      desc: t('set.precedence.desc'),
-      otherDesc: t('set.precedence.other'),
-      upTooltip: t('set.precedence.up'),
-      downTooltip: t('set.precedence.down'),
       save: async (value) => { s.linkPrecedence = value; await save(false); },
     });
 
