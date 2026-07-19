@@ -5,6 +5,7 @@
 # Reference Linker
 
 <p align="center">
+  <a href="https://community.obsidian.md/plugins/reference-linker"><img src="https://img.shields.io/badge/dynamic/json?logo=obsidian&color=7c3aed&query=%24%5B%22reference-linker%22%5D.downloads&url=https%3A%2F%2Fraw.githubusercontent.com%2Fobsidianmd%2Fobsidian-releases%2Fmaster%2Fcommunity-plugin-stats.json&label=downloads" alt="Obsidian downloads"></a>
   <a href="https://github.com/max-fluff/obsidian-reference-linker/releases/latest"><img src="https://img.shields.io/github/v/release/max-fluff/obsidian-reference-linker?sort=semver&color=7c3aed&label=release" alt="Latest release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/max-fluff/obsidian-reference-linker?color=7c3aed" alt="License: MIT"></a>
 </p>
@@ -12,6 +13,8 @@
 An Obsidian plugin that autocompletes links to external documents (PDFs, Office files, images) and inserts a markdown link that opens the document in your default app at the right page. For PDFs it also indexes the outline, so you can link straight to a section, preview the page on hover, and embed it inline.
 
 It's the document counterpart to [Code Linker](https://github.com/max-fluff/obsidian-code-linker), which does the same for source code. Your reference material usually lives outside the vault, in project folders, download folders or a research library. This plugin makes it as linkable as a note, without copying anything in.
+
+Available in the Obsidian community catalog: **[community.obsidian.md/plugins/reference-linker](https://community.obsidian.md/plugins/reference-linker)**.
 
 > Desktop only. It reads files from disk through Node's filesystem API, which isn't available on mobile.
 
@@ -278,11 +281,13 @@ To deploy into a test vault on each build, create `esbuild.local.mjs` exporting 
 
 ## Installation
 
-This plugin is desktop-only, since it reads the filesystem. It isn't in the community catalog yet.
+This plugin is desktop-only, since it reads the filesystem.
+
+**From Obsidian (recommended).** Open *Settings → Community plugins → Browse*, search for **Reference Linker**, then *Install* and *Enable*. You can also open its catalog page directly: [community.obsidian.md/plugins/reference-linker](https://community.obsidian.md/plugins/reference-linker).
 
 **Manually.** Download `main.js`, `manifest.json` and `styles.css` from the [latest release](https://github.com/max-fluff/obsidian-reference-linker/releases/latest) into `<vault>/.obsidian/plugins/reference-linker/`, then enable the plugin in *Settings → Community plugins*.
 
-**Beta builds via [BRAT](https://github.com/TfTHacker/obsidian42-brat).** Add the repository `max-fluff/obsidian-reference-linker`.
+**Beta builds via [BRAT](https://github.com/TfTHacker/obsidian42-brat).** Add the repository `max-fluff/obsidian-reference-linker` to test unreleased changes before they reach the catalog.
 
 After enabling, set **Reference root** and **File extensions** in settings. The index stays empty until extensions are set.
 
@@ -315,10 +320,10 @@ The rest of the linker family, also by the author. Two of them autocomplete a na
   </a>
 </p>
 
-**[Heading Linker](https://github.com/max-fluff/obsidian-heading-linker)** — the file-based sibling of Glossary Linker: each heading inside a chosen file is a term, matched in any word form and turned into a link. Works on desktop and mobile. Not in the community catalog yet.
+**[Heading Linker](https://community.obsidian.md/plugins/heading-linker)** — the file-based sibling of Glossary Linker: each heading inside a chosen file is a term, matched in any word form and turned into a link. Works on desktop and mobile.
 
 <p align="center">
-  <a href="https://github.com/max-fluff/obsidian-heading-linker">
+  <a href="https://community.obsidian.md/plugins/heading-linker">
     <img src="docs/images/heading-linker-banner.svg" alt="Heading Linker — highlight words in any form, link them to headings" width="480">
   </a>
 </p>
