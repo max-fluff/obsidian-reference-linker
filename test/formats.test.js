@@ -51,6 +51,17 @@ describe('zip reader', () => {
     assert.strictEqual(openZip(tmp('a.zip', Buffer.from('not a zip at all'))), null);
   });
 
+  it('finds the real end record when the comment contains its signature', () => {
+    // A valid archive whose comment holds the EOCD signature bytes: the back-scan hits those
+    // first, so only the comment-length check tells the real record from the decoy.
+    let buf = writeZip([{ name: 'a.xml', data: '<hello/>' }]);
+    const decoy = Buffer.concat([Buffer.from([0x50, 0x4b, 0x05, 0x06]), Buffer.alloc(20, 0)]);
+    buf.writeUInt16LE(decoy.length, buf.length - 2); // real EOCD's comment-length field
+    const z = openZip(tmp('c.zip', Buffer.concat([buf, decoy])));
+    assert.ok(z, 'valid archive read as unopenable');
+    assert.strictEqual(z.text('a.xml'), '<hello/>');
+  });
+
   it('declines a file that is not there', () => {
     assert.strictEqual(openZip(path.join(os.tmpdir(), 'no-such-reflinker-file.zip')), null);
   });

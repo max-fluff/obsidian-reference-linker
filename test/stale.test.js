@@ -29,11 +29,14 @@ const load = async () => {
       { name: 'Title Slide', kind: 'section', path: 'Deck.pptx', lang: 'pptx', page: 1 },
       { name: 'Pan and Zoom', kind: 'section', path: 'Deck.pptx', lang: 'pptx', page: 7 },
     ] }],
-    // One heading anchors, one never had an id — the mix a real doc page has.
+    // One heading anchors, one never had an id — the mix a real doc page has. "Notes" appears
+    // twice: once with no id (a link pins to that), once with an id — the duplicate-heading trap.
     ['Doc.html', { entries: [
       { name: 'Doc', kind: 'file', path: 'Doc.html', lang: 'html', page: 1 },
       { name: 'Title', kind: 'section', path: 'Doc.html', lang: 'html', page: 1 },
       { name: 'Options', kind: 'section', path: 'Doc.html', lang: 'html', page: 5, anchor: '_options' },
+      { name: 'Notes', kind: 'section', path: 'Doc.html', lang: 'html', page: 6 },
+      { name: 'Notes', kind: 'section', path: 'Doc.html', lang: 'html', page: 8, anchor: '_notes' },
     ] }],
   ]);
   return plugin;
@@ -66,6 +69,25 @@ describe('stale marks', () => {
     const plugin = await load();
     const fixed = plugin.actualizedTarget(link('file:///x/Spec.pdf#page=3', 'Details'));
     assert.ok(fixed.startsWith('file:///x/Spec.pdf#page=7'), 'not repointed to page 7: ' + fixed);
+  });
+
+  it('fixes a page carried in a query in place, not by appending a dead #page=', async () => {
+    // A custom viewer template can carry {page} in the query. Appending #page= left the real
+    // ?page= untouched, so the link stayed stale forever and every update rewrote the note.
+    const plugin = await load();
+    const fixed = plugin.actualizedTarget(link('file:///x/Spec.pdf?page=3', 'Details'));
+    assert.ok(/\?page=7/.test(fixed) && !/#page=/.test(fixed), 'query page not fixed in place: ' + fixed);
+    assert.strictEqual(plugin.targetPage(fixed), 7);
+  });
+
+  it('does not flag a link pinned to an id-less heading that a same-named id sibling shadows', async () => {
+    const plugin = await load();
+    assert.strictEqual(plugin.linkState(link('file:///x/Doc.html', 'Notes')), null);
+  });
+
+  it('still fixes a real id drift even when a same-named heading exists', async () => {
+    const plugin = await load();
+    assert.strictEqual(plugin.linkState(link('file:///x/Doc.html#_gone', 'Notes')), 'stale');
   });
 
   it('leaves a PDF link that is already right alone', async () => {

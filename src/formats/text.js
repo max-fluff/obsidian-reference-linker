@@ -8,6 +8,7 @@ const fs = require('fs');
 const { isFenceLine } = require('../shared/markdown');
 const { renderLines, renderMarkdown } = require('./preview');
 const { assetLoader } = require('./html');
+const { clampPage } = require('./util');
 
 const ATX = /^(#{1,6})\s+(.+?)\s*#*\s*$/;
 const SETEXT = /^(=+|-{2,})\s*$/;
@@ -55,7 +56,7 @@ async function readSection(absPath, page) {
   if (!hs.length) {
     return { title: '', body: lines.map((l) => l.trimEnd()).filter(Boolean).slice(0, MAX_LINES), page: 1, total: 1 };
   }
-  const n = Math.min(Math.max(1, page | 0), lines.length);
+  const n = clampPage(page, lines.length);
   let at = hs.findIndex((h) => h.page === n);
   if (at < 0) at = 0;
   const here = hs[at];

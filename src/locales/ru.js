@@ -52,7 +52,7 @@ module.exports = {
   // Inline embeds
   'embed.empty': 'Reference Linker: пустой embed — укажите путь к документу',
   'embed.fmt.file': 'Документ (первая страница)',
-  'embed.fmt.section': 'Страница раздела ({page})',
+  'embed.fmt.section': 'Раздел «{name}»',
   'embed.unsupported': 'Reference Linker: нет инлайн-превью для {path}',
   'preview.empty': 'Здесь нечего показать',
   'embed.menu.open': 'Открыть документ',

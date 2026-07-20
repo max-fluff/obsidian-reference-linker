@@ -7,6 +7,7 @@
 const { openZip } = require('../zip');
 const { elements, attr, decodeEntities } = require('../xml');
 const { renderLines } = require('./preview');
+const { clampPage } = require('./util');
 
 const MAX_LINES = 60;
 
@@ -98,21 +99,21 @@ async function readSection(absPath, ext, page) {
   if (ext === 'odp') {
     const pages = elements(xml, 'draw:page');
     if (!pages.length) return null;
-    const n = Math.min(Math.max(1, page | 0), pages.length);
+    const n = clampPage(page, pages.length);
     const { title, body } = slideText(pages[n - 1]);
     return { title, body: body.slice(0, MAX_LINES), page: n, total: pages.length };
   }
   if (ext === 'ods') {
     const tables = elements(xml, 'table:table');
     if (!tables.length) return null;
-    const n = Math.min(Math.max(1, page | 0), tables.length);
+    const n = clampPage(page, tables.length);
     return { title: attr(tables[n - 1], 'table:name') || '', body: textLines(tables[n - 1]).slice(0, MAX_LINES), page: n, total: tables.length };
   }
 
   const hs = odtOutline(xml);
   const lines = textLines(xml);
   if (!hs.length) return { title: '', body: lines.slice(0, MAX_LINES), page: 1, total: 1 };
-  const n = Math.min(Math.max(1, page | 0), hs.length);
+  const n = clampPage(page, hs.length);
   const here = lines.indexOf(hs[n - 1].title);
   const next = hs[n] ? lines.indexOf(hs[n].title, here + 1) : lines.length;
   const body = lines.slice(here + 1, next < 0 ? lines.length : next);

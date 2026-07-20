@@ -75,6 +75,13 @@ settings:
   max-height: 60vh;
 }
 
+/* Stacked pages/sections of a range embed, set apart so the seam between them reads. */
+.%p%-embed-slot + .%p%-embed-slot {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
 /* Rendered PDF page (canvas) or image inside the popover / embed. */
 .%p%-hover-body canvas,
 .%p%-hover-body img,

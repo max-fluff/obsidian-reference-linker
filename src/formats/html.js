@@ -7,43 +7,19 @@
 
 const fs = require('fs');
 const nodePath = require('path');
+const { decodeEntities } = require('../xml');
 const { renderLines, renderHtml } = require('./preview');
+const { clampPage, assetSrc } = require('./util');
 
 // Read an image a page links to, from the page's own folder. Only inside that folder: a src
 // like "../../etc/passwd" in a saved page must not become a file read.
 function assetLoader(htmlAbs) {
   const dir = nodePath.dirname(htmlAbs);
   return (src) => {
-    const rel = decodeURIComponent(src.split(/[?#]/)[0]);
-    const abs = nodePath.resolve(dir, rel);
+    const abs = nodePath.resolve(dir, assetSrc(src));
     if (abs !== dir && !abs.startsWith(dir + nodePath.sep)) return null;
     return fs.readFileSync(abs);
   };
-}
-
-// XML has five named entities; HTML has hundreds, and generated docs lean on them heavily —
-// left raw they show up verbatim in the preview. This is the common set, not the full one.
-const NAMED = {
-  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'",
-  nbsp: ' ', shy: '­', ensp: ' ', emsp: ' ', thinsp: ' ',
-  ndash: '–', mdash: '—', hellip: '…', bull: '•', middot: '·', dagger: '†',
-  lsquo: '‘', rsquo: '’', ldquo: '“', rdquo: '”', laquo: '«', raquo: '»',
-  copy: '©', reg: '®', trade: '™', sect: '§', para: '¶', deg: '°',
-  larr: '←', rarr: '→', harr: '↔', times: '×', minus: '−', plusmn: '±',
-  ne: '≠', le: '≤', ge: '≥', euro: '€', pound: '£', yen: '¥', cent: '¢',
-};
-
-function decodeEntities(s) {
-  return String(s).replace(/&(#x?[0-9a-f]+|[a-z][a-z0-9]*);/gi, (m, body) => {
-    if (body[0] === '#') {
-      const code = body[1] === 'x' || body[1] === 'X'
-        ? parseInt(body.slice(2), 16)
-        : parseInt(body.slice(1), 10);
-      return Number.isFinite(code) ? String.fromCodePoint(code) : m;
-    }
-    const hit = NAMED[body.toLowerCase()];
-    return hit === undefined ? m : hit;
-  });
 }
 
 const HEADING = /<h([1-6])\b([^>]*)>([\s\S]*?)<\/h\1\s*>/gi;
@@ -112,7 +88,7 @@ async function readSection(absPath, page) {
   if (!html) return null;
   const hs = headings(html);
   if (!hs.length) return { title: '', body: blockLines(html).slice(0, MAX_LINES), page: 1, total: 1 };
-  const n = Math.min(Math.max(1, page | 0), hs.length);
+  const n = clampPage(page, hs.length);
   const here = hs[n - 1];
   const next = hs[n];
   const end = next ? next.from : html.length;

@@ -4,15 +4,27 @@
 // flatten text. Not a parser — it never validates, and it assumes the well-formed XML that
 // OOXML/ODF/EPUB producers emit.
 
-const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+// XML defines five named entities; the document formats (EPUB XHTML especially) lean on the
+// common HTML ones too, so the table carries those — left raw they show up verbatim in a
+// title or preview. It is the common set, not the full HTML list.
+const ENTITIES = {
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'",
+  nbsp: ' ', shy: '­', ensp: ' ', emsp: ' ', thinsp: ' ',
+  ndash: '–', mdash: '—', hellip: '…', bull: '•', middot: '·', dagger: '†',
+  lsquo: '‘', rsquo: '’', ldquo: '“', rdquo: '”', laquo: '«', raquo: '»',
+  copy: '©', reg: '®', trade: '™', sect: '§', para: '¶', deg: '°',
+  larr: '←', rarr: '→', harr: '↔', times: '×', minus: '−', plusmn: '±',
+  ne: '≠', le: '≤', ge: '≥', euro: '€', pound: '£', yen: '¥', cent: '¢',
+};
 
 function decodeEntities(s) {
-  return String(s).replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (m, body) => {
+  return String(s).replace(/&(#x?[0-9a-f]+|[a-z][a-z0-9]*);/gi, (m, body) => {
     if (body[0] === '#') {
       const code = body[1] === 'x' || body[1] === 'X'
         ? parseInt(body.slice(2), 16)
         : parseInt(body.slice(1), 10);
-      return Number.isFinite(code) ? String.fromCodePoint(code) : m;
+      // fromCodePoint throws past U+10FFFF; a malformed &#99999999; must not abort the file.
+      return code >= 0 && code <= 0x10ffff ? String.fromCodePoint(code) : m;
     }
     const hit = ENTITIES[body.toLowerCase()];
     return hit === undefined ? m : hit;
@@ -63,9 +75,12 @@ function scanElement(xml, start, tag) {
   return -1;
 }
 
+// Both quote styles: single quotes are well-formed XML and some EPUB/ODF producers emit them,
+// and a load-bearing attribute like full-path missed would fail the whole document.
 function attr(source, name) {
-  const m = new RegExp('\\s' + name + '\\s*=\\s*"([^"]*)"').exec(source);
-  return m ? decodeEntities(m[1]) : null;
+  const m = new RegExp('\\s' + name + '\\s*=\\s*(?:"([^"]*)"|\'([^\']*)\')').exec(source);
+  if (!m) return null;
+  return decodeEntities(m[1] !== undefined ? m[1] : m[2]);
 }
 
 // Concatenated text of every `<tag>` in source, in document order.

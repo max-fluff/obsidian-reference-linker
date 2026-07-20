@@ -53,12 +53,13 @@ const anchorFor = (entry) => {
 // alone: the preview honours it, an external open lands at the top of the file.
 const hasOsAnchor = (ext) => anchorKind(ext) !== null;
 
-// How a position reads in a header — "p. 5" for a paged document, "2:05" for a recording.
-// Null when the position is not worth showing (a whole file, page 1).
-const positionLabel = (ext, n) => {
-  if (!(n > 1)) return null;
+// How a position reads in a header — "p.5" or "p.3–5" for a paged document, "2:05" for a
+// recording. Null when the number would not mean a position to a reader: the whole file, or
+// an ordinal format (an HTML heading's "5" is not a page) where the name is already shown.
+const positionLabel = (ext, n, to) => {
+  if (!(n > 1) && !(to > 1)) return null;
   const h = handlerFor(ext);
-  return h && h.positionLabel ? h.positionLabel(n) : 'p.' + n;
+  return h && h.positionLabel ? h.positionLabel(n, to) : null;
 };
 
 async function outline(ext, absPath) {

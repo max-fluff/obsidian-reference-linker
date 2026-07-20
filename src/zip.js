@@ -13,11 +13,13 @@ const EOCD_MIN = 22;
 const MAX_COMMENT = 0xffff;
 
 // The EOCD sits at the end, behind a comment of unknown length, so it is found by scanning
-// back for its signature rather than by arithmetic.
+// back for its signature. The comment can itself contain the signature bytes, so a candidate
+// only counts when its own comment-length field accounts for exactly the bytes that follow —
+// that is what tells the real record from those four bytes appearing inside the comment.
 function findEocd(buf) {
   const start = Math.max(0, buf.length - EOCD_MIN - MAX_COMMENT);
   for (let i = buf.length - EOCD_MIN; i >= start; i--) {
-    if (buf.readUInt32LE(i) === EOCD_SIG) return i;
+    if (buf.readUInt32LE(i) === EOCD_SIG && buf.readUInt16LE(i + 20) === buf.length - i - EOCD_MIN) return i;
   }
   return -1;
 }

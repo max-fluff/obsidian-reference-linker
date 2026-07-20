@@ -56,7 +56,7 @@ module.exports = {
   // Inline embeds
   'embed.empty': 'Reference Linker: empty embed — give a document path',
   'embed.fmt.file': 'Document (first page)',
-  'embed.fmt.section': 'Section page ({page})',
+  'embed.fmt.section': 'Section “{name}”',
   'embed.unsupported': 'Reference Linker: no inline preview for {path}',
   'preview.empty': 'Nothing to show here',
   'embed.menu.open': 'Open document',

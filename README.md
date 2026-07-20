@@ -133,9 +133,11 @@ papers/paper-with-outline.pdf#page=3
 ````
 
 - A path (`papers/report.pdf`) shows the first page; add `#page=N` (or `:N`) for a specific page.
+- An `#id` anchor works too (`guide.html#_options`) — the same fragment a copied HTML section link carries — resolved through the index to its section.
 - A name or section (`Introduction`) is resolved through the index to its file and page.
 - An image path shows the image; a `.pptx` path shows the slide's text.
-- Optional `key: value` lines after the target tune it: `page: N`, `width: N`, `title: …`.
+- A **range** stacks several pages or sections: `report.pdf#page=3-5`, or a `page: 3-5` line. Paged and sectioned formats range; images and media render once. Up to 20 at a time.
+- Optional `key: value` lines after the target tune it: `page: N` (or `N-M`), `width: N`, `title: …`.
 
 <p align="center">
   <img src="docs/images/embed.png" alt="Two rendered reference-link embeds: a PDF page with a title, and an image" width="640">

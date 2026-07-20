@@ -8,20 +8,13 @@ const { openZip } = require('../zip');
 const { elements, attr, textIn } = require('../xml');
 const { blockLines, inlineText } = require('./html');
 const { renderLines, renderHtml } = require('./preview');
+const { clampPage, normPath, assetSrc } = require('./util');
 
 const MAX_LINES = 60;
 
 // Zip member paths are absolute within the archive; hrefs inside a document are relative to
-// the document that holds them.
-function resolve(base, href) {
-  const parts = (base ? base.split('/').slice(0, -1) : []).concat(String(href).split('/'));
-  const out = [];
-  for (const p of parts) {
-    if (!p || p === '.') continue;
-    if (p === '..') out.pop(); else out.push(p);
-  }
-  return out.join('/');
-}
+// the document that holds them, so resolve against the base file's folder.
+const resolve = (base, href) => normPath((base ? base.split('/').slice(0, -1).join('/') + '/' : '') + href);
 
 const dropFragment = (href) => String(href).split('#')[0];
 
@@ -126,7 +119,7 @@ async function readOutline(absPath) {
 
 // `path` is the chapter's own zip path, kept so images inside it resolve against it.
 function chapterAt(doc, page) {
-  const n = Math.min(Math.max(1, page | 0), doc.spine.order.length);
+  const n = clampPage(page, doc.spine.order.length);
   const path = doc.spine.order[n - 1];
   const xhtml = doc.zip.text(path);
   if (!xhtml) return null;
@@ -155,8 +148,7 @@ async function render(el, req) {
 
 // Reads an image the chapter references out of the same zip, its src resolved against the
 // chapter's own path — "../images/x.png" from OEBPS/text/ lands on OEBPS/images/x.png.
-const imageLoader = (doc, chapterPath) => (src) =>
-  doc.zip.read(resolve(chapterPath, decodeURIComponent(src.split(/[?#]/)[0])));
+const imageLoader = (doc, chapterPath) => (src) => doc.zip.read(resolve(chapterPath, assetSrc(src)));
 
 module.exports = {
   exts: ['epub'],

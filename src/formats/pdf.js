@@ -37,6 +37,7 @@ module.exports = {
   exts: ['pdf'],
   anchorKind: 'page',
   anchorFor: (e) => (e.kind === 'section' && e.page ? 'page=' + e.page : null),
+  positionLabel: (n, to) => 'p.' + n + (to && to > n ? '–' + to : ''),
   outline: readOutline,
   render,
   dispose,

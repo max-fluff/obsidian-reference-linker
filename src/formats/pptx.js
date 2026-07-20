@@ -6,21 +6,13 @@
 const { openZip } = require('../zip');
 const { elements, attr, textIn } = require('../xml');
 const { renderLines } = require('./preview');
+const { clampPage, normPath } = require('./util');
 
 const SLIDE_RE = /^ppt\/slides\/slide(\d+)\.xml$/;
 const TITLE_PH = new Set(['title', 'ctrTitle']);
 
 // A relationship target is relative to ppt/, and PowerPoint writes some as "../slides/…".
-function resolveTarget(target) {
-  const t = String(target).replace(/^\/+/, '');
-  const parts = ('ppt/' + t).split('/');
-  const out = [];
-  for (const p of parts) {
-    if (p === '.' || p === '') continue;
-    if (p === '..') out.pop(); else out.push(p);
-  }
-  return out.join('/');
-}
+const resolveTarget = (target) => normPath('ppt/' + String(target).replace(/^\/+/, ''));
 
 // Presentation order, not file order: slide7.xml may well be the second slide shown.
 function slideParts(zip) {
@@ -108,7 +100,7 @@ async function readOutline(absPath) {
 async function readSlide(absPath, page) {
   const doc = readSlides(absPath);
   if (!doc) return null;
-  const n = Math.min(Math.max(1, page | 0), doc.parts.length);
+  const n = clampPage(page, doc.parts.length);
   const xml = doc.zip.text(doc.parts[n - 1]);
   if (!xml) return null;
   return { ...slideText(xml), page: n, total: doc.parts.length };

@@ -5,7 +5,7 @@
 // display text is never read. Nothing is rewritten automatically.
 
 const { splitTarget, withTitle, rewriteLinks } = require('./shared/markdown');
-const { PAGE_RE, parseBinding, formatBinding, ownsBinding } = require('./shared/binding');
+const { parseBinding, formatBinding, ownsBinding } = require('./shared/binding');
 const shared = require('./shared/actualize');
 const preview = require('./shared/update-preview');
 
@@ -16,11 +16,20 @@ const OWNER = 'reference';
 // never style each other's dialog.
 const PREVIEW_CLASS = 'reference-linker-preview';
 
+// Where a page lives in a link — the same shapes targetPage reads, a hash OR a query, since a
+// custom viewer template can carry {page} in the query. Replacing only a #page= fragment left
+// a query-page link with a dead #page= appended and its real ?page= untouched, so targetPage
+// kept reading the old number: the link stayed stale forever and every update rewrote the note.
+const POS_RE = /([#?&])(page|t)=\d+/i;
+
 // Repoint a link at where its section moved to. `r` is a stale verdict: `anchor` for a named
 // fragment, `line` for a page (bindStateFrom's name for the moved-to position).
-const withAnchor = (url, r) => (r.anchor != null
-  ? url.replace(/#.*$/, '') + '#' + r.anchor
-  : PAGE_RE.test(url) ? url.replace(PAGE_RE, '#page=' + r.line) : url + '#page=' + r.line);
+const withAnchor = (url, r) => {
+  if (r.anchor != null) return url.replace(/#.*$/, '') + '#' + r.anchor;
+  return POS_RE.test(url)
+    ? url.replace(POS_RE, (_, sep, key) => sep + key + '=' + r.line)
+    : url + '#page=' + r.line;
+};
 
 // What the update preview shows as the change. An id-anchored link that had no fragment at
 // all reads as a dash rather than an empty cell.

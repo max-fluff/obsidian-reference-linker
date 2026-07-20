@@ -15,27 +15,32 @@ const BLOB_LIMIT = 96 * 1024 * 1024;
 
 // encodeURI, not per-segment encodeURIComponent: the latter turns the "D:" drive letter into
 // "D%3A" and Windows then resolves nothing. buildUri encodes {abs} the same way.
-const fileUrl = (abs) => 'file:///' + encodeURI(abs.split(nodePath.sep).join('/').replace(/^\/+/, ''));
+// encodeURI keeps the "D:" drive colon (per-segment encoding turns it into %3A and Windows
+// resolves nothing) but leaves # and ? — in a file name those would start a fragment/query
+// and point at the wrong file, so encode them too.
+const fileUrl = (abs) => 'file:///'
+  + encodeURI(abs.split(nodePath.sep).join('/').replace(/^\/+/, '')).replace(/#/g, '%23').replace(/\?/g, '%3F');
 
+// Returns the blob URL it set on `el`, or '' when the file can't or shouldn't be copied. The
+// caller owns the URL — this used to return its own cleanup, but the error handler that calls
+// it can fire after the preview is gone, orphaning that closure and leaking the blob.
 function blobFallback(el, abs, ext) {
   let size = 0;
   try {
     size = fs.statSync(abs).size;
   } catch {
-    return null;
+    return '';
   }
-  if (size > BLOB_LIMIT) return null;
+  if (size > BLOB_LIMIT) return '';
   let buf;
   try {
     buf = fs.readFileSync(abs);
   } catch {
-    return null;
+    return '';
   }
   const url = URL.createObjectURL(new Blob([buf], { type: VIDEO[ext] || AUDIO[ext] || 'application/octet-stream' }));
   el.src = url;
-  return () => {
-    try { URL.revokeObjectURL(url); } catch { /* ignore */ }
-  };
+  return url;
 }
 
 async function render(el, req) {
@@ -54,18 +59,27 @@ async function render(el, req) {
   const seek = () => { try { if (at > 0) media.currentTime = at; } catch { /* not seekable */ } };
   media.addEventListener('loadedmetadata', seek, { once: true });
 
-  let release = null;
+  let blobUrl = '';
+  let disposed = false;
+  // Reachable from both the returned cleanup and the not-current path below, so the blob the
+  // async error handler may mint can never outlive the preview.
+  const dispose = () => {
+    disposed = true;
+    if (blobUrl) { try { URL.revokeObjectURL(blobUrl); } catch { /* ignore */ } blobUrl = ''; }
+    try { media.removeAttribute('src'); } catch { /* ignore */ }
+  };
+
   // Obsidian's CSP may or may not let a media element load a file:// source; rather than
   // guess, try it and read the failure, falling back to a Blob for a file worth copying.
   media.addEventListener('error', () => {
-    if (release) return;
-    release = blobFallback(media, req.abs, req.ext);
-    if (release) media.addEventListener('loadedmetadata', seek, { once: true });
+    if (disposed || blobUrl) return;
+    blobUrl = blobFallback(media, req.abs, req.ext);
+    if (blobUrl) media.addEventListener('loadedmetadata', seek, { once: true });
   }, { once: true });
   media.src = fileUrl(req.abs);
 
-  if (!req.isCurrent()) return false;
-  return () => { if (release) release(); };
+  if (!req.isCurrent()) { dispose(); return false; }
+  return dispose;
 }
 
 // A position in a recording is a time, not a page: 125 reads as 2:05.

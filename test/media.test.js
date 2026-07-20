@@ -30,6 +30,7 @@ const el = () => {
     child.tag = tag;
     child.addEventListener = (n, f) => { (child.listeners[n] = child.listeners[n] || []).push(f); };
     child.fire = (n) => (child.listeners[n] || []).slice().forEach((f) => f());
+    child.removeAttribute = (a) => { if (a === 'src') child.src = ''; };
     node.children.push(child);
     return child;
   };
@@ -99,6 +100,19 @@ describe('media preview', () => {
     media.fire('error');
     cleanup();
     assert.deepStrictEqual(revoked, ['blob:test']);
+  }));
+
+  it('mints no blob when the error fires after cleanup, so nothing leaks', withBrowserGlobals(async (revoked) => {
+    const { media, cleanup } = await render(tmpMedia('a.mp3'), 'mp3', 1);
+    cleanup();            // the preview is gone before the CSP-blocked file:// load fails
+    media.fire('error');
+    assert.ok(!String(media.src).startsWith('blob:'), 'a blob was created after cleanup: ' + media.src);
+    assert.deepStrictEqual(revoked, []);
+  }));
+
+  it('encodes a # in the file name rather than starting a fragment', withBrowserGlobals(async () => {
+    const { media } = await render(tmpMedia('a#b.mp3'), 'mp3', 1);
+    assert.ok(media.src.includes('a%23b.mp3') && !media.src.includes('a#b'), media.src);
   }));
 
   it('will not read a file past the blob limit into memory', withBrowserGlobals(async () => {

@@ -442,12 +442,15 @@ class ReferenceLinkerPlugin extends Plugin {
   }
 
   // An id-anchored link drifts when its heading is still there under a different id, which
-  // is what regenerating a doc site does. A heading that never had an id anchors nothing.
+  // is what regenerating a doc site does. A heading with no id anchors as the empty fragment,
+  // so a link pinned to it must match by that — else a same-named heading that does have an id
+  // would drag the link onto the wrong one.
   idBindState(url, hits) {
-    const wanted = hits.map((e) => e.anchor).filter(Boolean);
-    if (!wanted.length) return null;
     const stored = this.targetAnchor(this.decodeTarget(url));
-    return wanted.includes(stored) ? null : { state: 'stale', anchor: wanted[0] };
+    const anchors = hits.map((e) => e.anchor || '');
+    if (anchors.includes(stored)) return null;
+    const withId = anchors.filter(Boolean);
+    return withId.length ? { state: 'stale', anchor: withId[0] } : null;
   }
 
   // The fragment a link carries, without the '#'.
@@ -847,11 +850,14 @@ class ReferenceLinkerPlugin extends Plugin {
     editor.replaceSelection(this.buildLink(e, inTable, template));
   }
 
-  // The ```reference-link block body offered for an entry: a section embeds its page,
-  // and any document embeds by its relative path (page 1).
+  // The ```reference-link block body offered for an entry: a section embeds by its own anchor
+  // (a #id for HTML, #page= for a PDF, the ordinal page otherwise), any document by its path.
   embedFormats(e) {
     const out = [];
-    if (e.kind === 'section' && e.page) out.push({ label: t('embed.fmt.section', { page: e.page }), body: e.path + '#page=' + e.page });
+    if (e.kind === 'section' && e.page) {
+      const frag = formats.anchorFor(e) || ('page=' + e.page);
+      out.push({ label: t('embed.fmt.section', { name: e.name }), body: e.path + '#' + frag });
+    }
     out.push({ label: t('embed.fmt.file'), body: e.path });
     return out;
   }
