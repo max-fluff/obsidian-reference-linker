@@ -16,7 +16,18 @@ const OWNER = 'reference';
 // never style each other's dialog.
 const PREVIEW_CLASS = 'reference-linker-preview';
 
-const withPage = (url, page) => (PAGE_RE.test(url) ? url.replace(PAGE_RE, '#page=' + page) : url + '#page=' + page);
+// Repoint a link at where its section moved to. `r` is a stale verdict: `anchor` for a named
+// fragment, `line` for a page (bindStateFrom's name for the moved-to position).
+const withAnchor = (url, r) => (r.anchor != null
+  ? url.replace(/#.*$/, '') + '#' + r.anchor
+  : PAGE_RE.test(url) ? url.replace(PAGE_RE, '#page=' + r.line) : url + '#page=' + r.line);
+
+// What the update preview shows as the change. An id-anchored link that had no fragment at
+// all reads as a dash rather than an empty cell.
+const movedFrom = (plugin, url, r) => (r.anchor != null
+  ? plugin.targetAnchor(url) || '—'
+  : String(plugin.targetPage(url)));
+const movedTo = (r) => (r.anchor != null ? r.anchor : String(r.line));
 
 // One pass over a note's links. `selected` null is a dry run: apply every fix to build the
 // preview and record each change under a key (its order of appearance). A set of keys
@@ -33,10 +44,9 @@ const rewriteUpdates = (plugin, text, selected) => {
     if (r && r.state === 'stale') {
       const k = key++;
       const { url, title } = splitTarget(target);
-      // bindStateFrom names the moved-to position `line`; for a document it is a page.
-      if (collect) changes.push({ key: k, label: name, from: String(plugin.targetPage(url)), to: String(r.line) });
+      if (collect) changes.push({ key: k, label: name, from: movedFrom(plugin, url, r), to: movedTo(r) });
       if (!collect && !selected.has(k)) return null;
-      return '[' + name + '](' + withTitle(withPage(url, r.line), title) + ')';
+      return '[' + name + '](' + withTitle(withAnchor(url, r), title) + ')';
     }
     if (collect && r && r.state === 'broken') broken.push(name);
     return null;
@@ -81,13 +91,13 @@ const methods = {
     return this.linkState(target) === 'stale';
   },
 
-  // The link with its page corrected, or null when there's nothing to fix. The binding
-  // rides along. bindStateFrom names the moved-to position `line`; here it's a page.
+  // The link with its position corrected, or null when there's nothing to fix. The binding
+  // rides along.
   actualizedTarget(target) {
     const r = bindStateOf(this, target);
     if (!r || r.state !== 'stale') return null;
     const { url, title } = splitTarget(target);
-    return withTitle(withPage(url, r.line), title);
+    return withTitle(withAnchor(url, r), title);
   },
 
   rewriteActiveNote(transform, noticeKey) { return shared.rewriteActiveNote(this, transform, noticeKey); },

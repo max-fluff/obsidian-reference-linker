@@ -7,15 +7,11 @@
 
 const { MarkdownRenderChild, Menu } = require('obsidian');
 const nodePath = require('path');
-const fs = require('fs');
-const { openDocument, renderPageToCanvas } = require('./pdf');
+const formats = require('./formats');
 const { t } = require('./shared/i18n');
 
 const EMBED_LANG = 'reference-link';
 const DEFAULT_WIDTH = 600; // CSS px the page/image is rendered at (override with `width:`)
-
-const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'avif']);
-const MIME = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', svg: 'image/svg+xml', avif: 'image/avif' };
 
 const baseName = (p) => nodePath.basename(p).replace(/\.[^.]+$/, '');
 const looksLikePath = (s) => s.includes('/') || s.includes('\\') || /\.[a-z0-9]+$/i.test(s);
@@ -33,9 +29,10 @@ function parseSpec(source) {
   return spec;
 }
 
-// Split a trailing page off a path target: "file.pdf#page=3" or "file.pdf:3".
+// Split a trailing position off a path target: "file.pdf#page=3", "clip.mp4#t=90" or
+// "file.pdf:3".
 function splitPage(target) {
-  let m = /^(.*)#page=(\d+)\s*$/i.exec(target);
+  let m = /^(.*)#(?:page|t)=(\d+)\s*$/i.exec(target);
   if (m) return { path: m[1], page: parseInt(m[2], 10) };
   m = /^(.+?):(\d+)\s*$/.exec(target);
   if (m) return { path: m[1], page: parseInt(m[2], 10) };
@@ -81,7 +78,7 @@ class ReferenceEmbed extends MarkdownRenderChild {
     this.plugin = plugin;
     this.spec = spec;
     this.renderId = 0;
-    this.blobUrl = '';
+    this.cleanup = null;
   }
 
   onload() {
@@ -93,7 +90,7 @@ class ReferenceEmbed extends MarkdownRenderChild {
 
   onunload() {
     if (this.unsub) this.unsub();
-    this.revokeBlob();
+    this.release();
   }
 
   // Open the embedded document at its page — the same path the open/insert commands use.
@@ -114,7 +111,7 @@ class ReferenceEmbed extends MarkdownRenderChild {
   }
 
   notice(cls, text) { this.containerEl.empty(); this.containerEl.createDiv({ cls, text }); }
-  revokeBlob() { if (this.blobUrl) { try { URL.revokeObjectURL(this.blobUrl); } catch { /* ignore */ } this.blobUrl = ''; } }
+  release() { if (this.cleanup) { try { this.cleanup(); } catch { /* ignore */ } this.cleanup = null; } }
   width() { const n = parseInt(this.spec.width, 10); return Number.isFinite(n) && n > 0 ? n : DEFAULT_WIDTH; }
 
   async render(force) {
@@ -135,32 +132,32 @@ class ReferenceEmbed extends MarkdownRenderChild {
     el.empty();
     el.addClass('reference-linker-embed');
     const header = el.createDiv({ cls: 'reference-linker-embed-header mod-clickable' });
-    header.createSpan({ text: this.spec.title || res.name + (res.entry.kind === 'section' ? '  ·  p.' + res.page : '') });
+    const pos = formats.positionLabel(res.ext, res.page);
+    header.createSpan({ text: this.spec.title || res.name + (pos ? '  ·  ' + pos : '') });
     header.addEventListener('click', () => this.open());
     const body = el.createDiv({ cls: 'reference-linker-embed-body' });
 
-    if (res.ext === 'pdf') {
-      const doc = await openDocument(res.absPath);
-      if (token !== this.renderId) { if (doc) { try { await doc.destroy(); } catch { /* ignore */ } } return; }
-      if (!doc) { this.fail(res); return; }
-      const canvas = body.createEl('canvas');
-      const ok = await renderPageToCanvas(doc, res.page, canvas, this.width());
-      try { await doc.destroy(); } catch { /* ignore */ }
-      if (token !== this.renderId) return;
-      if (!ok) { this.fail(res); return; }
-    } else if (IMAGE_EXT.has(res.ext)) {
-      let buf;
-      try { buf = fs.readFileSync(res.absPath); } catch { this.fail(res); return; }
-      if (token !== this.renderId) return;
-      this.revokeBlob();
-      this.blobUrl = URL.createObjectURL(new Blob([buf], { type: MIME[res.ext] || 'application/octet-stream' }));
-      const img = body.createEl('img');
-      img.src = this.blobUrl;
-      img.style.maxWidth = this.width() + 'px';
-    } else {
+    if (!formats.canPreview(res.ext)) {
       this.notice('reference-linker-embed-error', t('embed.unsupported', { path: res.relPath }));
       this.lastSig = null;
+      return;
     }
+    this.release();
+    const cleanup = await formats.render(body, {
+      abs: res.absPath,
+      ext: res.ext,
+      page: res.page,
+      width: this.width(),
+      app: this.plugin.app,
+      component: this,
+      isCurrent: () => token === this.renderId,
+    });
+    if (token !== this.renderId) {
+      if (typeof cleanup === 'function') { try { cleanup(); } catch { /* ignore */ } }
+      return;
+    }
+    if (cleanup === false) { this.fail(res); return; }
+    this.cleanup = typeof cleanup === 'function' ? cleanup : null;
   }
 
   fail(res) {

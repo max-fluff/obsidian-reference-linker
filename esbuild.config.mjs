@@ -6,7 +6,7 @@ try { ({ deployTargets = [] } = await import('./esbuild.local.mjs')); } catch { 
 await buildPlugin({
   name: 'Reference Linker',
   platform: 'node',
-  external: ['obsidian', 'electron', 'fs', 'path', '@codemirror/view', '@codemirror/state', '@codemirror/language'],
+  external: ['obsidian', 'electron', 'fs', 'path', 'zlib', '@codemirror/view', '@codemirror/state', '@codemirror/language'],
   kind: 'sigil',
   prefix: 'reference-linker',
   deployTargets,

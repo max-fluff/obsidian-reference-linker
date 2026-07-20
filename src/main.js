@@ -27,7 +27,7 @@ const { registerEmbed } = require('./embed');
 const actualize = require('./actualize');
 const { ReferenceLinkModal, PresetPickerModal } = require('./modal');
 const { ReferenceLinkerSettingTab } = require('./settings-tab');
-const { readOutline } = require('./pdf');
+const formats = require('./formats');
 const { initI18n, withFamily, t, plural } = require('./shared/i18n');
 const api = require('./api');
 const indexEvents = require('./shared/index-events');
@@ -59,6 +59,7 @@ const TITLE_ATTR = 'data-reference-title';
 const anchorTitle = (a) => a.getAttribute(TITLE_ATTR) || a.getAttribute('title') || '';
 
 const pathPart = (dec) => dec.split('#')[0].split('?')[0];
+const extOf = (rel) => nodePath.extname(rel).slice(1).toLowerCase();
 const normCase = (s) => (process.platform === 'win32' ? s.toLowerCase() : s);
 
 // Whether `p` names the file at `full`: it ends with it on a path boundary (a target
@@ -77,11 +78,17 @@ function namesPath(p, full) {
 // rather than falling back to the file name, which the reader could already see in the link.
 // The code linker's header always says exactly where the link goes; this is the same promise
 // for documents.
+// Where the link lands cannot be read off the URL alone: most formats store no position in
+// it, so targetPage answers 1 for all of them and the preview would open every document at
+// its top. The binding names the section and the index knows where that section sits.
 const previewEntry = (plugin, ref, title, url) => {
   const b = parseBinding(title);
-  if (b && b.sec) return Object.assign({}, ref.entry, { page: ref.page, title: b.sec });
-  const sec = plugin.sectionAtLinkPage(url);
-  return Object.assign({}, ref.entry, { page: ref.page, title: sec ? sec.name : '' });
+  const at = plugin.sectionAtLinkPage(url);
+  if (b && b.sec) {
+    const named = at && at.name === b.sec ? at : plugin.sectionNamed(ref.entry.path, b.sec);
+    return Object.assign({}, ref.entry, { page: (named && named.page) || ref.page, title: b.sec });
+  }
+  return Object.assign({}, ref.entry, { page: (at && at.page) || ref.page, title: at ? at.name : '' });
 };
 
 class ReferenceLinkerPlugin extends Plugin {
@@ -206,6 +213,7 @@ class ReferenceLinkerPlugin extends Plugin {
     this.stopWatchers();
     clearTimeout(this.watchTimer);
     if (this.hover) this.hover.destroy();
+    formats.dispose();
   }
 
   migrateSettings() {
@@ -384,10 +392,10 @@ class ReferenceLinkerPlugin extends Plugin {
     return dec.split('\\').join('/');
   }
 
-  // The page a link asks for — only ever read, never overridden. A #page fragment or a
-  // {page} query both count.
+  // The position a link asks for — only ever read, never overridden. A #page fragment or a
+  // {page} query both count, and #t= is the same question asked of a recording.
   targetPage(dec) {
-    const m = /[#?&]page=(\d+)/i.exec(dec);
+    const m = /[#?&](?:page|t)=(\d+)/i.exec(dec);
     return m ? parseInt(m[1], 10) : 1;
   }
 
@@ -405,6 +413,11 @@ class ReferenceLinkerPlugin extends Plugin {
     return rel ? (this.fileCache.get(rel) || { entries: [] }).entries : [];
   }
 
+  // A document's section by name — how a link that stores no position finds where it points.
+  sectionNamed(rel, name) {
+    return this.entriesIn(rel).find((e) => e.kind === 'section' && e.name === name) || null;
+  }
+
   // What a section binding says about the page a link stores: null when the section still
   // sits there, stale with the page it moved to, or broken when the document is indexed but
   // no such section resolves any more (renamed, or the outline changed).
@@ -417,8 +430,30 @@ class ReferenceLinkerPlugin extends Plugin {
     if (!b.sec) return null;
     const rel = this.targetIndexedFile(this.decodeTarget(url));
     if (!rel) return null;
-    const pages = this.entriesIn(rel).filter((e) => e.kind === 'section' && e.name === b.sec).map((e) => e.page);
-    return bindStateFrom(pages, storedPage);
+    const hits = this.entriesIn(rel).filter((e) => e.kind === 'section' && e.name === b.sec);
+    if (!hits.length) return { state: 'broken' };
+    const kind = formats.anchorKind(extOf(rel));
+    // Nothing stored to compare against: the binding alone says which section, so only its
+    // disappearance is worth a verdict. Judging by page here marked every slide past the
+    // first as moved, because a link that stores no page reads as page 1.
+    if (!kind) return null;
+    if (kind === 'id') return this.idBindState(url, hits);
+    return bindStateFrom(hits.map((e) => e.page), storedPage);
+  }
+
+  // An id-anchored link drifts when its heading is still there under a different id, which
+  // is what regenerating a doc site does. A heading that never had an id anchors nothing.
+  idBindState(url, hits) {
+    const wanted = hits.map((e) => e.anchor).filter(Boolean);
+    if (!wanted.length) return null;
+    const stored = this.targetAnchor(this.decodeTarget(url));
+    return wanted.includes(stored) ? null : { state: 'stale', anchor: wanted[0] };
+  }
+
+  // The fragment a link carries, without the '#'.
+  targetAnchor(dec) {
+    const i = dec.indexOf('#');
+    return i < 0 ? '' : dec.slice(i + 1);
   }
 
   // The outline section beginning on a link's page — what it can be pinned to. Null when the
@@ -426,8 +461,17 @@ class ReferenceLinkerPlugin extends Plugin {
   sectionAtLinkPage(url) {
     const rel = url && this.targetIndexedFile(this.decodeTarget(url));
     if (!rel) return null;
+    const kind = formats.anchorKind(extOf(rel));
+    // Without an anchor there is nothing in the link to read a section off, and defaulting to
+    // page 1 would pin every link in the deck to the title slide.
+    if (!kind) return null;
+    const entries = this.entriesIn(rel);
+    if (kind === 'id') {
+      const frag = this.targetAnchor(this.decodeTarget(url));
+      return (frag && entries.find((e) => e.kind === 'section' && e.anchor === frag)) || null;
+    }
     const page = this.targetPage(url);
-    return this.entriesIn(rel).find((e) => e.kind === 'section' && e.page === page) || null;
+    return entries.find((e) => e.kind === 'section' && e.page === page) || null;
   }
 
   // The title pinning would produce and the section it pins to, or null when there's nothing
@@ -520,7 +564,7 @@ class ReferenceLinkerPlugin extends Plugin {
   // version (bumped when indexing logic changes, e.g. PDF sections were added). When it
   // changes, the per-file cache is stale even if mtimes haven't moved, so we drop it.
   indexSignature() {
-    return JSON.stringify({ v: 2, exts: [...parseExtensions(this.settings.extensions)].sort() });
+    return JSON.stringify({ v: 4, exts: [...parseExtensions(this.settings.extensions)].sort() });
   }
 
   async loadCache() {
@@ -748,12 +792,12 @@ class ReferenceLinkerPlugin extends Plugin {
     const base = nodePath.basename(abs).replace(/\.[^.]+$/, '');
     const ext = nodePath.extname(abs).slice(1).toLowerCase();
     const entries = [{ name: base, kind: 'file', lang: ext, path: rel, line: 1, page: 1 }];
-    // A PDF's outline becomes section entries on their pages (the Phase 2 differentiator).
-    // Cached with the file, so a PDF's outline is only re-read when its mtime changes.
-    if (ext === 'pdf') {
-      for (const s of await readOutline(abs)) {
-        entries.push({ name: s.title, kind: 'section', lang: 'pdf', path: rel, line: s.page, page: s.page });
-      }
+    // A document's outline becomes section entries on their pages (the Phase 2
+    // differentiator). Cached with the file, so it is only re-read when the mtime changes.
+    for (const s of await formats.outline(ext, abs)) {
+      const entry = { name: s.title, kind: 'section', lang: ext, path: rel, line: s.page, page: s.page };
+      if (s.anchor) entry.anchor = s.anchor;
+      entries.push(entry);
     }
     scan.next.set(rel, { mtimeMs: stat.mtimeMs, entries });
   }
@@ -777,11 +821,11 @@ class ReferenceLinkerPlugin extends Plugin {
       .replace(/{path}/g, encPath(e.path))
       .replace(/{page}/g, page)
       .replace(/{name}/g, encodeURIComponent(e.name));
-    // A section carries its page in the link so it opens there; the file preset has no
-    // {page}, so append the fragment when the template didn't already encode one.
-    if (e.kind === 'section' && e.page && /^file:/i.test(uri) && !/#page=/i.test(uri)) {
-      uri += '#page=' + e.page;
-    }
+    // A section carries where it starts so the link opens there. What that looks like is the
+    // format's business — a page for a PDF, an id for HTML, nothing where the viewer would
+    // choke on a fragment (see CONTRIBUTING, "Adding a document format").
+    const anchor = formats.anchorFor(e);
+    if (anchor && /^file:/i.test(uri) && !uri.includes('#')) uri += '#' + anchor;
     return uri;
   }
 
@@ -844,6 +888,12 @@ class ReferenceLinkerPlugin extends Plugin {
 
   // fillRoot resolves the portable {root} token, since there's no note to render it.
   openEntry(e, template) {
+    // Where the OS drops our anchor the file opens at the top, so hand the section name over
+    // for a paste into the viewer's own find box.
+    if (e.kind === 'section' && e.name && !formats.hasOsAnchor(e.lang)) {
+      navigator.clipboard.writeText(e.name);
+      new Notice(t('notice.anchorCopied', { section: e.name }));
+    }
     openExternal(this.fillRoot(this.buildUri(e, template)));
   }
 

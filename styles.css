@@ -331,11 +331,67 @@ settings:
 /* Rendered PDF page (canvas) or image inside the popover / embed. */
 .reference-linker-hover-body canvas,
 .reference-linker-hover-body img,
+.reference-linker-hover-body video,
 .reference-linker-embed-body canvas,
-.reference-linker-embed-body img {
+.reference-linker-embed-body img,
+.reference-linker-embed-body video {
   display: block;
   max-width: 100%;
   height: auto;
+}
+
+/* Width is set inline from the request; a percentage here would collapse against the
+   shrink-to-fit popover. */
+.reference-linker-hover-body audio,
+.reference-linker-embed-body audio {
+  display: block;
+  max-width: 100%;
+  margin: 8px 4px;
+}
+
+/* Markdown and HTML preview as themselves. The width is set inline from the request; the
+   padding is what keeps rendered content off the popover border. */
+.reference-linker-rendered {
+  padding: 10px 14px;
+}
+
+.reference-linker-rendered > :first-child {
+  margin-top: 0;
+}
+
+.reference-linker-rendered > :last-child {
+  margin-bottom: 0;
+}
+
+.reference-linker-rendered img {
+  max-width: 100%;
+  height: auto;
+}
+
+.reference-linker-rendered pre {
+  overflow-x: auto;
+}
+
+/* The line preview: a heading and the lines under it, for formats with no markup to show. */
+.reference-linker-doc {
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.reference-linker-doc-title {
+  font-weight: var(--font-semibold);
+}
+
+.reference-linker-doc-line {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.reference-linker-doc-empty {
+  color: var(--text-faint);
+  font-style: italic;
 }
 
 /* Update preview: each note is a checkable group, its link changes a compact table, and

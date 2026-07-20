@@ -2,6 +2,7 @@
 
 const { PluginSettingTab, Setting } = require('obsidian');
 const { PRESETS } = require('./constants');
+const { knownExtensions } = require('./formats');
 const { FolderSuggest, folderSuggestAvailable } = require('./shared/deeplink/folder-suggest');
 const { renderFolderList } = require('./shared/folder-list');
 const { t, plural } = require('./shared/i18n');
@@ -79,7 +80,23 @@ class ReferenceLinkerSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName(t('set.extensions.name'))
       .setDesc(t('set.extensions.desc'))
-      .addText((c) => { wide(c).setPlaceholder('.pdf .docx .png').setValue(s.extensions).onChange(async (v) => { s.extensions = v; await save(false); }); c.inputEl.addEventListener('blur', () => this.plugin.rebuildIndex(false)); });
+      .addText((c) => {
+        this.extInput = c;
+        wide(c).setPlaceholder('.pdf .pptx .png').setValue(s.extensions).onChange(async (v) => { s.extensions = v; await save(false); });
+        c.inputEl.addEventListener('blur', () => this.plugin.rebuildIndex(false));
+      })
+      // The field starts empty and nothing is indexed until it is filled, so the list of what
+      // the plugin can actually read has to be reachable without going to the docs for it.
+      .addExtraButton((c) => c
+        .setIcon('list-plus')
+        .setTooltip(t('set.extensions.addAll'))
+        .onClick(async () => {
+          s.extensions = knownExtensions().join(' ');
+          if (this.extInput) this.extInput.setValue(s.extensions);
+          await save(false);
+          this.plugin.rebuildIndex(true);
+        }));
+    containerEl.createEl('div', { cls: 'reference-linker-note', text: t('set.extensions.known', { exts: knownExtensions().join(' ') }) });
 
     folderList(t('set.skipFolders.name'), t('set.skipFolders.desc'), 'skipDirs');
 

@@ -10,7 +10,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/github/license/max-fluff/obsidian-reference-linker?color=7c3aed" alt="License: MIT"></a>
 </p>
 
-An Obsidian plugin that autocompletes links to external documents (PDFs, Office files, images) and inserts a markdown link that opens the document in your default app at the right page. For PDFs it also indexes the outline, so you can link straight to a section, preview the page on hover, and embed it inline.
+An Obsidian plugin that autocompletes links to external documents (PDFs, Office files, images) and inserts a markdown link that opens the document in your default app at the right page. For PDFs and PowerPoint decks it also indexes the outline — bookmarks, or one entry per slide — so you can link straight to a section, preview it on hover, and embed it inline.
 
 It's the document counterpart to [Code Linker](https://github.com/max-fluff/obsidian-code-linker), which does the same for source code. Your reference material usually lives outside the vault, in project folders, download folders or a research library. This plugin makes it as linkable as a note, without copying anything in.
 
@@ -28,7 +28,7 @@ The plugin ships as `main.js`, `manifest.json` and `styles.css`. It scans the fo
 
 - [What it does](#what-it-does)
   - [Autocomplete as you type](#autocomplete-as-you-type)
-  - [PDF sections](#pdf-sections)
+  - [Document sections](#document-sections)
   - [Portable `{ref-root}` links](#portable-ref-root-links)
   - [Opening at a page](#opening-at-a-page)
   - [Hover preview](#hover-preview)
@@ -60,11 +60,11 @@ The inserted link looks like:
 [paper-with-outline](file:///{ref-root}/papers/paper-with-outline.pdf)
 ```
 
-Filter a common name by an inline prefix: an extension (`pdf:`, `png:`) or `sec:` to match only PDF sections.
+Filter a common name by an inline prefix: an extension (`pdf:`, `pptx:`, `png:`) or `sec:` to match only sections.
 
-### PDF sections
+### Document sections
 
-For a PDF, the plugin reads its outline (bookmarks) and indexes each section with its page number. It's the same idea as Code Linker indexing a symbol on its line, with a section on its page instead. So `@!intro` finds the *Introduction* section of a paper, and the inserted link carries that page, plus a `sec:` binding in the title that pins it to the section (see [Keeping links current](#keeping-links-current)):
+Where a format has an outline, the plugin reads it and indexes each section with its page number. It's the same idea as Code Linker indexing a symbol on its line, with a section on its page instead. So `@!intro` finds the *Introduction* section of a paper, and the inserted link carries that page, plus a `sec:` binding in the title that pins it to the section (see [Keeping links current](#keeping-links-current)):
 
 ```markdown
 [Introduction](file:///{ref-root}/papers/paper-with-outline.pdf#page=1 "sec:Introduction")
@@ -74,7 +74,29 @@ For a PDF, the plugin reads its outline (bookmarks) and indexes each section wit
   <img src="docs/images/sections.png" alt="Suggestions filtered to sections only: the same section name in two documents, told apart by its path" width="560">
 </p>
 
-A PDF with no outline is still indexed by file name. Other document types (Office, EPUB, images) are indexed by name too.
+What each format gives you:
+
+| Format | Sections | Preview | Opens at the position |
+|---|---|---|---|
+| PDF | outline (bookmarks) | page rendered by pdf.js | yes — `#page=`, when the default app is a browser |
+| HTML, XHTML | every heading that carries an `id` | the section's text | yes — `#id`, and the browser is the default app |
+| Markdown, txt, log | headings, on their line | the text itself | no — see below |
+| EPUB | table of contents (EPUB 2 and 3) | the chapter's text | no |
+| PPTX | one per slide | the slide's text | no |
+| ODT, ODP, ODS | headings / slides / sheets | the text | no |
+| Audio, video | — | the file, seeked to `#t=` seconds | no |
+| Images | — | the image | — |
+| Anything else | — | — | — |
+
+HTML is the one worth setting up: generated documentation (AsciiDoc, Sphinx, Doxygen,
+javadoc) puts an `id` on nearly every heading, so a link lands on the exact section in your
+browser. A heading with no `id` — usually just the page title — is still indexed by name, it
+simply opens the file at the top.
+
+Markdown, HTML and EPUB previews render as documents — headings, lists, code and the images
+they reference (read straight off disk or out of the book), not a page's stylesheet.
+
+A document with no outline — a PDF without bookmarks, a `.docx`, an `.epub` — is still indexed by file name, and its link still opens it. Only the section entries and the preview are missing.
 
 ### Portable `{ref-root}` links
 
@@ -88,13 +110,17 @@ Click a link and the document opens in your OS default app. When that app is a b
 
 The link is handed to the OS through the shell, so the `#page=` fragment survives intact. Obsidian's own external-link opener mangles it, so the plugin routes clicks on PDF-page links itself. The commands and the hover/embed headers open the same way.
 
+Not every viewer honours a fragment. PowerPoint, Word and most e-book readers are handed it as part of the path and then find no file at all, so the plugin doesn't write one for those formats — a `.pptx` section link opens the deck at the first slide. The section name goes to the clipboard when you open one, so the viewer's own search box takes you the rest of the way. Inside Obsidian the anchor is exact either way: hover and embeds open at the section the link names.
+
+Which fragment a link carries is the format's business: `#page=` for a PDF, `#id` for HTML, `#t=` seconds for a recording, none where the viewer would choke on one.
+
 ### Hover preview
 
 <p align="center">
   <img src="docs/images/hover.png" alt="The hover popover over a reference link, showing the target PDF page rendered" width="560">
 </p>
 
-Hover a reference link to preview it without leaving your notes: for a PDF, the target page rendered to a canvas; for an image, the image itself. Rendering uses the pdf.js that Obsidian already ships, so no second copy is bundled. In live preview, hold Ctrl/Cmd to show it, the way a note preview works; in reading view a plain hover is enough. Toggle it with **Preview on hover** in settings.
+Hover a reference link to preview it without leaving your notes: for a PDF, the target page rendered to a canvas; for a slide, its text; for an image, the image itself. PDF rendering uses the pdf.js that Obsidian already ships, so no second copy is bundled. In live preview, hold Ctrl/Cmd to show it, the way a note preview works; in reading view a plain hover is enough. Toggle it with **Preview on hover** in settings.
 
 ### Inline embeds
 
@@ -108,7 +134,7 @@ papers/paper-with-outline.pdf#page=3
 
 - A path (`papers/report.pdf`) shows the first page; add `#page=N` (or `:N`) for a specific page.
 - A name or section (`Introduction`) is resolved through the index to its file and page.
-- An image path shows the image.
+- An image path shows the image; a `.pptx` path shows the slide's text.
 - Optional `key: value` lines after the target tune it: `page: N`, `width: N`, `title: …`.
 
 <p align="center">
@@ -180,7 +206,7 @@ The selection commands are also in the editor's right-click menu. Right-clicking
 | --- | --- | --- |
 | **Reference root** | vault's parent folder | Base folder the scan paths resolve against. Empty = the folder containing the vault. |
 | **Scan folders** | whole root | One path per line, relative to the reference root. Empty scans the whole root. |
-| **File extensions** | none | Which file types to index, space- or comma-separated (`.pdf .docx .png`). Empty means nothing is indexed, so set this first. |
+| **File extensions** | none | Which file types to index, space- or comma-separated (`.pdf .pptx .png`). Empty means nothing is indexed, so set this first. |
 | **Skip folders** | `.git`, `node_modules`, `.obsidian` | A bare name is skipped at any depth; a path with a slash skips only that folder. |
 | **Auto-refresh index** | on | Watch the scan folders and rebuild when documents change. Not available on Linux, which lacks recursive watching; rebuild manually there. |
 

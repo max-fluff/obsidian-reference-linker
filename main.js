@@ -1434,43 +1434,6 @@ var require_suggest = __commonJS({
   }
 });
 
-// src/suggest.js
-var require_suggest2 = __commonJS({
-  "src/suggest.js"(exports2, module2) {
-    "use strict";
-    var { createSigilSuggest } = require_suggest();
-    var ReferenceSuggest2 = createSigilSuggest({
-      cls: "reference-linker",
-      kindText: (e) => e.kind === "section" ? "p." + e.page : e.lang
-    });
-    module2.exports = { ReferenceSuggest: ReferenceSuggest2 };
-  }
-});
-
-// src/filter.js
-var require_filter = __commonJS({
-  "src/filter.js"(exports2, module2) {
-    "use strict";
-    function parseQuery(raw, kinds, exts) {
-      const f = { kind: null, ext: null, name: "" };
-      const parts = String(raw == null ? "" : raw).split(":");
-      let i = 0;
-      for (; i < parts.length - 1; i++) {
-        const p = parts[i];
-        if (kinds && kinds.has(p))
-          f.kind = p;
-        else if (exts && exts.has(p))
-          f.ext = p;
-        else
-          break;
-      }
-      f.name = parts.slice(i).join(":");
-      return f;
-    }
-    module2.exports = { parseQuery };
-  }
-});
-
 // src/pdf.js
 var require_pdf = __commonJS({
   "src/pdf.js"(exports2, module2) {
@@ -1507,7 +1470,7 @@ var require_pdf = __commonJS({
         return null;
       }
     }
-    async function readOutline2(absPath) {
+    async function readOutline(absPath) {
       const doc = await openDocument(absPath);
       if (!doc)
         return [];
@@ -1555,7 +1518,1263 @@ var require_pdf = __commonJS({
         return false;
       }
     }
-    module2.exports = { openDocument, readOutline: readOutline2, renderPageToCanvas };
+    module2.exports = { openDocument, readOutline, renderPageToCanvas };
+  }
+});
+
+// src/formats/pdf.js
+var require_pdf2 = __commonJS({
+  "src/formats/pdf.js"(exports2, module2) {
+    "use strict";
+    var { openDocument, readOutline, renderPageToCanvas } = require_pdf();
+    var openPath = "";
+    var openDoc = null;
+    async function dispose() {
+      if (openDoc) {
+        try {
+          await openDoc.destroy();
+        } catch (e) {
+        }
+      }
+      openPath = "";
+      openDoc = null;
+    }
+    async function getDoc(absPath) {
+      if (openPath === absPath && openDoc)
+        return openDoc;
+      await dispose();
+      const doc = await openDocument(absPath);
+      if (doc) {
+        openPath = absPath;
+        openDoc = doc;
+      }
+      return doc;
+    }
+    async function render(el, req) {
+      const doc = await getDoc(req.abs);
+      if (!req.isCurrent() || !doc)
+        return false;
+      const canvas = el.createEl("canvas");
+      const ok = await renderPageToCanvas(doc, req.page, canvas, req.width);
+      if (!req.isCurrent() || !ok)
+        return false;
+      return null;
+    }
+    module2.exports = {
+      exts: ["pdf"],
+      anchorKind: "page",
+      anchorFor: (e) => e.kind === "section" && e.page ? "page=" + e.page : null,
+      outline: readOutline,
+      render,
+      dispose
+    };
+  }
+});
+
+// src/formats/image.js
+var require_image = __commonJS({
+  "src/formats/image.js"(exports2, module2) {
+    "use strict";
+    var fs2 = require("fs");
+    var MIME = {
+      png: "image/png",
+      jpg: "image/jpeg",
+      jpeg: "image/jpeg",
+      gif: "image/gif",
+      webp: "image/webp",
+      bmp: "image/bmp",
+      svg: "image/svg+xml",
+      avif: "image/avif"
+    };
+    async function render(el, req) {
+      let buf;
+      try {
+        buf = fs2.readFileSync(req.abs);
+      } catch (e) {
+        return false;
+      }
+      if (!req.isCurrent())
+        return false;
+      const url = URL.createObjectURL(new Blob([buf], { type: MIME[req.ext] || "application/octet-stream" }));
+      const img = el.createEl("img");
+      img.src = url;
+      img.style.maxWidth = req.width + "px";
+      return () => {
+        try {
+          URL.revokeObjectURL(url);
+        } catch (e) {
+        }
+      };
+    }
+    module2.exports = {
+      exts: Object.keys(MIME),
+      anchorKind: null,
+      render
+    };
+  }
+});
+
+// src/zip.js
+var require_zip = __commonJS({
+  "src/zip.js"(exports2, module2) {
+    "use strict";
+    var fs2 = require("fs");
+    var zlib = require("zlib");
+    var EOCD_SIG = 101010256;
+    var CEN_SIG = 33639248;
+    var LOC_SIG = 67324752;
+    var EOCD_MIN = 22;
+    var MAX_COMMENT = 65535;
+    function findEocd(buf) {
+      const start = Math.max(0, buf.length - EOCD_MIN - MAX_COMMENT);
+      for (let i = buf.length - EOCD_MIN; i >= start; i--) {
+        if (buf.readUInt32LE(i) === EOCD_SIG)
+          return i;
+      }
+      return -1;
+    }
+    function readCentral(buf) {
+      const eocd = findEocd(buf);
+      if (eocd < 0)
+        return null;
+      const count = buf.readUInt16LE(eocd + 10);
+      let p = buf.readUInt32LE(eocd + 16);
+      if (p === 4294967295)
+        return null;
+      const out = /* @__PURE__ */ new Map();
+      for (let i = 0; i < count; i++) {
+        if (p + 46 > buf.length || buf.readUInt32LE(p) !== CEN_SIG)
+          break;
+        const method = buf.readUInt16LE(p + 10);
+        const compressed = buf.readUInt32LE(p + 20);
+        const uncompressed = buf.readUInt32LE(p + 24);
+        const nameLen = buf.readUInt16LE(p + 28);
+        const extraLen = buf.readUInt16LE(p + 30);
+        const commentLen = buf.readUInt16LE(p + 32);
+        const offset = buf.readUInt32LE(p + 42);
+        const name = buf.slice(p + 46, p + 46 + nameLen).toString("utf8");
+        out.set(name, { method, compressed, uncompressed, offset });
+        p += 46 + nameLen + extraLen + commentLen;
+      }
+      return out;
+    }
+    function inflateMember(buf, ent) {
+      if (ent.offset + 30 > buf.length || buf.readUInt32LE(ent.offset) !== LOC_SIG)
+        return null;
+      const nameLen = buf.readUInt16LE(ent.offset + 26);
+      const extraLen = buf.readUInt16LE(ent.offset + 28);
+      const start = ent.offset + 30 + nameLen + extraLen;
+      const raw = buf.slice(start, start + ent.compressed);
+      if (ent.method === 0)
+        return raw;
+      if (ent.method !== 8)
+        return null;
+      try {
+        return zlib.inflateRawSync(raw);
+      } catch (e) {
+        return null;
+      }
+    }
+    function openZip(absPath) {
+      let buf;
+      try {
+        buf = fs2.readFileSync(absPath);
+      } catch (e) {
+        return null;
+      }
+      const central = readCentral(buf);
+      if (!central)
+        return null;
+      const cache = /* @__PURE__ */ new Map();
+      const read = (name) => {
+        if (cache.has(name))
+          return cache.get(name);
+        const ent = central.get(name);
+        const out = ent ? inflateMember(buf, ent) : null;
+        cache.set(name, out);
+        return out;
+      };
+      return {
+        names: () => [...central.keys()],
+        has: (name) => central.has(name),
+        read,
+        text: (name) => {
+          const b = read(name);
+          return b ? b.toString("utf8") : null;
+        }
+      };
+    }
+    module2.exports = { openZip };
+  }
+});
+
+// src/xml.js
+var require_xml = __commonJS({
+  "src/xml.js"(exports2, module2) {
+    "use strict";
+    var ENTITIES = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
+    function decodeEntities(s) {
+      return String(s).replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (m, body) => {
+        if (body[0] === "#") {
+          const code = body[1] === "x" || body[1] === "X" ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10);
+          return Number.isFinite(code) ? String.fromCodePoint(code) : m;
+        }
+        const hit = ENTITIES[body.toLowerCase()];
+        return hit === void 0 ? m : hit;
+      });
+    }
+    function elements(xml, tag) {
+      const out = [];
+      const open = new RegExp("<" + tag + "(?=[\\s/>])", "g");
+      let m;
+      while (m = open.exec(xml)) {
+        const end = scanElement(xml, m.index, tag);
+        if (end < 0)
+          break;
+        out.push(xml.slice(m.index, end));
+        open.lastIndex = end;
+      }
+      return out;
+    }
+    function scanElement(xml, start, tag) {
+      const open = "<" + tag;
+      const close = "</" + tag + ">";
+      let depth = 0;
+      let i = start;
+      while (i >= 0 && i < xml.length) {
+        if (xml.startsWith(close, i)) {
+          const gt = xml.indexOf(">", i);
+          if (gt < 0)
+            return -1;
+          if (--depth === 0)
+            return gt + 1;
+          i = gt + 1;
+        } else if (xml.startsWith(open, i)) {
+          if (!/[\s/>]/.test(xml[i + open.length] || "")) {
+            i += open.length;
+            continue;
+          }
+          const gt = xml.indexOf(">", i);
+          if (gt < 0)
+            return -1;
+          if (xml[gt - 1] === "/") {
+            if (depth === 0)
+              return gt + 1;
+          } else
+            depth++;
+          i = gt + 1;
+        } else {
+          const a = xml.indexOf(open, i);
+          const b = xml.indexOf(close, i);
+          if (a < 0 && b < 0)
+            return -1;
+          i = a < 0 ? b : b < 0 ? a : Math.min(a, b);
+        }
+      }
+      return -1;
+    }
+    function attr(source, name) {
+      const m = new RegExp("\\s" + name + '\\s*=\\s*"([^"]*)"').exec(source);
+      return m ? decodeEntities(m[1]) : null;
+    }
+    function textIn(source, tag) {
+      const re = new RegExp("<" + tag + "(?:\\s[^>]*)?>([\\s\\S]*?)</" + tag + ">", "g");
+      let out = "";
+      let m;
+      while (m = re.exec(source))
+        out += decodeEntities(m[1]);
+      return out;
+    }
+    module2.exports = { decodeEntities, elements, attr, textIn };
+  }
+});
+
+// src/formats/preview.js
+var require_preview = __commonJS({
+  "src/formats/preview.js"(exports2, module2) {
+    "use strict";
+    var obsidian = require("obsidian");
+    var { t: t2 } = require_i18n();
+    var IMAGE_BUDGET = 24 * 1024 * 1024;
+    var REMOTE = /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i;
+    var IMAGE_MIME = {
+      png: "image/png",
+      jpg: "image/jpeg",
+      jpeg: "image/jpeg",
+      gif: "image/gif",
+      webp: "image/webp",
+      bmp: "image/bmp",
+      svg: "image/svg+xml",
+      avif: "image/avif"
+    };
+    var mimeForImage = (name) => IMAGE_MIME[(name.split(".").pop() || "").toLowerCase()] || "application/octet-stream";
+    function inlineImages(box, load) {
+      const urls = [];
+      if (!box || !box.querySelectorAll)
+        return urls;
+      let spent = 0;
+      for (const img of box.querySelectorAll("img")) {
+        const src = img.getAttribute && img.getAttribute("src");
+        if (!src || REMOTE.test(src))
+          continue;
+        let buf = null;
+        try {
+          buf = load(src);
+        } catch (e) {
+          buf = null;
+        }
+        if (!buf || spent + buf.length > IMAGE_BUDGET) {
+          if (img.removeAttribute)
+            img.removeAttribute("src");
+          continue;
+        }
+        spent += buf.length;
+        const url = URL.createObjectURL(new Blob([buf], { type: mimeForImage(src) }));
+        img.src = url;
+        urls.push(url);
+      }
+      return urls;
+    }
+    var revoker = (urls) => urls.length ? () => {
+      for (const u of urls) {
+        try {
+          URL.revokeObjectURL(u);
+        } catch (e) {
+        }
+      }
+    } : null;
+    async function renderMarkdown(el, { markdown, width, app, component, loadImage }) {
+      const R = obsidian.MarkdownRenderer;
+      const render = R && (R.render || R.renderMarkdown);
+      if (!render || !component)
+        return false;
+      const box = el.createDiv({ cls: "reference-linker-rendered markdown-rendered" });
+      box.style.maxWidth = width + "px";
+      try {
+        if (R.render)
+          await R.render(app, markdown, box, "", component);
+        else
+          await R.renderMarkdown(markdown, box, "", component);
+      } catch (e) {
+        box.remove();
+        return false;
+      }
+      return revoker(loadImage ? inlineImages(box, loadImage) : []);
+    }
+    function renderHtml(el, { html, width, loadImage }) {
+      if (typeof obsidian.sanitizeHTMLToDom !== "function")
+        return false;
+      const box = el.createDiv({ cls: "reference-linker-rendered markdown-rendered" });
+      box.style.maxWidth = width + "px";
+      try {
+        box.appendChild(obsidian.sanitizeHTMLToDom(html));
+      } catch (e) {
+        box.remove();
+        return false;
+      }
+      return revoker(loadImage ? inlineImages(box, loadImage) : []);
+    }
+    function renderLines(el, { title, body, width }) {
+      const box = el.createDiv({ cls: "reference-linker-doc" });
+      box.style.maxWidth = width + "px";
+      if (title)
+        box.createDiv({ cls: "reference-linker-doc-title", text: title });
+      for (const line of body || [])
+        box.createDiv({ cls: "reference-linker-doc-line", text: line });
+      if (!title && !(body || []).length) {
+        box.createDiv({ cls: "reference-linker-doc-empty", text: t2("preview.empty") });
+      }
+      return null;
+    }
+    module2.exports = { renderLines, renderMarkdown, renderHtml, inlineImages };
+  }
+});
+
+// src/formats/pptx.js
+var require_pptx = __commonJS({
+  "src/formats/pptx.js"(exports2, module2) {
+    "use strict";
+    var { openZip } = require_zip();
+    var { elements, attr, textIn } = require_xml();
+    var { renderLines } = require_preview();
+    var SLIDE_RE = /^ppt\/slides\/slide(\d+)\.xml$/;
+    var TITLE_PH = /* @__PURE__ */ new Set(["title", "ctrTitle"]);
+    function resolveTarget(target) {
+      const t2 = String(target).replace(/^\/+/, "");
+      const parts = ("ppt/" + t2).split("/");
+      const out = [];
+      for (const p of parts) {
+        if (p === "." || p === "")
+          continue;
+        if (p === "..")
+          out.pop();
+        else
+          out.push(p);
+      }
+      return out.join("/");
+    }
+    function slideParts(zip) {
+      const pres = zip.text("ppt/presentation.xml");
+      const rels = zip.text("ppt/_rels/presentation.xml.rels");
+      if (pres && rels) {
+        const targets = /* @__PURE__ */ new Map();
+        for (const r of elements(rels, "Relationship")) {
+          const id = attr(r, "Id");
+          const tgt = attr(r, "Target");
+          if (id && tgt)
+            targets.set(id, resolveTarget(tgt));
+        }
+        const lst = elements(pres, "p:sldIdLst")[0];
+        if (lst) {
+          const out = [];
+          for (const s of elements(lst, "p:sldId")) {
+            const tgt = targets.get(attr(s, "r:id"));
+            if (tgt && zip.has(tgt))
+              out.push(tgt);
+          }
+          if (out.length)
+            return out;
+        }
+      }
+      return zip.names().filter((n) => SLIDE_RE.test(n)).sort((a, b) => Number(SLIDE_RE.exec(a)[1]) - Number(SLIDE_RE.exec(b)[1]));
+    }
+    var BR = /<a:br(?:\s[^>]*)?\/>|<a:br(?:\s[^>]*)?>[\s\S]*?<\/a:br>/;
+    var paragraphs = (source) => elements(source, "a:p").flatMap((p) => p.split(BR)).map((chunk) => textIn(chunk, "a:t").replace(/\s+/g, " ").trim()).filter(Boolean);
+    function shapeIsTitle(sp) {
+      const ph = elements(elements(sp, "p:nvSpPr")[0] || "", "p:ph")[0];
+      return !!ph && TITLE_PH.has(attr(ph, "type") || "");
+    }
+    function slideTitle(xml) {
+      for (const sp of elements(xml, "p:sp")) {
+        if (!shapeIsTitle(sp))
+          continue;
+        const text = paragraphs(sp).join(" ");
+        if (text)
+          return text;
+      }
+      return paragraphs(xml)[0] || "";
+    }
+    function slideText(xml) {
+      const title = slideTitle(xml);
+      const body = [];
+      for (const sp of elements(xml, "p:sp")) {
+        if (shapeIsTitle(sp))
+          continue;
+        for (const line of paragraphs(sp))
+          if (line !== title)
+            body.push(line);
+      }
+      return { title, body };
+    }
+    function readSlides(absPath) {
+      const zip = openZip(absPath);
+      if (!zip)
+        return null;
+      const parts = slideParts(zip);
+      if (!parts.length)
+        return null;
+      return { zip, parts };
+    }
+    async function readOutline(absPath) {
+      const doc = readSlides(absPath);
+      if (!doc)
+        return [];
+      const out = [];
+      doc.parts.forEach((part, i) => {
+        const xml = doc.zip.text(part);
+        if (!xml)
+          return;
+        const title = slideTitle(xml);
+        if (title)
+          out.push({ title, page: i + 1 });
+      });
+      return out;
+    }
+    async function readSlide(absPath, page) {
+      const doc = readSlides(absPath);
+      if (!doc)
+        return null;
+      const n = Math.min(Math.max(1, page | 0), doc.parts.length);
+      const xml = doc.zip.text(doc.parts[n - 1]);
+      if (!xml)
+        return null;
+      return { ...slideText(xml), page: n, total: doc.parts.length };
+    }
+    async function render(el, req) {
+      const slide = await readSlide(req.abs, req.page);
+      if (!req.isCurrent() || !slide)
+        return false;
+      return renderLines(el, { title: slide.title, body: slide.body, width: req.width });
+    }
+    module2.exports = {
+      exts: ["pptx"],
+      anchorKind: null,
+      // PowerPoint takes a fragment as part of the file name and finds nothing
+      outline: readOutline,
+      render,
+      readOutline,
+      readSlide
+    };
+  }
+});
+
+// src/formats/html.js
+var require_html = __commonJS({
+  "src/formats/html.js"(exports2, module2) {
+    "use strict";
+    var fs2 = require("fs");
+    var nodePath2 = require("path");
+    var { renderLines, renderHtml } = require_preview();
+    function assetLoader(htmlAbs) {
+      const dir = nodePath2.dirname(htmlAbs);
+      return (src) => {
+        const rel = decodeURIComponent(src.split(/[?#]/)[0]);
+        const abs = nodePath2.resolve(dir, rel);
+        if (abs !== dir && !abs.startsWith(dir + nodePath2.sep))
+          return null;
+        return fs2.readFileSync(abs);
+      };
+    }
+    var NAMED = {
+      amp: "&",
+      lt: "<",
+      gt: ">",
+      quot: '"',
+      apos: "'",
+      nbsp: "\xA0",
+      shy: "\xAD",
+      ensp: "\u2002",
+      emsp: "\u2003",
+      thinsp: "\u2009",
+      ndash: "\u2013",
+      mdash: "\u2014",
+      hellip: "\u2026",
+      bull: "\u2022",
+      middot: "\xB7",
+      dagger: "\u2020",
+      lsquo: "\u2018",
+      rsquo: "\u2019",
+      ldquo: "\u201C",
+      rdquo: "\u201D",
+      laquo: "\xAB",
+      raquo: "\xBB",
+      copy: "\xA9",
+      reg: "\xAE",
+      trade: "\u2122",
+      sect: "\xA7",
+      para: "\xB6",
+      deg: "\xB0",
+      larr: "\u2190",
+      rarr: "\u2192",
+      harr: "\u2194",
+      times: "\xD7",
+      minus: "\u2212",
+      plusmn: "\xB1",
+      ne: "\u2260",
+      le: "\u2264",
+      ge: "\u2265",
+      euro: "\u20AC",
+      pound: "\xA3",
+      yen: "\xA5",
+      cent: "\xA2"
+    };
+    function decodeEntities(s) {
+      return String(s).replace(/&(#x?[0-9a-f]+|[a-z][a-z0-9]*);/gi, (m, body) => {
+        if (body[0] === "#") {
+          const code = body[1] === "x" || body[1] === "X" ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10);
+          return Number.isFinite(code) ? String.fromCodePoint(code) : m;
+        }
+        const hit = NAMED[body.toLowerCase()];
+        return hit === void 0 ? m : hit;
+      });
+    }
+    var HEADING = /<h([1-6])\b([^>]*)>([\s\S]*?)<\/h\1\s*>/gi;
+    var ID_ATTR = /\b(?:id|name)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s">]+))/i;
+    var DROP = /<(script|style|template)\b[\s\S]*?<\/\1\s*>/gi;
+    var BLOCK_END = /<\/(?:p|div|li|tr|dt|dd|h[1-6]|pre|blockquote|section|article|table)\s*>/gi;
+    var MAX_LINES = 40;
+    var read = (absPath) => {
+      try {
+        return fs2.readFileSync(absPath, "utf8");
+      } catch (e) {
+        return null;
+      }
+    };
+    var inlineText = (fragment) => decodeEntities(fragment.replace(/<[^>]*>/g, "")).replace(/\s+/g, " ").trim();
+    function blockLines(fragment) {
+      const flat = fragment.replace(DROP, "").replace(/<br\s*\/?>/gi, "\n").replace(BLOCK_END, "\n").replace(/<[^>]*>/g, "");
+      return decodeEntities(flat).split("\n").map((l) => l.replace(/[ \t ]+/g, " ").trim()).filter(Boolean);
+    }
+    function idOf(attrs, inner) {
+      const own = ID_ATTR.exec(attrs);
+      if (own)
+        return own[1] || own[2] || own[3] || null;
+      const child = /<a\b([^>]*)>/i.exec(inner);
+      if (!child)
+        return null;
+      const m = ID_ATTR.exec(child[1]);
+      return m ? m[1] || m[2] || m[3] || null : null;
+    }
+    function headings(html) {
+      const out = [];
+      let m;
+      HEADING.lastIndex = 0;
+      while (m = HEADING.exec(html)) {
+        const title = inlineText(m[3]);
+        if (title)
+          out.push({ title, anchor: idOf(m[2], m[3]), from: m.index, to: HEADING.lastIndex });
+      }
+      return out;
+    }
+    async function readOutline(absPath) {
+      const html = read(absPath);
+      if (!html)
+        return [];
+      return headings(html).map((h, i) => ({ title: h.title, page: i + 1, anchor: h.anchor || void 0 }));
+    }
+    async function readSection(absPath, page) {
+      const html = read(absPath);
+      if (!html)
+        return null;
+      const hs = headings(html);
+      if (!hs.length)
+        return { title: "", body: blockLines(html).slice(0, MAX_LINES), page: 1, total: 1 };
+      const n = Math.min(Math.max(1, page | 0), hs.length);
+      const here = hs[n - 1];
+      const next = hs[n];
+      const end = next ? next.from : html.length;
+      const body = blockLines(html.slice(here.to, end));
+      return { title: here.title, body: body.slice(0, MAX_LINES), raw: html.slice(here.from, end), page: n, total: hs.length };
+    }
+    async function render(el, req) {
+      const sec = await readSection(req.abs, req.page);
+      if (!req.isCurrent() || !sec)
+        return false;
+      if (sec.raw) {
+        const done = renderHtml(el, { html: sec.raw.replace(DROP, ""), width: req.width, loadImage: assetLoader(req.abs) });
+        if (done !== false)
+          return done;
+      }
+      return renderLines(el, { title: sec.title, body: sec.body, width: req.width });
+    }
+    module2.exports = {
+      // EPUB content is XHTML, so it reads its chapters with these rather than its own copy.
+      blockLines,
+      inlineText,
+      decodeEntities,
+      assetLoader,
+      exts: ["html", "htm", "xhtml"],
+      anchorKind: "id",
+      anchorFor: (e) => e.kind === "section" && e.anchor ? e.anchor : null,
+      outline: readOutline,
+      render,
+      readOutline,
+      readSection
+    };
+  }
+});
+
+// src/formats/text.js
+var require_text = __commonJS({
+  "src/formats/text.js"(exports2, module2) {
+    "use strict";
+    var fs2 = require("fs");
+    var { isFenceLine } = require_markdown();
+    var { renderLines, renderMarkdown } = require_preview();
+    var { assetLoader } = require_html();
+    var ATX = /^(#{1,6})\s+(.+?)\s*#*\s*$/;
+    var SETEXT = /^(=+|-{2,})\s*$/;
+    var MAX_LINES = 60;
+    function readLines(absPath) {
+      try {
+        return fs2.readFileSync(absPath, "utf8").replace(/^﻿/, "").split(/\r?\n/);
+      } catch (e) {
+        return null;
+      }
+    }
+    function headings(lines) {
+      const out = [];
+      let fenced = false;
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (isFenceLine(line)) {
+          fenced = !fenced;
+          continue;
+        }
+        if (fenced)
+          continue;
+        const atx = ATX.exec(line);
+        if (atx) {
+          out.push({ title: atx[2].trim(), page: i + 1 });
+          continue;
+        }
+        if (SETEXT.test(line) && i > 0) {
+          const above = lines[i - 1].trim();
+          if (above && !ATX.test(above) && !isFenceLine(above))
+            out.push({ title: above, page: i });
+        }
+      }
+      return out;
+    }
+    async function readOutline(absPath) {
+      const lines = readLines(absPath);
+      return lines ? headings(lines) : [];
+    }
+    async function readSection(absPath, page) {
+      const lines = readLines(absPath);
+      if (!lines)
+        return null;
+      const hs = headings(lines);
+      if (!hs.length) {
+        return { title: "", body: lines.map((l) => l.trimEnd()).filter(Boolean).slice(0, MAX_LINES), page: 1, total: 1 };
+      }
+      const n = Math.min(Math.max(1, page | 0), lines.length);
+      let at = hs.findIndex((h) => h.page === n);
+      if (at < 0)
+        at = 0;
+      const here = hs[at];
+      const next = hs[at + 1];
+      const slice = lines.slice(here.page, next ? next.page - 1 : lines.length).map((l) => l.trimEnd());
+      const body = slice.filter(Boolean);
+      return {
+        title: here.title,
+        body: body.slice(0, MAX_LINES),
+        raw: slice.slice(0, MAX_LINES).join("\n"),
+        page: here.page,
+        total: hs.length
+      };
+    }
+    var MARKDOWN = /* @__PURE__ */ new Set(["md", "markdown"]);
+    async function render(el, req) {
+      const sec = await readSection(req.abs, req.page);
+      if (!req.isCurrent() || !sec)
+        return false;
+      if (MARKDOWN.has(req.ext) && sec.raw !== void 0) {
+        const md = (sec.title ? "## " + sec.title + "\n\n" : "") + sec.raw;
+        const done = await renderMarkdown(el, {
+          markdown: md,
+          width: req.width,
+          app: req.app,
+          component: req.component,
+          loadImage: assetLoader(req.abs)
+        });
+        if (done !== false)
+          return done;
+      }
+      return renderLines(el, { title: sec.title, body: sec.body, width: req.width });
+    }
+    module2.exports = {
+      exts: ["md", "markdown", "txt", "text", "log"],
+      anchorKind: null,
+      // no viewer honours a position in a text file
+      outline: readOutline,
+      render,
+      readOutline,
+      readSection
+    };
+  }
+});
+
+// src/formats/epub.js
+var require_epub = __commonJS({
+  "src/formats/epub.js"(exports2, module2) {
+    "use strict";
+    var { openZip } = require_zip();
+    var { elements, attr, textIn } = require_xml();
+    var { blockLines, inlineText } = require_html();
+    var { renderLines, renderHtml } = require_preview();
+    var MAX_LINES = 60;
+    function resolve(base, href) {
+      const parts = (base ? base.split("/").slice(0, -1) : []).concat(String(href).split("/"));
+      const out = [];
+      for (const p of parts) {
+        if (!p || p === ".")
+          continue;
+        if (p === "..")
+          out.pop();
+        else
+          out.push(p);
+      }
+      return out.join("/");
+    }
+    var dropFragment = (href) => String(href).split("#")[0];
+    function opfPath(zip) {
+      const container = zip.text("META-INF/container.xml");
+      if (!container)
+        return null;
+      for (const r of elements(container, "rootfile")) {
+        const p = attr(r, "full-path");
+        if (p && zip.has(p))
+          return p;
+      }
+      return null;
+    }
+    function readSpine(zip, opf, xml) {
+      const items = /* @__PURE__ */ new Map();
+      const manifest = elements(xml, "manifest")[0] || "";
+      for (const it of elements(manifest, "item")) {
+        const id = attr(it, "id");
+        const href = attr(it, "href");
+        if (id && href)
+          items.set(id, { path: resolve(opf, dropFragment(href)), props: attr(it, "properties") || "" });
+      }
+      const spine = elements(xml, "spine")[0] || "";
+      const order = [];
+      for (const ref of elements(spine, "itemref")) {
+        const hit = items.get(attr(ref, "idref"));
+        if (hit && zip.has(hit.path))
+          order.push(hit.path);
+      }
+      return { items, order, tocId: attr(spine, "toc") };
+    }
+    function readToc(zip, spine) {
+      const nav = [...spine.items.values()].find((i) => /\bnav\b/.test(i.props));
+      if (nav) {
+        const doc = zip.text(nav.path);
+        const out = doc ? tocFromNav(doc, nav.path) : [];
+        if (out.length)
+          return out;
+      }
+      const ncx = spine.tocId && spine.items.get(spine.tocId);
+      if (ncx) {
+        const doc = zip.text(ncx.path);
+        if (doc)
+          return tocFromNcx(doc, ncx.path);
+      }
+      return [];
+    }
+    function tocFromNav(doc, base) {
+      const toc = elements(doc, "nav").find((n) => /toc/i.test(attr(n, "epub:type") || attr(n, "type") || "")) || elements(doc, "nav")[0];
+      if (!toc)
+        return [];
+      const out = [];
+      for (const a of elements(toc, "a")) {
+        const href = attr(a, "href");
+        const title = inlineText(a);
+        if (href && title)
+          out.push({ title, path: resolve(base, dropFragment(href)) });
+      }
+      return out;
+    }
+    function tocFromNcx(doc, base) {
+      const out = [];
+      for (const p of elements(doc, "navPoint")) {
+        const title = textIn(elements(p, "navLabel")[0] || "", "text").replace(/\s+/g, " ").trim();
+        const content = elements(p, "content")[0];
+        const src = content && attr(content, "src");
+        if (title && src)
+          out.push({ title, path: resolve(base, dropFragment(src)) });
+      }
+      return out;
+    }
+    function open(absPath) {
+      const zip = openZip(absPath);
+      if (!zip)
+        return null;
+      const opf = opfPath(zip);
+      const xml = opf && zip.text(opf);
+      if (!xml)
+        return null;
+      const spine = readSpine(zip, opf, xml);
+      if (!spine.order.length)
+        return null;
+      return { zip, opf, spine };
+    }
+    async function readOutline(absPath) {
+      const doc = open(absPath);
+      if (!doc)
+        return [];
+      const at = new Map(doc.spine.order.map((p, i) => [p, i + 1]));
+      const out = [];
+      const seen = /* @__PURE__ */ new Set();
+      for (const entry of readToc(doc.zip, doc.spine)) {
+        const page = at.get(entry.path);
+        if (!page || seen.has(entry.title + "|" + page))
+          continue;
+        seen.add(entry.title + "|" + page);
+        out.push({ title: entry.title, page });
+      }
+      return out;
+    }
+    function chapterAt(doc, page) {
+      const n = Math.min(Math.max(1, page | 0), doc.spine.order.length);
+      const path = doc.spine.order[n - 1];
+      const xhtml = doc.zip.text(path);
+      if (!xhtml)
+        return null;
+      const body = elements(xhtml, "body")[0] || xhtml;
+      const lines = blockLines(body);
+      return { title: lines[0] || "", body: lines.slice(1, MAX_LINES), raw: body, path, page: n, total: doc.spine.order.length };
+    }
+    async function readChapter(absPath, page) {
+      const doc = open(absPath);
+      return doc ? chapterAt(doc, page) : null;
+    }
+    async function render(el, req) {
+      const doc = open(req.abs);
+      const ch = doc && chapterAt(doc, req.page);
+      if (!req.isCurrent() || !ch)
+        return false;
+      if (ch.raw) {
+        const done = renderHtml(el, { html: ch.raw, width: req.width, loadImage: imageLoader(doc, ch.path) });
+        if (done !== false)
+          return done;
+      }
+      return renderLines(el, { title: ch.title, body: ch.body, width: req.width });
+    }
+    var imageLoader = (doc, chapterPath) => (src) => doc.zip.read(resolve(chapterPath, decodeURIComponent(src.split(/[?#]/)[0])));
+    module2.exports = {
+      exts: ["epub"],
+      anchorKind: null,
+      // an e-reader takes the file and ignores the fragment
+      outline: readOutline,
+      render,
+      readOutline,
+      readChapter,
+      open,
+      imageLoader
+    };
+  }
+});
+
+// src/formats/media.js
+var require_media = __commonJS({
+  "src/formats/media.js"(exports2, module2) {
+    "use strict";
+    var fs2 = require("fs");
+    var nodePath2 = require("path");
+    var VIDEO = { mp4: "video/mp4", m4v: "video/mp4", webm: "video/webm", mkv: "video/x-matroska", mov: "video/quicktime", ogv: "video/ogg" };
+    var AUDIO = { mp3: "audio/mpeg", m4a: "audio/mp4", wav: "audio/wav", flac: "audio/flac", ogg: "audio/ogg", opus: "audio/ogg", aac: "audio/aac" };
+    var BLOB_LIMIT = 96 * 1024 * 1024;
+    var fileUrl = (abs) => "file:///" + encodeURI(abs.split(nodePath2.sep).join("/").replace(/^\/+/, ""));
+    function blobFallback(el, abs, ext) {
+      let size = 0;
+      try {
+        size = fs2.statSync(abs).size;
+      } catch (e) {
+        return null;
+      }
+      if (size > BLOB_LIMIT)
+        return null;
+      let buf;
+      try {
+        buf = fs2.readFileSync(abs);
+      } catch (e) {
+        return null;
+      }
+      const url = URL.createObjectURL(new Blob([buf], { type: VIDEO[ext] || AUDIO[ext] || "application/octet-stream" }));
+      el.src = url;
+      return () => {
+        try {
+          URL.revokeObjectURL(url);
+        } catch (e) {
+        }
+      };
+    }
+    async function render(el, req) {
+      if (!fs2.existsSync(req.abs))
+        return false;
+      const isVideo = !!VIDEO[req.ext];
+      const media = el.createEl(isVideo ? "video" : "audio");
+      media.controls = true;
+      media.preload = "metadata";
+      media.style.width = req.width + "px";
+      media.style.maxWidth = "100%";
+      const at = Math.max(0, (req.page | 0) - (req.page > 1 ? 0 : 1));
+      const seek = () => {
+        try {
+          if (at > 0)
+            media.currentTime = at;
+        } catch (e) {
+        }
+      };
+      media.addEventListener("loadedmetadata", seek, { once: true });
+      let release = null;
+      media.addEventListener("error", () => {
+        if (release)
+          return;
+        release = blobFallback(media, req.abs, req.ext);
+        if (release)
+          media.addEventListener("loadedmetadata", seek, { once: true });
+      }, { once: true });
+      media.src = fileUrl(req.abs);
+      if (!req.isCurrent())
+        return false;
+      return () => {
+        if (release)
+          release();
+      };
+    }
+    function positionLabel(n) {
+      const s = Math.max(0, n | 0);
+      const mm = Math.floor(s / 60);
+      const ss = String(s % 60).padStart(2, "0");
+      return mm >= 60 ? Math.floor(mm / 60) + ":" + String(mm % 60).padStart(2, "0") + ":" + ss : mm + ":" + ss;
+    }
+    module2.exports = {
+      exts: [...Object.keys(VIDEO), ...Object.keys(AUDIO)],
+      anchorKind: null,
+      // no outline, so nothing writes an anchor; a hand-written #t= still previews
+      positionLabel,
+      render
+    };
+  }
+});
+
+// src/formats/odf.js
+var require_odf = __commonJS({
+  "src/formats/odf.js"(exports2, module2) {
+    "use strict";
+    var { openZip } = require_zip();
+    var { elements, attr, decodeEntities } = require_xml();
+    var { renderLines } = require_preview();
+    var MAX_LINES = 60;
+    function contentOf(absPath) {
+      const zip = openZip(absPath);
+      return zip ? zip.text("content.xml") : null;
+    }
+    var TEXT_BLOCK = /<text:(?:h|p)\b[^>]*>([\s\S]*?)<\/text:(?:h|p)>/g;
+    function textLines(xml) {
+      const out = [];
+      let m;
+      while (m = TEXT_BLOCK.exec(xml)) {
+        const line = decodeEntities(m[1].replace(/<text:tab\b[^>]*\/?>/g, " ").replace(/<text:s\b[^>]*\/?>/g, " ").replace(/<text:line-break\b[^>]*\/?>/g, " ").replace(/<[^>]*>/g, "")).replace(/\s+/g, " ").trim();
+        if (line)
+          out.push(line);
+      }
+      return out;
+    }
+    function odtOutline(xml) {
+      const out = [];
+      let m;
+      const re = /<text:h\b[^>]*>([\s\S]*?)<\/text:h>/g;
+      while (m = re.exec(xml)) {
+        const title = decodeEntities(m[1].replace(/<[^>]*>/g, "")).replace(/\s+/g, " ").trim();
+        if (title)
+          out.push({ title, page: out.length + 1 });
+      }
+      return out;
+    }
+    function slideText(page) {
+      let title = "";
+      const body = [];
+      for (const frame of elements(page, "draw:frame")) {
+        const lines = textLines(frame);
+        if (!title && (attr(frame, "presentation:class") || "") === "title")
+          title = lines.join(" ");
+        else
+          body.push(...lines);
+      }
+      if (!title)
+        title = body.shift() || "";
+      return { title, body };
+    }
+    function odpOutline(xml) {
+      const out = [];
+      for (const page of elements(xml, "draw:page")) {
+        const title = slideText(page).title;
+        if (title)
+          out.push({ title, page: out.length + 1 });
+      }
+      return out;
+    }
+    function odsOutline(xml) {
+      const out = [];
+      for (const table of elements(xml, "table:table")) {
+        const name = attr(table, "table:name");
+        if (name)
+          out.push({ title: name, page: out.length + 1 });
+      }
+      return out;
+    }
+    function outlineFor(ext, xml) {
+      if (ext === "odp")
+        return odpOutline(xml);
+      if (ext === "ods")
+        return odsOutline(xml);
+      return odtOutline(xml);
+    }
+    async function readOutline(absPath, ext) {
+      const xml = contentOf(absPath);
+      return xml ? outlineFor(ext, xml) : [];
+    }
+    async function readSection(absPath, ext, page) {
+      const xml = contentOf(absPath);
+      if (!xml)
+        return null;
+      if (ext === "odp") {
+        const pages = elements(xml, "draw:page");
+        if (!pages.length)
+          return null;
+        const n2 = Math.min(Math.max(1, page | 0), pages.length);
+        const { title, body: body2 } = slideText(pages[n2 - 1]);
+        return { title, body: body2.slice(0, MAX_LINES), page: n2, total: pages.length };
+      }
+      if (ext === "ods") {
+        const tables = elements(xml, "table:table");
+        if (!tables.length)
+          return null;
+        const n2 = Math.min(Math.max(1, page | 0), tables.length);
+        return { title: attr(tables[n2 - 1], "table:name") || "", body: textLines(tables[n2 - 1]).slice(0, MAX_LINES), page: n2, total: tables.length };
+      }
+      const hs = odtOutline(xml);
+      const lines = textLines(xml);
+      if (!hs.length)
+        return { title: "", body: lines.slice(0, MAX_LINES), page: 1, total: 1 };
+      const n = Math.min(Math.max(1, page | 0), hs.length);
+      const here = lines.indexOf(hs[n - 1].title);
+      const next = hs[n] ? lines.indexOf(hs[n].title, here + 1) : lines.length;
+      const body = lines.slice(here + 1, next < 0 ? lines.length : next);
+      return { title: hs[n - 1].title, body: body.slice(0, MAX_LINES), page: n, total: hs.length };
+    }
+    async function render(el, req) {
+      const sec = await readSection(req.abs, req.ext, req.page);
+      if (!req.isCurrent() || !sec)
+        return false;
+      return renderLines(el, { title: sec.title, body: sec.body, width: req.width });
+    }
+    module2.exports = {
+      exts: ["odt", "ods", "odp"],
+      anchorKind: null,
+      outline: (abs, ext) => readOutline(abs, ext),
+      render,
+      readOutline,
+      readSection
+    };
+  }
+});
+
+// src/formats/index.js
+var require_formats = __commonJS({
+  "src/formats/index.js"(exports2, module2) {
+    "use strict";
+    var pdf = require_pdf2();
+    var image = require_image();
+    var pptx = require_pptx();
+    var html = require_html();
+    var text = require_text();
+    var epub = require_epub();
+    var media = require_media();
+    var odf = require_odf();
+    var HANDLERS = [pdf, image, pptx, html, text, epub, media, odf];
+    var byExt = /* @__PURE__ */ new Map();
+    for (const h of HANDLERS)
+      for (const e of h.exts)
+        byExt.set(e, h);
+    var handlerFor = (ext) => byExt.get(String(ext || "").toLowerCase()) || null;
+    var knownExtensions = () => [...byExt.keys()].map((e) => "." + e).sort();
+    var canOutline = (ext) => {
+      const h = handlerFor(ext);
+      return !!(h && h.outline);
+    };
+    var canPreview = (ext) => {
+      const h = handlerFor(ext);
+      return !!(h && h.render);
+    };
+    var anchorKind = (ext) => {
+      const h = handlerFor(ext);
+      return h && h.anchorKind || null;
+    };
+    var anchorFor = (entry) => {
+      const h = handlerFor(entry && entry.lang);
+      if (!h || !h.anchorFor)
+        return null;
+      return h.anchorFor(entry) || null;
+    };
+    var hasOsAnchor = (ext) => anchorKind(ext) !== null;
+    var positionLabel = (ext, n) => {
+      if (!(n > 1))
+        return null;
+      const h = handlerFor(ext);
+      return h && h.positionLabel ? h.positionLabel(n) : "p." + n;
+    };
+    async function outline(ext, absPath) {
+      const h = handlerFor(ext);
+      if (!h || !h.outline)
+        return [];
+      try {
+        return await h.outline(absPath, ext);
+      } catch (e) {
+        return [];
+      }
+    }
+    async function render(el, req) {
+      const h = handlerFor(req.ext);
+      if (!h || !h.render)
+        return false;
+      try {
+        return await h.render(el, req);
+      } catch (e) {
+        return false;
+      }
+    }
+    async function dispose() {
+      for (const h of HANDLERS) {
+        if (!h.dispose)
+          continue;
+        try {
+          await h.dispose();
+        } catch (e) {
+        }
+      }
+    }
+    module2.exports = {
+      handlerFor,
+      knownExtensions,
+      canOutline,
+      canPreview,
+      anchorKind,
+      anchorFor,
+      hasOsAnchor,
+      positionLabel,
+      outline,
+      render,
+      dispose
+    };
+  }
+});
+
+// src/suggest.js
+var require_suggest2 = __commonJS({
+  "src/suggest.js"(exports2, module2) {
+    "use strict";
+    var nodePath2 = require("path");
+    var { createSigilSuggest } = require_suggest();
+    var formats2 = require_formats();
+    var baseName = (p) => nodePath2.basename(p).replace(/\.[^.]+$/, "");
+    var ReferenceSuggest2 = createSigilSuggest({
+      cls: "reference-linker",
+      kindText: (e) => {
+        if (e.kind !== "section")
+          return e.lang;
+        return formats2.anchorKind(e.lang) === "page" ? "p." + e.page : baseName(e.path);
+      }
+    });
+    module2.exports = { ReferenceSuggest: ReferenceSuggest2 };
+  }
+});
+
+// src/filter.js
+var require_filter = __commonJS({
+  "src/filter.js"(exports2, module2) {
+    "use strict";
+    function parseQuery(raw, kinds, exts) {
+      const f = { kind: null, ext: null, name: "" };
+      const parts = String(raw == null ? "" : raw).split(":");
+      let i = 0;
+      for (; i < parts.length - 1; i++) {
+        const p = parts[i];
+        if (kinds && kinds.has(p))
+          f.kind = p;
+        else if (exts && exts.has(p))
+          f.ext = p;
+        else
+          break;
+      }
+      f.name = parts.slice(i).join(":");
+      return f;
+    }
+    module2.exports = { parseQuery };
   }
 });
 
@@ -1688,33 +2907,19 @@ var require_hover = __commonJS({
   "src/hover.js"(exports2, module2) {
     "use strict";
     var nodePath2 = require("path");
-    var fs2 = require("fs");
-    var { openDocument, renderPageToCanvas } = require_pdf();
+    var formats2 = require_formats();
     var { Popover } = require_popover();
     var PREVIEW_WIDTH = 420;
-    var IMAGE_EXT = /* @__PURE__ */ new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "avif"]);
-    var MIME = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", bmp: "image/bmp", svg: "image/svg+xml", avif: "image/avif" };
     var keyOf = (e) => e.path + ":" + (e.page || e.line || 1);
     var HoverPreview2 = class {
       constructor(plugin) {
         this.plugin = plugin;
-        this.docPath = "";
-        this.doc = null;
-        this.blobUrl = "";
+        this.cleanup = null;
         this.pop = new Popover({
           cls: "reference-linker-hover",
           hiddenCls: "reference-linker-hidden",
-          onHide: () => this.revokeBlob(),
-          onDestroy: () => {
-            this.revokeBlob();
-            if (this.doc) {
-              try {
-                this.doc.destroy();
-              } catch (e) {
-              }
-              this.doc = null;
-            }
-          }
+          onHide: () => this.release(),
+          onDestroy: () => this.release()
         });
       }
       // Read from onHoverMove to tell "nothing scheduled" from "waiting to show".
@@ -1739,10 +2944,9 @@ var require_hover = __commonJS({
       destroy() {
         this.pop.destroy();
       }
-      // Only PDFs and images preview; skip other types so nothing schedules for them.
+      // Skip types no handler can draw, so nothing schedules for them.
       previewable(entry) {
-        const ext = (entry.lang || "").toLowerCase();
-        return ext === "pdf" || IMAGE_EXT.has(ext);
+        return formats2.canPreview(entry.lang);
       }
       schedule(entry, x, y) {
         this.pop.cancelHide();
@@ -1750,62 +2954,37 @@ var require_hover = __commonJS({
           return;
         this.pop.schedule(keyOf(entry), x, y, (el, ctx) => this.build(entry, el, ctx));
       }
-      // Open + cache the PDF for `abs`, reusing it while hovering pages of the same file.
-      async getDoc(abs) {
-        if (this.docPath === abs && this.doc)
-          return this.doc;
-        if (this.doc) {
-          try {
-            await this.doc.destroy();
-          } catch (e) {
-          }
-          this.doc = null;
-        }
-        this.doc = await openDocument(abs);
-        this.docPath = this.doc ? abs : "";
-        return this.doc;
-      }
       async build(entry, el, ctx) {
         const root = this.plugin.codeRoot();
         const abs = root ? nodePath2.join(root, entry.path) : entry.path;
         const ext = (entry.lang || "").toLowerCase();
         const page = entry.page || 1;
         const label = entry.title || entry.name;
-        el.createDiv({ cls: "reference-linker-hover-header", text: page > 1 ? label + "  \xB7  p." + page : label });
+        const pos = formats2.positionLabel(ext, page);
+        el.createDiv({ cls: "reference-linker-hover-header", text: pos ? label + "  \xB7  " + pos : label });
         const body = el.createDiv({ cls: "reference-linker-hover-body" });
-        if (ext === "pdf") {
-          const doc = await this.getDoc(abs);
-          if (!ctx.isCurrent() || !doc)
-            return false;
-          const canvas = body.createEl("canvas");
-          const ok = await renderPageToCanvas(doc, page, canvas, PREVIEW_WIDTH);
-          if (!ctx.isCurrent() || !ok)
-            return false;
-          return void 0;
-        }
-        if (IMAGE_EXT.has(ext)) {
-          let buf;
-          try {
-            buf = fs2.readFileSync(abs);
-          } catch (e) {
-            return false;
-          }
-          if (!ctx.isCurrent())
-            return false;
-          this.revokeBlob();
-          this.blobUrl = URL.createObjectURL(new Blob([buf], { type: MIME[ext] || "application/octet-stream" }));
-          body.createEl("img").src = this.blobUrl;
-          return void 0;
-        }
-        return false;
+        this.release();
+        const cleanup = await formats2.render(body, {
+          abs,
+          ext,
+          page,
+          width: PREVIEW_WIDTH,
+          app: this.plugin.app,
+          component: this.plugin,
+          isCurrent: () => ctx.isCurrent()
+        });
+        if (cleanup === false)
+          return false;
+        this.cleanup = cleanup || null;
+        return void 0;
       }
-      revokeBlob() {
-        if (this.blobUrl) {
+      release() {
+        if (this.cleanup) {
           try {
-            URL.revokeObjectURL(this.blobUrl);
+            this.cleanup();
           } catch (e) {
           }
-          this.blobUrl = "";
+          this.cleanup = null;
         }
       }
     };
@@ -1819,13 +2998,10 @@ var require_embed = __commonJS({
     "use strict";
     var { MarkdownRenderChild, Menu } = require("obsidian");
     var nodePath2 = require("path");
-    var fs2 = require("fs");
-    var { openDocument, renderPageToCanvas } = require_pdf();
+    var formats2 = require_formats();
     var { t: t2 } = require_i18n();
     var EMBED_LANG = "reference-link";
     var DEFAULT_WIDTH = 600;
-    var IMAGE_EXT = /* @__PURE__ */ new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "avif"]);
-    var MIME = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", bmp: "image/bmp", svg: "image/svg+xml", avif: "image/avif" };
     var baseName = (p) => nodePath2.basename(p).replace(/\.[^.]+$/, "");
     var looksLikePath = (s) => s.includes("/") || s.includes("\\") || /\.[a-z0-9]+$/i.test(s);
     function parseSpec(source) {
@@ -1843,7 +3019,7 @@ var require_embed = __commonJS({
       return spec;
     }
     function splitPage(target) {
-      let m = /^(.*)#page=(\d+)\s*$/i.exec(target);
+      let m = /^(.*)#(?:page|t)=(\d+)\s*$/i.exec(target);
       if (m)
         return { path: m[1], page: parseInt(m[2], 10) };
       m = /^(.+?):(\d+)\s*$/.exec(target);
@@ -1892,7 +3068,7 @@ var require_embed = __commonJS({
         this.plugin = plugin;
         this.spec = spec;
         this.renderId = 0;
-        this.blobUrl = "";
+        this.cleanup = null;
       }
       onload() {
         this.containerEl.addEventListener("contextmenu", (evt) => this.onContextMenu(evt));
@@ -1902,7 +3078,7 @@ var require_embed = __commonJS({
       onunload() {
         if (this.unsub)
           this.unsub();
-        this.revokeBlob();
+        this.release();
       }
       // Open the embedded document at its page — the same path the open/insert commands use.
       open() {
@@ -1926,13 +3102,13 @@ var require_embed = __commonJS({
         this.containerEl.empty();
         this.containerEl.createDiv({ cls, text });
       }
-      revokeBlob() {
-        if (this.blobUrl) {
+      release() {
+        if (this.cleanup) {
           try {
-            URL.revokeObjectURL(this.blobUrl);
+            this.cleanup();
           } catch (e) {
           }
-          this.blobUrl = "";
+          this.cleanup = null;
         }
       }
       width() {
@@ -1957,55 +3133,39 @@ var require_embed = __commonJS({
         el.empty();
         el.addClass("reference-linker-embed");
         const header = el.createDiv({ cls: "reference-linker-embed-header mod-clickable" });
-        header.createSpan({ text: this.spec.title || res.name + (res.entry.kind === "section" ? "  \xB7  p." + res.page : "") });
+        const pos = formats2.positionLabel(res.ext, res.page);
+        header.createSpan({ text: this.spec.title || res.name + (pos ? "  \xB7  " + pos : "") });
         header.addEventListener("click", () => this.open());
         const body = el.createDiv({ cls: "reference-linker-embed-body" });
-        if (res.ext === "pdf") {
-          const doc = await openDocument(res.absPath);
-          if (token !== this.renderId) {
-            if (doc) {
-              try {
-                await doc.destroy();
-              } catch (e) {
-              }
-            }
-            return;
-          }
-          if (!doc) {
-            this.fail(res);
-            return;
-          }
-          const canvas = body.createEl("canvas");
-          const ok = await renderPageToCanvas(doc, res.page, canvas, this.width());
-          try {
-            await doc.destroy();
-          } catch (e) {
-          }
-          if (token !== this.renderId)
-            return;
-          if (!ok) {
-            this.fail(res);
-            return;
-          }
-        } else if (IMAGE_EXT.has(res.ext)) {
-          let buf;
-          try {
-            buf = fs2.readFileSync(res.absPath);
-          } catch (e) {
-            this.fail(res);
-            return;
-          }
-          if (token !== this.renderId)
-            return;
-          this.revokeBlob();
-          this.blobUrl = URL.createObjectURL(new Blob([buf], { type: MIME[res.ext] || "application/octet-stream" }));
-          const img = body.createEl("img");
-          img.src = this.blobUrl;
-          img.style.maxWidth = this.width() + "px";
-        } else {
+        if (!formats2.canPreview(res.ext)) {
           this.notice("reference-linker-embed-error", t2("embed.unsupported", { path: res.relPath }));
           this.lastSig = null;
+          return;
         }
+        this.release();
+        const cleanup = await formats2.render(body, {
+          abs: res.absPath,
+          ext: res.ext,
+          page: res.page,
+          width: this.width(),
+          app: this.plugin.app,
+          component: this,
+          isCurrent: () => token === this.renderId
+        });
+        if (token !== this.renderId) {
+          if (typeof cleanup === "function") {
+            try {
+              cleanup();
+            } catch (e) {
+            }
+          }
+          return;
+        }
+        if (cleanup === false) {
+          this.fail(res);
+          return;
+        }
+        this.cleanup = typeof cleanup === "function" ? cleanup : null;
       }
       fail(res) {
         this.notice("reference-linker-embed-error", t2("embed.unreadable", { path: res.relPath }));
@@ -2304,7 +3464,9 @@ var require_actualize2 = __commonJS({
     var preview = require_update_preview();
     var OWNER2 = "reference";
     var PREVIEW_CLASS = "reference-linker-preview";
-    var withPage = (url, page) => PAGE_RE.test(url) ? url.replace(PAGE_RE, "#page=" + page) : url + "#page=" + page;
+    var withAnchor = (url, r) => r.anchor != null ? url.replace(/#.*$/, "") + "#" + r.anchor : PAGE_RE.test(url) ? url.replace(PAGE_RE, "#page=" + r.line) : url + "#page=" + r.line;
+    var movedFrom = (plugin, url, r) => r.anchor != null ? plugin.targetAnchor(url) || "\u2014" : String(plugin.targetPage(url));
+    var movedTo = (r) => r.anchor != null ? r.anchor : String(r.line);
     var rewriteUpdates = (plugin, text, selected) => {
       const collect = selected == null;
       const changes = [];
@@ -2316,10 +3478,10 @@ var require_actualize2 = __commonJS({
           const k = key++;
           const { url, title } = splitTarget2(target);
           if (collect)
-            changes.push({ key: k, label: name, from: String(plugin.targetPage(url)), to: String(r.line) });
+            changes.push({ key: k, label: name, from: movedFrom(plugin, url, r), to: movedTo(r) });
           if (!collect && !selected.has(k))
             return null;
-          return "[" + name + "](" + withTitle2(withPage(url, r.line), title) + ")";
+          return "[" + name + "](" + withTitle2(withAnchor(url, r), title) + ")";
         }
         if (collect && r && r.state === "broken")
           broken.push(name);
@@ -2351,14 +3513,14 @@ var require_actualize2 = __commonJS({
       isLinkStale(target) {
         return this.linkState(target) === "stale";
       },
-      // The link with its page corrected, or null when there's nothing to fix. The binding
-      // rides along. bindStateFrom names the moved-to position `line`; here it's a page.
+      // The link with its position corrected, or null when there's nothing to fix. The binding
+      // rides along.
       actualizedTarget(target) {
         const r = bindStateOf(this, target);
         if (!r || r.state !== "stale")
           return null;
         const { url, title } = splitTarget2(target);
-        return withTitle2(withPage(url, r.line), title);
+        return withTitle2(withAnchor(url, r), title);
       },
       rewriteActiveNote(transform, noticeKey) {
         return shared.rewriteActiveNote(this, transform, noticeKey);
@@ -2683,6 +3845,7 @@ var require_settings_tab = __commonJS({
     "use strict";
     var { PluginSettingTab, Setting } = require("obsidian");
     var { PRESETS: PRESETS2 } = require_constants();
+    var { knownExtensions } = require_formats();
     var { FolderSuggest, folderSuggestAvailable } = require_folder_suggest();
     var { renderFolderList } = require_folder_list();
     var { t: t2, plural: plural2 } = require_i18n();
@@ -2756,12 +3919,20 @@ var require_settings_tab = __commonJS({
           containerEl.createEl("div", { cls: "reference-linker-note is-error", text: t2("set.scanFolders.notFound", { folders: missing.join(", ") }) });
         }
         new Setting(containerEl).setName(t2("set.extensions.name")).setDesc(t2("set.extensions.desc")).addText((c) => {
-          wide(c).setPlaceholder(".pdf .docx .png").setValue(s.extensions).onChange(async (v) => {
+          this.extInput = c;
+          wide(c).setPlaceholder(".pdf .pptx .png").setValue(s.extensions).onChange(async (v) => {
             s.extensions = v;
             await save(false);
           });
           c.inputEl.addEventListener("blur", () => this.plugin.rebuildIndex(false));
-        });
+        }).addExtraButton((c) => c.setIcon("list-plus").setTooltip(t2("set.extensions.addAll")).onClick(async () => {
+          s.extensions = knownExtensions().join(" ");
+          if (this.extInput)
+            this.extInput.setValue(s.extensions);
+          await save(false);
+          this.plugin.rebuildIndex(true);
+        }));
+        containerEl.createEl("div", { cls: "reference-linker-note", text: t2("set.extensions.known", { exts: knownExtensions().join(" ") }) });
         folderList(t2("set.skipFolders.name"), t2("set.skipFolders.desc"), "skipDirs");
         new Setting(containerEl).setName(t2("set.autoRefresh.name")).setDesc(t2("set.autoRefresh.desc")).addToggle((c) => c.setValue(s.autoRefresh).onChange(async (v) => {
           s.autoRefresh = v;
@@ -3031,6 +4202,7 @@ var require_en = __commonJS({
       "notice.indexed": "Reference Linker: {entries} indexed",
       "notice.missingFolders": "Reference Linker: scan folder not found \u2014 {folders}",
       "notice.copied": "Reference Linker: link copied",
+      "notice.anchorCopied": "Opens at the start \u2014 \u201C{section}\u201D copied, search for it",
       "notice.noSelection": "Reference Linker: select a name or path first",
       "notice.noMatch": "Reference Linker: no document matches \u201C{query}\u201D",
       "notice.watchUnsupported": "Reference Linker: auto-refresh is unavailable on this platform \u2014 rebuild manually",
@@ -3049,6 +4221,7 @@ var require_en = __commonJS({
       "embed.fmt.file": "Document (first page)",
       "embed.fmt.section": "Section page ({page})",
       "embed.unsupported": "Reference Linker: no inline preview for {path}",
+      "preview.empty": "Nothing to show here",
       "embed.menu.open": "Open document",
       "embed.notFound": "Reference Linker: no document matches \u201C{query}\u201D",
       "embed.ambiguous": "Reference Linker: {n} documents match \u201C{query}\u201D \u2014 add a path to pick one",
@@ -3066,7 +4239,9 @@ var require_en = __commonJS({
       "set.scanFolders.desc": "Folders scanned for documents, relative to the reference root. Leave empty to scan the whole root.",
       "set.scanFolders.notFound": "\u26A0 Not found under the reference root \u2014 {folders}",
       "set.extensions.name": "File extensions",
-      "set.extensions.desc": "Which file types to index, space- or comma-separated (e.g. .pdf .docx .png). Empty = nothing is indexed.",
+      "set.extensions.desc": "Which file types to index, space- or comma-separated (e.g. .pdf .pptx .png). Empty = nothing is indexed.",
+      "set.extensions.known": "Previews and section indexing: {exts}. Any other extension is indexed by file name only.",
+      "set.extensions.addAll": "Add every supported extension",
       "set.skipFolders.desc": "A bare name (node_modules) is skipped at any depth; a path with a slash (archive/raw) skips only that folder, relative to the reference root.",
       "set.autoRefresh.desc": "Watch the scan folders and rebuild the index when documents change.",
       "set.info": "Reference root: {root} \xB7 {entries} indexed",
@@ -3123,6 +4298,7 @@ var require_ru = __commonJS({
       "notice.indexed": "Reference Linker: \u043F\u0440\u043E\u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043E {entries}",
       "notice.missingFolders": "Reference Linker: \u043F\u0430\u043F\u043A\u0430 \u0441\u043A\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u0430 \u2014 {folders}",
       "notice.copied": "Reference Linker: \u0441\u0441\u044B\u043B\u043A\u0430 \u0441\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u043D\u0430",
+      "notice.anchorCopied": "\u041E\u0442\u043A\u0440\u043E\u0435\u0442\u0441\u044F \u0441 \u043D\u0430\u0447\u0430\u043B\u0430 \u2014 \xAB{section}\xBB \u0441\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u043D\u043E, \u043D\u0430\u0439\u0434\u0438\u0442\u0435 \u043F\u043E\u0438\u0441\u043A\u043E\u043C",
       "notice.noSelection": "Reference Linker: \u0441\u043D\u0430\u0447\u0430\u043B\u0430 \u0432\u044B\u0434\u0435\u043B\u0438\u0442\u0435 \u0438\u043C\u044F \u0438\u043B\u0438 \u043F\u0443\u0442\u044C",
       "notice.noMatch": "Reference Linker: \u043D\u0435\u0442 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430 \u0434\u043B\u044F \xAB{query}\xBB",
       "notice.watchUnsupported": "Reference Linker: \u0430\u0432\u0442\u043E\u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0435 \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u043D\u043E \u043D\u0430 \u044D\u0442\u043E\u0439 \u043F\u043B\u0430\u0442\u0444\u043E\u0440\u043C\u0435 \u2014 \u043F\u0435\u0440\u0435\u0441\u0442\u0440\u0430\u0438\u0432\u0430\u0439\u0442\u0435 \u0432\u0440\u0443\u0447\u043D\u0443\u044E",
@@ -3141,6 +4317,7 @@ var require_ru = __commonJS({
       "embed.fmt.file": "\u0414\u043E\u043A\u0443\u043C\u0435\u043D\u0442 (\u043F\u0435\u0440\u0432\u0430\u044F \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0430)",
       "embed.fmt.section": "\u0421\u0442\u0440\u0430\u043D\u0438\u0446\u0430 \u0440\u0430\u0437\u0434\u0435\u043B\u0430 ({page})",
       "embed.unsupported": "Reference Linker: \u043D\u0435\u0442 \u0438\u043D\u043B\u0430\u0439\u043D-\u043F\u0440\u0435\u0432\u044C\u044E \u0434\u043B\u044F {path}",
+      "preview.empty": "\u0417\u0434\u0435\u0441\u044C \u043D\u0435\u0447\u0435\u0433\u043E \u043F\u043E\u043A\u0430\u0437\u0430\u0442\u044C",
       "embed.menu.open": "\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442",
       "embed.notFound": "Reference Linker: \u043D\u0435\u0442 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430 \u0434\u043B\u044F \xAB{query}\xBB",
       "embed.ambiguous": "Reference Linker: \u043F\u043E\u0434 \xAB{query}\xBB \u043F\u043E\u0434\u0445\u043E\u0434\u0438\u0442 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u043E\u0432: {n} \u2014 \u0443\u0442\u043E\u0447\u043D\u0438\u0442\u0435 \u043F\u0443\u0442\u0451\u043C",
@@ -3158,7 +4335,9 @@ var require_ru = __commonJS({
       "set.scanFolders.desc": "\u041F\u0430\u043F\u043A\u0438, \u0441\u043A\u0430\u043D\u0438\u0440\u0443\u0435\u043C\u044B\u0435 \u043D\u0430 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u044B, \u043E\u0442\u043D\u043E\u0441\u0438\u0442\u0435\u043B\u044C\u043D\u043E \u043A\u043E\u0440\u043D\u044F. \u041E\u0441\u0442\u0430\u0432\u044C\u0442\u0435 \u043F\u0443\u0441\u0442\u044B\u043C, \u0447\u0442\u043E\u0431\u044B \u0441\u043A\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0432\u0435\u0441\u044C \u043A\u043E\u0440\u0435\u043D\u044C.",
       "set.scanFolders.notFound": "\u26A0 \u041D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u043E \u0432 \u043A\u043E\u0440\u043D\u0435 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u043E\u0432 \u2014 {folders}",
       "set.extensions.name": "\u0420\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u044F \u0444\u0430\u0439\u043B\u043E\u0432",
-      "set.extensions.desc": "\u041A\u0430\u043A\u0438\u0435 \u0442\u0438\u043F\u044B \u0444\u0430\u0439\u043B\u043E\u0432 \u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u0442\u044C, \u0447\u0435\u0440\u0435\u0437 \u043F\u0440\u043E\u0431\u0435\u043B \u0438\u043B\u0438 \u0437\u0430\u043F\u044F\u0442\u0443\u044E (\u043D\u0430\u043F\u0440. .pdf .docx .png). \u041F\u0443\u0441\u0442\u043E = \u043D\u0438\u0447\u0435\u0433\u043E \u043D\u0435 \u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u0443\u0435\u0442\u0441\u044F.",
+      "set.extensions.desc": "\u041A\u0430\u043A\u0438\u0435 \u0442\u0438\u043F\u044B \u0444\u0430\u0439\u043B\u043E\u0432 \u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u0442\u044C, \u0447\u0435\u0440\u0435\u0437 \u043F\u0440\u043E\u0431\u0435\u043B \u0438\u043B\u0438 \u0437\u0430\u043F\u044F\u0442\u0443\u044E (\u043D\u0430\u043F\u0440. .pdf .pptx .png). \u041F\u0443\u0441\u0442\u043E = \u043D\u0438\u0447\u0435\u0433\u043E \u043D\u0435 \u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u0443\u0435\u0442\u0441\u044F.",
+      "set.extensions.known": "\u041F\u0440\u0435\u0432\u044C\u044E \u0438 \u0438\u043D\u0434\u0435\u043A\u0441\u0430\u0446\u0438\u044F \u0440\u0430\u0437\u0434\u0435\u043B\u043E\u0432: {exts}. \u041E\u0441\u0442\u0430\u043B\u044C\u043D\u044B\u0435 \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u044F \u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u0443\u044E\u0442\u0441\u044F \u0442\u043E\u043B\u044C\u043A\u043E \u043F\u043E \u0438\u043C\u0435\u043D\u0438 \u0444\u0430\u0439\u043B\u0430.",
+      "set.extensions.addAll": "\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u0432\u0441\u0435 \u043F\u043E\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0435\u043C\u044B\u0435 \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u044F",
       "set.skipFolders.desc": "\u041F\u0440\u043E\u0441\u0442\u043E \u0438\u043C\u044F (node_modules) \u043F\u0440\u043E\u043F\u0443\u0441\u043A\u0430\u0435\u0442\u0441\u044F \u043D\u0430 \u043B\u044E\u0431\u043E\u0439 \u0433\u043B\u0443\u0431\u0438\u043D\u0435; \u043F\u0443\u0442\u044C \u0441\u043E \u0441\u043B\u044D\u0448\u0435\u043C (archive/raw) \u043F\u0440\u043E\u043F\u0443\u0441\u043A\u0430\u0435\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u044D\u0442\u0443 \u043F\u0430\u043F\u043A\u0443 \u043E\u0442\u043D\u043E\u0441\u0438\u0442\u0435\u043B\u044C\u043D\u043E \u043A\u043E\u0440\u043D\u044F.",
       "set.autoRefresh.desc": "\u0421\u043B\u0435\u0434\u0438\u0442\u044C \u0437\u0430 \u043F\u0430\u043F\u043A\u0430\u043C\u0438 \u0441\u043A\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F \u0438 \u043F\u0435\u0440\u0435\u0441\u0442\u0440\u0430\u0438\u0432\u0430\u0442\u044C \u0438\u043D\u0434\u0435\u043A\u0441 \u043F\u0440\u0438 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0438 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u043E\u0432.",
       "set.info": "\u041A\u043E\u0440\u0435\u043D\u044C \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u043E\u0432: {root} \xB7 \u043F\u0440\u043E\u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043E {entries}",
@@ -3201,7 +4380,7 @@ var { registerEmbed } = require_embed();
 var actualize = require_actualize2();
 var { ReferenceLinkModal, PresetPickerModal } = require_modal();
 var { ReferenceLinkerSettingTab } = require_settings_tab();
-var { readOutline } = require_pdf();
+var formats = require_formats();
 var { initI18n, withFamily, t, plural } = require_i18n();
 var api = require_api();
 var indexEvents = require_index_events();
@@ -3219,6 +4398,7 @@ var SIBLING_ID = "code-linker";
 var TITLE_ATTR = "data-reference-title";
 var anchorTitle = (a) => a.getAttribute(TITLE_ATTR) || a.getAttribute("title") || "";
 var pathPart = (dec) => dec.split("#")[0].split("?")[0];
+var extOf = (rel) => nodePath.extname(rel).slice(1).toLowerCase();
 var normCase = (s) => process.platform === "win32" ? s.toLowerCase() : s;
 function namesPath(p, full) {
   const a = normCase(p), b = normCase(full);
@@ -3229,10 +4409,12 @@ function namesPath(p, full) {
 }
 var previewEntry = (plugin, ref, title, url) => {
   const b = parseBinding(title);
-  if (b && b.sec)
-    return Object.assign({}, ref.entry, { page: ref.page, title: b.sec });
-  const sec = plugin.sectionAtLinkPage(url);
-  return Object.assign({}, ref.entry, { page: ref.page, title: sec ? sec.name : "" });
+  const at = plugin.sectionAtLinkPage(url);
+  if (b && b.sec) {
+    const named = at && at.name === b.sec ? at : plugin.sectionNamed(ref.entry.path, b.sec);
+    return Object.assign({}, ref.entry, { page: named && named.page || ref.page, title: b.sec });
+  }
+  return Object.assign({}, ref.entry, { page: at && at.page || ref.page, title: at ? at.name : "" });
 };
 var ReferenceLinkerPlugin = class extends Plugin {
   async onload() {
@@ -3326,6 +4508,7 @@ var ReferenceLinkerPlugin = class extends Plugin {
     clearTimeout(this.watchTimer);
     if (this.hover)
       this.hover.destroy();
+    formats.dispose();
   }
   migrateSettings() {
     this.settings.skipDirs = (this.settings.skipDirs || "").split(/[\n,]+/).map((s) => s.trim()).filter(Boolean).join("\n");
@@ -3499,10 +4682,10 @@ var ReferenceLinkerPlugin = class extends Plugin {
     }
     return dec.split("\\").join("/");
   }
-  // The page a link asks for — only ever read, never overridden. A #page fragment or a
-  // {page} query both count.
+  // The position a link asks for — only ever read, never overridden. A #page fragment or a
+  // {page} query both count, and #t= is the same question asked of a recording.
   targetPage(dec) {
-    const m = /[#?&]page=(\d+)/i.exec(dec);
+    const m = /[#?&](?:page|t)=(\d+)/i.exec(dec);
     return m ? parseInt(m[1], 10) : 1;
   }
   // The document a link points at, from its target alone: { entry, page }, or null for a
@@ -3518,6 +4701,10 @@ var ReferenceLinkerPlugin = class extends Plugin {
   entriesIn(rel) {
     return rel ? (this.fileCache.get(rel) || { entries: [] }).entries : [];
   }
+  // A document's section by name — how a link that stores no position finds where it points.
+  sectionNamed(rel, name) {
+    return this.entriesIn(rel).find((e) => e.kind === "section" && e.name === name) || null;
+  }
   // What a section binding says about the page a link stores: null when the section still
   // sits there, stale with the page it moved to, or broken when the document is indexed but
   // no such section resolves any more (renamed, or the outline changed).
@@ -3532,8 +4719,29 @@ var ReferenceLinkerPlugin = class extends Plugin {
     const rel = this.targetIndexedFile(this.decodeTarget(url));
     if (!rel)
       return null;
-    const pages = this.entriesIn(rel).filter((e) => e.kind === "section" && e.name === b.sec).map((e) => e.page);
-    return bindStateFrom(pages, storedPage);
+    const hits = this.entriesIn(rel).filter((e) => e.kind === "section" && e.name === b.sec);
+    if (!hits.length)
+      return { state: "broken" };
+    const kind = formats.anchorKind(extOf(rel));
+    if (!kind)
+      return null;
+    if (kind === "id")
+      return this.idBindState(url, hits);
+    return bindStateFrom(hits.map((e) => e.page), storedPage);
+  }
+  // An id-anchored link drifts when its heading is still there under a different id, which
+  // is what regenerating a doc site does. A heading that never had an id anchors nothing.
+  idBindState(url, hits) {
+    const wanted = hits.map((e) => e.anchor).filter(Boolean);
+    if (!wanted.length)
+      return null;
+    const stored = this.targetAnchor(this.decodeTarget(url));
+    return wanted.includes(stored) ? null : { state: "stale", anchor: wanted[0] };
+  }
+  // The fragment a link carries, without the '#'.
+  targetAnchor(dec) {
+    const i = dec.indexOf("#");
+    return i < 0 ? "" : dec.slice(i + 1);
   }
   // The outline section beginning on a link's page — what it can be pinned to. Null when the
   // page is mid-section or the document has no outline.
@@ -3541,8 +4749,16 @@ var ReferenceLinkerPlugin = class extends Plugin {
     const rel = url && this.targetIndexedFile(this.decodeTarget(url));
     if (!rel)
       return null;
+    const kind = formats.anchorKind(extOf(rel));
+    if (!kind)
+      return null;
+    const entries = this.entriesIn(rel);
+    if (kind === "id") {
+      const frag = this.targetAnchor(this.decodeTarget(url));
+      return frag && entries.find((e) => e.kind === "section" && e.anchor === frag) || null;
+    }
     const page = this.targetPage(url);
-    return this.entriesIn(rel).find((e) => e.kind === "section" && e.page === page) || null;
+    return entries.find((e) => e.kind === "section" && e.page === page) || null;
   }
   // The title pinning would produce and the section it pins to, or null when there's nothing
   // to pin or it would change nothing.
@@ -3638,7 +4854,7 @@ var ReferenceLinkerPlugin = class extends Plugin {
   // version (bumped when indexing logic changes, e.g. PDF sections were added). When it
   // changes, the per-file cache is stale even if mtimes haven't moved, so we drop it.
   indexSignature() {
-    return JSON.stringify({ v: 2, exts: [...parseExtensions(this.settings.extensions)].sort() });
+    return JSON.stringify({ v: 4, exts: [...parseExtensions(this.settings.extensions)].sort() });
   }
   async loadCache() {
     try {
@@ -3866,10 +5082,11 @@ var ReferenceLinkerPlugin = class extends Plugin {
     const base = nodePath.basename(abs).replace(/\.[^.]+$/, "");
     const ext = nodePath.extname(abs).slice(1).toLowerCase();
     const entries = [{ name: base, kind: "file", lang: ext, path: rel, line: 1, page: 1 }];
-    if (ext === "pdf") {
-      for (const s of await readOutline(abs)) {
-        entries.push({ name: s.title, kind: "section", lang: "pdf", path: rel, line: s.page, page: s.page });
-      }
+    for (const s of await formats.outline(ext, abs)) {
+      const entry = { name: s.title, kind: "section", lang: ext, path: rel, line: s.page, page: s.page };
+      if (s.anchor)
+        entry.anchor = s.anchor;
+      entries.push(entry);
     }
     scan.next.set(rel, { mtimeMs: stat.mtimeMs, entries });
   }
@@ -3886,9 +5103,9 @@ var ReferenceLinkerPlugin = class extends Plugin {
     const page = String(e.page || 1);
     const encPath = (p) => p.split("/").map(encodeURIComponent).join("/");
     let uri = tpl.replace(/{abs}/g, encodeURI(absFwd)).replace(/{path}/g, encPath(e.path)).replace(/{page}/g, page).replace(/{name}/g, encodeURIComponent(e.name));
-    if (e.kind === "section" && e.page && /^file:/i.test(uri) && !/#page=/i.test(uri)) {
-      uri += "#page=" + e.page;
-    }
+    const anchor = formats.anchorFor(e);
+    if (anchor && /^file:/i.test(uri) && !uri.includes("#"))
+      uri += "#" + anchor;
     return uri;
   }
   // The markdown link to insert. A section link is pinned to its section by a title binding
@@ -3916,8 +5133,8 @@ var ReferenceLinkerPlugin = class extends Plugin {
     return out;
   }
   insertEmbed(editor, e) {
-    const formats = this.embedFormats(e);
-    new PresetPickerModal(this.app, formats, (f) => {
+    const formats2 = this.embedFormats(e);
+    new PresetPickerModal(this.app, formats2, (f) => {
       editor.replaceSelection("```reference-link\n" + f.body + "\n```\n");
     }, t("modal.embedPlaceholder")).open();
   }
@@ -3944,6 +5161,10 @@ var ReferenceLinkerPlugin = class extends Plugin {
   }
   // fillRoot resolves the portable {root} token, since there's no note to render it.
   openEntry(e, template) {
+    if (e.kind === "section" && e.name && !formats.hasOsAnchor(e.lang)) {
+      navigator.clipboard.writeText(e.name);
+      new Notice(t("notice.anchorCopied", { section: e.name }));
+    }
     openExternal(this.fillRoot(this.buildUri(e, template)));
   }
   // Entries matched by name, or by path tail so a selected "Foo/Bar.cs" resolves too.

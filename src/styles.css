@@ -78,11 +78,67 @@ settings:
 /* Rendered PDF page (canvas) or image inside the popover / embed. */
 .%p%-hover-body canvas,
 .%p%-hover-body img,
+.%p%-hover-body video,
 .%p%-embed-body canvas,
-.%p%-embed-body img {
+.%p%-embed-body img,
+.%p%-embed-body video {
   display: block;
   max-width: 100%;
   height: auto;
+}
+
+/* Width is set inline from the request; a percentage here would collapse against the
+   shrink-to-fit popover. */
+.%p%-hover-body audio,
+.%p%-embed-body audio {
+  display: block;
+  max-width: 100%;
+  margin: 8px 4px;
+}
+
+/* Markdown and HTML preview as themselves. The width is set inline from the request; the
+   padding is what keeps rendered content off the popover border. */
+.%p%-rendered {
+  padding: 10px 14px;
+}
+
+.%p%-rendered > :first-child {
+  margin-top: 0;
+}
+
+.%p%-rendered > :last-child {
+  margin-bottom: 0;
+}
+
+.%p%-rendered img {
+  max-width: 100%;
+  height: auto;
+}
+
+.%p%-rendered pre {
+  overflow-x: auto;
+}
+
+/* The line preview: a heading and the lines under it, for formats with no markup to show. */
+.%p%-doc {
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.%p%-doc-title {
+  font-weight: var(--font-semibold);
+}
+
+.%p%-doc-line {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.%p%-doc-empty {
+  color: var(--text-faint);
+  font-style: italic;
 }
 
 /* Update preview: each note is a checkable group, its link changes a compact table, and

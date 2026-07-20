@@ -41,6 +41,43 @@ const hoverOn = (plugin, href, title) => {
   return plugin.entryAtPoint(a, 0, 0);
 };
 
+// A format that stores no position in its link: the binding is the only thing that says
+// which section, so the preview has to resolve the page through the index.
+const unanchored = (plugin) => {
+  plugin.targetIndexedFile = () => 'Deck.pptx';
+  plugin.fileCache = new Map([['Deck.pptx', {
+    entries: [
+      { name: 'Deck', kind: 'file', path: 'Deck.pptx', lang: 'pptx', page: 1 },
+      { name: 'Title Slide', kind: 'section', path: 'Deck.pptx', lang: 'pptx', page: 1 },
+      { name: 'Pan and Zoom', kind: 'section', path: 'Deck.pptx', lang: 'pptx', page: 7 },
+    ],
+  }]]);
+  return plugin;
+};
+
+describe('hover on a link with no position in it', () => {
+  it('previews the slide the binding names, not the first one', async () => {
+    const plugin = unanchored(await load());
+    const hit = hoverOn(plugin, 'file:///x/Deck.pptx', 'sec:Pan%20and%20Zoom');
+    assert.ok(hit, 'no hover entry at all');
+    assert.strictEqual(hit.entry.page, 7);
+    assert.strictEqual(hit.entry.title, 'Pan and Zoom');
+  });
+
+  it('still previews the first slide when that is what the binding names', async () => {
+    const plugin = unanchored(await load());
+    const hit = hoverOn(plugin, 'file:///x/Deck.pptx', 'sec:Title%20Slide');
+    assert.strictEqual(hit.entry.page, 1);
+  });
+
+  it('falls back to the file itself when the binding names no indexed section', async () => {
+    const plugin = unanchored(await load());
+    const hit = hoverOn(plugin, 'file:///x/Deck.pptx', 'sec:Gone');
+    assert.strictEqual(hit.entry.page, 1);
+    assert.strictEqual(hit.entry.title, 'Gone');
+  });
+});
+
 describe('hover header', () => {
   it('names the section a pinned link is pinned to', async () => {
     const plugin = withOutline(await load());
