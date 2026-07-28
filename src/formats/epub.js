@@ -151,6 +151,7 @@ async function render(el, req) {
 const imageLoader = (doc, chapterPath) => (src) => doc.zip.read(resolve(chapterPath, assetSrc(src)));
 
 module.exports = {
+  id: 'epub',
   exts: ['epub'],
   anchorKind: null, // an e-reader takes the file and ignores the fragment
   outline: readOutline,

@@ -197,6 +197,7 @@ async function render(el, req) {
 }
 
 module.exports = {
+  id: 'xlsx',
   exts: ['xlsx', 'xlsm', 'xltx', 'xltm'],
   // Excel takes the fragment as part of the file name, exactly as Word and PowerPoint do.
   anchorKind: null,

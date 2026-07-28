@@ -1565,6 +1565,7 @@ var require_pdf2 = __commonJS({
       return null;
     }
     module2.exports = {
+      id: "pdf",
       exts: ["pdf"],
       anchorKind: "page",
       anchorFor: (e) => e.kind === "section" && e.position ? "page=" + e.position : null,
@@ -1612,6 +1613,7 @@ var require_image = __commonJS({
       };
     }
     module2.exports = {
+      id: "image",
       exts: Object.keys(MIME),
       anchorKind: null,
       render
@@ -3241,6 +3243,7 @@ var require_pptx = __commonJS({
       return renderLines(el, { title: slide.title, body: slide.body, width: req.width });
     }
     module2.exports = {
+      id: "pptx",
       exts: ["pptx", "pptm", "potx", "potm"],
       anchorKind: null,
       // PowerPoint takes a fragment as part of the file name and finds nothing
@@ -3358,6 +3361,7 @@ var require_html = __commonJS({
       return renderLines(el, { title: sec.title, body: sec.body, width: req.width });
     }
     module2.exports = {
+      id: "html",
       // EPUB content is XHTML, so it reads its chapters with these rather than its own copy.
       blockLines,
       inlineText,
@@ -3465,6 +3469,7 @@ var require_text = __commonJS({
       return renderLines(el, { title: sec.title, body: sec.body, width: req.width });
     }
     module2.exports = {
+      id: "text",
       exts: ["md", "markdown", "txt", "text", "log"],
       anchorKind: null,
       // no viewer honours a position in a text file
@@ -3614,6 +3619,7 @@ var require_epub = __commonJS({
     }
     var imageLoader = (doc, chapterPath) => (src) => doc.zip.read(resolve(chapterPath, assetSrc(src)));
     module2.exports = {
+      id: "epub",
       exts: ["epub"],
       anchorKind: null,
       // an e-reader takes the file and ignores the fragment
@@ -3711,6 +3717,7 @@ var require_media = __commonJS({
       return mm >= 60 ? Math.floor(mm / 60) + ":" + String(mm % 60).padStart(2, "0") + ":" + ss : mm + ":" + ss;
     }
     module2.exports = {
+      id: "media",
       exts: [...Object.keys(VIDEO), ...Object.keys(AUDIO)],
       anchorKind: null,
       // no outline, so nothing writes an anchor; a hand-written #t= still previews
@@ -4300,6 +4307,7 @@ var require_odf = __commonJS({
       return renderLines(el, { title: sec.title, body: sec.body, width: req.width });
     }
     module2.exports = {
+      id: "odf",
       exts: ["odt", "ods", "odp", "odg", "ott", "ots", "otp", "otg"],
       anchorKind: null,
       outline: (abs, ext) => readOutline(abs, ext),
@@ -4888,6 +4896,7 @@ var require_docx = __commonJS({
       };
     }
     module2.exports = {
+      id: "docx",
       // A macro-enabled document and a template are the same package: word/document.xml, read the
       // same way. Only the .doc of old Word is a different format, and it is not one of these.
       exts: ["docx", "docm", "dotx", "dotm"],
@@ -5451,6 +5460,7 @@ var require_xlsx = __commonJS({
       return renderLines(el, { title: name, body: lines.slice(0, MAX_LINES), width: req.width });
     }
     module2.exports = {
+      id: "xlsx",
       exts: ["xlsx", "xlsm", "xltx", "xltm"],
       // Excel takes the fragment as part of the file name, exactly as Word and PowerPoint do.
       anchorKind: null,
@@ -5556,6 +5566,7 @@ var require_csv = __commonJS({
       return renderLines(el, { title: "", body: lines.slice(0, MAX_LINES), width: req.width });
     }
     module2.exports = {
+      id: "csv",
       exts: ["csv", "tsv"],
       // A CSV is opened in whatever the OS hands .csv to; there is no page to land on.
       anchorKind: null,
@@ -5589,6 +5600,7 @@ var require_formats = __commonJS({
         byExt.set(e, h);
     var handlerFor = (ext) => byExt.get(String(ext || "").toLowerCase()) || null;
     var knownExtensions = () => [...byExt.keys()].map((e) => "." + e).sort();
+    var formatGroups = () => HANDLERS.map((h) => ({ id: h.id, exts: h.exts.map((e) => "." + e) }));
     var canOutline = (ext) => {
       const h = handlerFor(ext);
       return !!(h && h.outline);
@@ -5651,6 +5663,7 @@ var require_formats = __commonJS({
     module2.exports = {
       handlerFor,
       knownExtensions,
+      formatGroups,
       canOutline,
       canPreview,
       anchorKind,
@@ -6877,16 +6890,21 @@ var require_settings_tab = __commonJS({
     "use strict";
     var { PluginSettingTab, Setting } = require("obsidian");
     var { PRESETS: PRESETS2, parseExtensions: parseExtensions2 } = require_constants();
-    var { knownExtensions } = require_formats();
+    var { formatGroups, knownExtensions } = require_formats();
     var { FolderSuggest, folderSuggestAvailable } = require_folder_suggest();
     var { renderFolderList } = require_folder_list();
     var { t: t2, plural: plural2 } = require_i18n();
     var { renderPrecedenceSetting: precedenceSetting } = require_precedence();
     var normFolder = (p) => p.replace(/\\/g, "/").replace(/\/+$/, "").trim();
+    var normExt = (e) => {
+      const x = e.trim().toLowerCase().replace(/^\.+/, "");
+      return x ? "." + x : "";
+    };
     var ReferenceLinkerSettingTab2 = class extends PluginSettingTab {
       constructor(app, plugin) {
         super(app, plugin);
         this.plugin = plugin;
+        this.expandedFormats = /* @__PURE__ */ new Set();
       }
       // The dropdown key for the active preset: 'ask' in always-ask mode, else a preset
       // ('u:<i>' for a user viewer). Migration guarantees a template match.
@@ -6907,6 +6925,61 @@ var require_settings_tab = __commonJS({
         const opt = Array.from(dropdown.selectEl.options).find((o) => o.value === "u:" + i);
         if (opt)
           opt.text = name || `Viewer ${i + 1}`;
+      }
+      // The setting stays one string — parseExtensions reads it unchanged, the list only
+      // writes it, so there is nothing to migrate.
+      renderExtensions(containerEl, save) {
+        const s = this.plugin.settings;
+        const known = new Set(knownExtensions());
+        const current = [...parseExtensions2(s.extensions)];
+        const on = new Set(current);
+        const commit = async (next) => {
+          s.extensions = [...new Set(next)].join(" ");
+          await save(true);
+          this.display();
+        };
+        if (this.showExtensions === void 0)
+          this.showExtensions = !on.size;
+        const heading = new Setting(containerEl).setName(t2("set.extensions.name")).setDesc(on.size ? t2("set.extensions.count", { n: current.filter((e) => known.has(e)).length, total: known.size }) : t2("set.extensions.none")).addExtraButton((c) => c.setIcon("list-plus").setTooltip(t2("set.extensions.addAll")).onClick(() => commit([...current, ...known])));
+        this.foldButton(heading, this.showExtensions, () => {
+          this.showExtensions = !this.showExtensions;
+          this.display();
+        });
+        if (!this.showExtensions)
+          return;
+        for (const g of formatGroups()) {
+          const enabled = g.exts.filter((e) => on.has(e));
+          const open = this.expandedFormats.has(g.id);
+          const partial = enabled.length > 0 && enabled.length < g.exts.length;
+          const row = new Setting(containerEl).setName(t2("set.format." + g.id)).setDesc(partial ? t2("set.extensions.meta", { n: enabled.length, total: g.exts.length, exts: g.exts.join(" ") }) : g.exts.join(" "));
+          if (g.exts.length > 1) {
+            this.foldButton(row, open, () => {
+              if (open)
+                this.expandedFormats.delete(g.id);
+              else
+                this.expandedFormats.add(g.id);
+              this.display();
+            });
+          }
+          row.addToggle((c) => c.setValue(enabled.length > 0).onChange((v) => commit(v ? [...current, ...g.exts] : current.filter((e) => !g.exts.includes(e)))));
+          if (!open)
+            continue;
+          for (const ext of g.exts) {
+            const sub = new Setting(containerEl).setName(ext).addToggle((c) => c.setValue(on.has(ext)).onChange((v) => commit(v ? [...current, ext] : current.filter((e) => e !== ext))));
+            sub.settingEl.addClass("reference-linker-kind-row");
+          }
+        }
+        renderFolderList(containerEl, {
+          cls: "reference-linker",
+          name: t2("set.extensions.other.name"),
+          desc: t2("set.extensions.other.desc"),
+          get: () => [...parseExtensions2(s.extensions)].filter((e) => !known.has(e)).join("\n"),
+          set: (v) => commit([...current.filter((e) => known.has(e)), ...parseExtensions2(v)]),
+          normalize: normExt,
+          placeholder: t2("set.extensions.other.add"),
+          removeLabel: t2("set.folderList.remove"),
+          addLabel: t2("set.folderList.addAria")
+        });
       }
       display() {
         const { containerEl } = this;
@@ -6950,26 +7023,7 @@ var require_settings_tab = __commonJS({
         if (missing.length) {
           containerEl.createEl("div", { cls: "reference-linker-note is-error", text: t2("set.scanFolders.notFound", { folders: missing.join(", ") }) });
         }
-        new Setting(containerEl).setName(t2("set.extensions.name")).setDesc(t2("set.extensions.desc")).addText((c) => {
-          this.extInput = c;
-          wide(c).setPlaceholder(".pdf .pptx .png").setValue(s.extensions).onChange(async (v) => {
-            s.extensions = v;
-            await save(false);
-          });
-          c.inputEl.addEventListener("blur", () => this.plugin.rebuildIndex(false));
-        }).addExtraButton((c) => c.setIcon("list-plus").setTooltip(t2("set.extensions.addAll")).onClick(async () => {
-          s.extensions = knownExtensions().join(" ");
-          if (this.extInput)
-            this.extInput.setValue(s.extensions);
-          await save(false);
-          this.plugin.rebuildIndex(true);
-        }));
-        containerEl.createEl("div", { cls: "reference-linker-note", text: t2("set.extensions.known", { exts: knownExtensions().join(" ") }) });
-        const enabled = parseExtensions2(s.extensions);
-        const off = knownExtensions().filter((e) => !enabled.has(e));
-        if (off.length && enabled.size) {
-          containerEl.createEl("div", { cls: "reference-linker-note", text: t2("set.extensions.off", { exts: off.join(" ") }) });
-        }
+        this.renderExtensions(containerEl, save);
         folderList(t2("set.skipFolders.name"), t2("set.skipFolders.desc"), "skipDirs");
         new Setting(containerEl).setName(t2("set.autoRefresh.name")).setDesc(t2("set.autoRefresh.desc")).addToggle((c) => c.setValue(s.autoRefresh).onChange(async (v) => {
           s.autoRefresh = v;
@@ -7282,10 +7336,24 @@ var require_en = __commonJS({
       "set.scanFolders.desc": "Folders scanned for documents, relative to the reference root. Leave empty to scan the whole root.",
       "set.scanFolders.notFound": "\u26A0 Not found under the reference root \u2014 {folders}",
       "set.extensions.name": "File extensions",
-      "set.extensions.desc": "Which file types to index, space- or comma-separated (e.g. .pdf .pptx .png). Empty = nothing is indexed.",
-      "set.extensions.known": "Previews and section indexing: {exts}. Any other extension is indexed by file name only.",
-      "set.extensions.addAll": "Add every supported extension",
-      "set.extensions.off": "Supported but not enabled here: {exts}",
+      "set.extensions.count": "{n} of {total} supported extensions on",
+      "set.extensions.none": "Nothing is indexed until at least one is on.",
+      "set.extensions.addAll": "Turn on every supported extension",
+      "set.extensions.meta": "{n} of {total} on: {exts}",
+      "set.extensions.other.name": "Other extensions",
+      "set.extensions.other.desc": "Anything else to index. Found by file name only \u2014 no preview, no sections.",
+      "set.extensions.other.add": "Add extension\u2026",
+      "set.format.pdf": "PDF",
+      "set.format.image": "Images",
+      "set.format.pptx": "PowerPoint presentations",
+      "set.format.html": "Web pages",
+      "set.format.text": "Text and Markdown",
+      "set.format.epub": "E-books",
+      "set.format.media": "Audio and video",
+      "set.format.odf": "OpenDocument",
+      "set.format.docx": "Word documents",
+      "set.format.xlsx": "Excel spreadsheets",
+      "set.format.csv": "CSV and TSV tables",
       "set.skipFolders.desc": "A bare name (node_modules) is skipped at any depth; a path with a slash (archive/raw) skips only that folder, relative to the reference root.",
       "set.autoRefresh.desc": "Watch the scan folders and rebuild the index when documents change.",
       "set.info": "Reference root: {root} \xB7 {entries} indexed",
@@ -7385,10 +7453,24 @@ var require_ru = __commonJS({
       "set.scanFolders.desc": "\u041F\u0430\u043F\u043A\u0438, \u0441\u043A\u0430\u043D\u0438\u0440\u0443\u0435\u043C\u044B\u0435 \u043D\u0430 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u044B, \u043E\u0442\u043D\u043E\u0441\u0438\u0442\u0435\u043B\u044C\u043D\u043E \u043A\u043E\u0440\u043D\u044F. \u041E\u0441\u0442\u0430\u0432\u044C\u0442\u0435 \u043F\u0443\u0441\u0442\u044B\u043C, \u0447\u0442\u043E\u0431\u044B \u0441\u043A\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0432\u0435\u0441\u044C \u043A\u043E\u0440\u0435\u043D\u044C.",
       "set.scanFolders.notFound": "\u26A0 \u041D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u043E \u0432 \u043A\u043E\u0440\u043D\u0435 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u043E\u0432 \u2014 {folders}",
       "set.extensions.name": "\u0420\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u044F \u0444\u0430\u0439\u043B\u043E\u0432",
-      "set.extensions.desc": "\u041A\u0430\u043A\u0438\u0435 \u0442\u0438\u043F\u044B \u0444\u0430\u0439\u043B\u043E\u0432 \u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u0442\u044C, \u0447\u0435\u0440\u0435\u0437 \u043F\u0440\u043E\u0431\u0435\u043B \u0438\u043B\u0438 \u0437\u0430\u043F\u044F\u0442\u0443\u044E (\u043D\u0430\u043F\u0440. .pdf .pptx .png). \u041F\u0443\u0441\u0442\u043E = \u043D\u0438\u0447\u0435\u0433\u043E \u043D\u0435 \u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u0443\u0435\u0442\u0441\u044F.",
-      "set.extensions.known": "\u041F\u0440\u0435\u0432\u044C\u044E \u0438 \u0438\u043D\u0434\u0435\u043A\u0441\u0430\u0446\u0438\u044F \u0440\u0430\u0437\u0434\u0435\u043B\u043E\u0432: {exts}. \u041E\u0441\u0442\u0430\u043B\u044C\u043D\u044B\u0435 \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u044F \u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u0443\u044E\u0442\u0441\u044F \u0442\u043E\u043B\u044C\u043A\u043E \u043F\u043E \u0438\u043C\u0435\u043D\u0438 \u0444\u0430\u0439\u043B\u0430.",
-      "set.extensions.addAll": "\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u0432\u0441\u0435 \u043F\u043E\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0435\u043C\u044B\u0435 \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u044F",
-      "set.extensions.off": "\u041F\u043E\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u044E\u0442\u0441\u044F, \u043D\u043E \u0437\u0434\u0435\u0441\u044C \u043D\u0435 \u0432\u043A\u043B\u044E\u0447\u0435\u043D\u044B: {exts}",
+      "set.extensions.count": "\u0412\u043A\u043B\u044E\u0447\u0435\u043D\u043E {n} \u0438\u0437 {total} \u043F\u043E\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0435\u043C\u044B\u0445 \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u0439",
+      "set.extensions.none": "\u041F\u043E\u043A\u0430 \u043D\u0438\u0447\u0435\u0433\u043E \u043D\u0435 \u0432\u043A\u043B\u044E\u0447\u0435\u043D\u043E \u2014 \u0438\u043D\u0434\u0435\u043A\u0441 \u043F\u0443\u0441\u0442.",
+      "set.extensions.addAll": "\u0412\u043A\u043B\u044E\u0447\u0438\u0442\u044C \u0432\u0441\u0435 \u043F\u043E\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0435\u043C\u044B\u0435 \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u044F",
+      "set.extensions.meta": "\u0412\u043A\u043B\u044E\u0447\u0435\u043D\u043E {n} \u0438\u0437 {total}: {exts}",
+      "set.extensions.other.name": "\u0414\u0440\u0443\u0433\u0438\u0435 \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u044F",
+      "set.extensions.other.desc": "\u0412\u0441\u0451 \u043E\u0441\u0442\u0430\u043B\u044C\u043D\u043E\u0435, \u0447\u0442\u043E \u043D\u0443\u0436\u043D\u043E \u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u0442\u044C. \u0418\u0449\u0435\u0442\u0441\u044F \u0442\u043E\u043B\u044C\u043A\u043E \u043F\u043E \u0438\u043C\u0435\u043D\u0438 \u0444\u0430\u0439\u043B\u0430 \u2014 \u0431\u0435\u0437 \u043F\u0440\u0435\u0432\u044C\u044E \u0438 \u0440\u0430\u0437\u0434\u0435\u043B\u043E\u0432.",
+      "set.extensions.other.add": "\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u0435\u2026",
+      "set.format.pdf": "PDF",
+      "set.format.image": "\u0418\u0437\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u044F",
+      "set.format.pptx": "\u041F\u0440\u0435\u0437\u0435\u043D\u0442\u0430\u0446\u0438\u0438 PowerPoint",
+      "set.format.html": "\u0412\u0435\u0431-\u0441\u0442\u0440\u0430\u043D\u0438\u0446\u044B",
+      "set.format.text": "\u0422\u0435\u043A\u0441\u0442 \u0438 Markdown",
+      "set.format.epub": "\u042D\u043B\u0435\u043A\u0442\u0440\u043E\u043D\u043D\u044B\u0435 \u043A\u043D\u0438\u0433\u0438",
+      "set.format.media": "\u0410\u0443\u0434\u0438\u043E \u0438 \u0432\u0438\u0434\u0435\u043E",
+      "set.format.odf": "OpenDocument",
+      "set.format.docx": "\u0414\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u044B Word",
+      "set.format.xlsx": "\u0422\u0430\u0431\u043B\u0438\u0446\u044B Excel",
+      "set.format.csv": "\u0422\u0430\u0431\u043B\u0438\u0446\u044B CSV \u0438 TSV",
       "set.skipFolders.desc": "\u041F\u0440\u043E\u0441\u0442\u043E \u0438\u043C\u044F (node_modules) \u043F\u0440\u043E\u043F\u0443\u0441\u043A\u0430\u0435\u0442\u0441\u044F \u043D\u0430 \u043B\u044E\u0431\u043E\u0439 \u0433\u043B\u0443\u0431\u0438\u043D\u0435; \u043F\u0443\u0442\u044C \u0441\u043E \u0441\u043B\u044D\u0448\u0435\u043C (archive/raw) \u043F\u0440\u043E\u043F\u0443\u0441\u043A\u0430\u0435\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u044D\u0442\u0443 \u043F\u0430\u043F\u043A\u0443 \u043E\u0442\u043D\u043E\u0441\u0438\u0442\u0435\u043B\u044C\u043D\u043E \u043A\u043E\u0440\u043D\u044F.",
       "set.autoRefresh.desc": "\u0421\u043B\u0435\u0434\u0438\u0442\u044C \u0437\u0430 \u043F\u0430\u043F\u043A\u0430\u043C\u0438 \u0441\u043A\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F \u0438 \u043F\u0435\u0440\u0435\u0441\u0442\u0440\u0430\u0438\u0432\u0430\u0442\u044C \u0438\u043D\u0434\u0435\u043A\u0441 \u043F\u0440\u0438 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0438 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u043E\u0432.",
       "set.info": "\u041A\u043E\u0440\u0435\u043D\u044C \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u043E\u0432: {root} \xB7 \u043F\u0440\u043E\u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043E {entries}",

@@ -76,6 +76,7 @@ async function render(el, req) {
 }
 
 module.exports = {
+  id: 'csv',
   exts: ['csv', 'tsv'],
   // A CSV is opened in whatever the OS hands .csv to; there is no page to land on.
   anchorKind: null,

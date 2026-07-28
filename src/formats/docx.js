@@ -358,6 +358,7 @@ function documentPage(parts, position, width, view) {
 }
 
 module.exports = {
+  id: 'docx',
   // A macro-enabled document and a template are the same package: word/document.xml, read the
   // same way. Only the .doc of old Word is a different format, and it is not one of these.
   exts: ['docx', 'docm', 'dotx', 'dotm'],

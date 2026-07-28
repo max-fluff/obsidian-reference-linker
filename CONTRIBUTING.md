@@ -24,12 +24,13 @@ Built-in viewer presets live in `src/constants.js` (`PRESETS`) with their labels
 ## Adding a document format
 
 Format knowledge lives in `src/formats/` and nowhere else. A handler is a module exporting
-`exts` plus whatever it can do; register it in `src/formats/index.js` and every caller —
-indexing, hover, embeds, the settings hint — picks it up. Nothing outside that folder should
-branch on an extension.
+`id` and `exts` plus whatever it can do; register it in `src/formats/index.js` and every
+caller — indexing, hover, embeds, the settings list — picks it up. Nothing outside that
+folder should branch on an extension.
 
 | Member | Meaning |
 |---|---|
+| `id` | Stable key for the format's row in the settings list. Its label is `set.format.<id>` in `src/locales/`, so a new handler needs that key in both locales or the row shows the key itself. |
 | `exts` | Extensions without the dot. Two handlers must not claim the same one. List every extension the same package is saved under — a `.docm` and a `.dotx` are a `.docx` with another name, and a handler that claims only the plain one reports the rest as unreadable. |
 | `outline(abs, ext)` | `[{ title, position, anchor? }]` in reading order, `[]` when there is none. Each becomes a `section` index entry. Called at index time and cached against the file's mtime, so it may be slow but must not be chatty. `ext` is passed for a handler (ODF) whose extensions share one reader — its `KIND` table folds each template and the drawing onto the three kinds that reader knows. Every entry states `position`, never `page`: the index reads `s.position`, and a handler that spells it otherwise indexes every section at `undefined`. |
 | `render(el, req)` | Draw a preview into `el`. `req` is `{ abs, ext, position, width, isCurrent() }`. Return a cleanup function, `null` if there's nothing to release, or `false` if nothing was drawn. Check `isCurrent()` after every await — the reader may have moved on. |

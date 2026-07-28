@@ -129,6 +129,7 @@ async function render(el, req) {
 }
 
 module.exports = {
+  id: 'html',
   // EPUB content is XHTML, so it reads its chapters with these rather than its own copy.
   blockLines,
   inlineText,

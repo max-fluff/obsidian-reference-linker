@@ -34,6 +34,7 @@ async function render(el, req) {
 }
 
 module.exports = {
+  id: 'pdf',
   exts: ['pdf'],
   anchorKind: 'page',
   anchorFor: (e) => (e.kind === 'section' && e.position ? 'page=' + e.position : null),

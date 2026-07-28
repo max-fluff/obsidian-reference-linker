@@ -34,6 +34,7 @@ async function render(el, req) {
 }
 
 module.exports = {
+  id: 'image',
   exts: Object.keys(MIME),
   anchorKind: null,
   render,

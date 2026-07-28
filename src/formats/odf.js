@@ -491,6 +491,7 @@ async function render(el, req) {
 }
 
 module.exports = {
+  id: 'odf',
   exts: ['odt', 'ods', 'odp', 'odg', 'ott', 'ots', 'otp', 'otg'],
   anchorKind: null,
   outline: (abs, ext) => readOutline(abs, ext),

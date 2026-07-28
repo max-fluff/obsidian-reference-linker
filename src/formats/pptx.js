@@ -513,6 +513,7 @@ async function render(el, req) {
 }
 
 module.exports = {
+  id: 'pptx',
   exts: ['pptx', 'pptm', 'potx', 'potm'],
   anchorKind: null, // PowerPoint takes a fragment as part of the file name and finds nothing
   outline: readOutline,

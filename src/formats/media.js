@@ -89,6 +89,7 @@ function positionLabel(n) {
 }
 
 module.exports = {
+  id: 'media',
   exts: [...Object.keys(VIDEO), ...Object.keys(AUDIO)],
   anchorKind: null, // no outline, so nothing writes an anchor; a hand-written #t= still previews
   positionUnit: 'time',

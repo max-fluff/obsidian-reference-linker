@@ -26,6 +26,9 @@ const handlerFor = (ext) => byExt.get(String(ext || '').toLowerCase()) || null;
 // `extensions` setting falls back to.
 const knownExtensions = () => [...byExt.keys()].map((e) => '.' + e).sort();
 
+// The settings list, one row per format.
+const formatGroups = () => HANDLERS.map((h) => ({ id: h.id, exts: h.exts.map((e) => '.' + e) }));
+
 const canOutline = (ext) => {
   const h = handlerFor(ext);
   return !!(h && h.outline);
@@ -108,6 +111,7 @@ async function dispose() {
 module.exports = {
   handlerFor,
   knownExtensions,
+  formatGroups,
   canOutline,
   canPreview,
   anchorKind,

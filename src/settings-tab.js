@@ -2,7 +2,7 @@
 
 const { PluginSettingTab, Setting } = require('obsidian');
 const { PRESETS, parseExtensions } = require('./constants');
-const { knownExtensions } = require('./formats');
+const { formatGroups, knownExtensions } = require('./formats');
 const { FolderSuggest, folderSuggestAvailable } = require('./shared/deeplink/folder-suggest');
 const { renderFolderList } = require('./shared/folder-list');
 const { t, plural } = require('./shared/i18n');
@@ -11,8 +11,13 @@ const { renderPrecedenceSetting: precedenceSetting } = require('./shared/precede
 // Path tidy for the folder-list rows: backslashes to slashes, no trailing slash.
 const normFolder = (p) => p.replace(/\\/g, '/').replace(/\/+$/, '').trim();
 
+const normExt = (e) => {
+  const x = e.trim().toLowerCase().replace(/^\.+/, '');
+  return x ? '.' + x : '';
+};
+
 class ReferenceLinkerSettingTab extends PluginSettingTab {
-  constructor(app, plugin) { super(app, plugin); this.plugin = plugin; }
+  constructor(app, plugin) { super(app, plugin); this.plugin = plugin; this.expandedFormats = new Set(); }
 
   // The dropdown key for the active preset: 'ask' in always-ask mode, else a preset
   // ('u:<i>' for a user viewer). Migration guarantees a template match.
@@ -34,6 +39,75 @@ class ReferenceLinkerSettingTab extends PluginSettingTab {
     if (!dropdown) return;
     const opt = Array.from(dropdown.selectEl.options).find((o) => o.value === 'u:' + i);
     if (opt) opt.text = name || `Viewer ${i + 1}`;
+  }
+
+  // The setting stays one string — parseExtensions reads it unchanged, the list only
+  // writes it, so there is nothing to migrate.
+  renderExtensions(containerEl, save) {
+    const s = this.plugin.settings;
+    const known = new Set(knownExtensions());
+    const current = [...parseExtensions(s.extensions)];
+    const on = new Set(current);
+
+    const commit = async (next) => {
+      s.extensions = [...new Set(next)].join(' ');
+      await save(true);
+      this.display();
+    };
+
+    if (this.showExtensions === undefined) this.showExtensions = !on.size;
+    const heading = new Setting(containerEl)
+      .setName(t('set.extensions.name'))
+      .setDesc(on.size
+        ? t('set.extensions.count', { n: current.filter((e) => known.has(e)).length, total: known.size })
+        : t('set.extensions.none'))
+      .addExtraButton((c) => c
+        .setIcon('list-plus')
+        .setTooltip(t('set.extensions.addAll'))
+        .onClick(() => commit([...current, ...known])));
+    this.foldButton(heading, this.showExtensions, () => { this.showExtensions = !this.showExtensions; this.display(); });
+    if (!this.showExtensions) return;
+
+    for (const g of formatGroups()) {
+      const enabled = g.exts.filter((e) => on.has(e));
+      const open = this.expandedFormats.has(g.id);
+      const partial = enabled.length > 0 && enabled.length < g.exts.length;
+      const row = new Setting(containerEl)
+        .setName(t('set.format.' + g.id))
+        .setDesc(partial
+          ? t('set.extensions.meta', { n: enabled.length, total: g.exts.length, exts: g.exts.join(' ') })
+          : g.exts.join(' '));
+
+      if (g.exts.length > 1) {
+        this.foldButton(row, open, () => {
+          if (open) this.expandedFormats.delete(g.id); else this.expandedFormats.add(g.id);
+          this.display();
+        });
+      }
+      row.addToggle((c) => c.setValue(enabled.length > 0)
+        .onChange((v) => commit(v ? [...current, ...g.exts] : current.filter((e) => !g.exts.includes(e)))));
+
+      if (!open) continue;
+      for (const ext of g.exts) {
+        const sub = new Setting(containerEl)
+          .setName(ext)
+          .addToggle((c) => c.setValue(on.has(ext))
+            .onChange((v) => commit(v ? [...current, ext] : current.filter((e) => e !== ext))));
+        sub.settingEl.addClass('reference-linker-kind-row');
+      }
+    }
+
+    renderFolderList(containerEl, {
+      cls: 'reference-linker',
+      name: t('set.extensions.other.name'),
+      desc: t('set.extensions.other.desc'),
+      get: () => [...parseExtensions(s.extensions)].filter((e) => !known.has(e)).join('\n'),
+      set: (v) => commit([...current.filter((e) => known.has(e)), ...parseExtensions(v)]),
+      normalize: normExt,
+      placeholder: t('set.extensions.other.add'),
+      removeLabel: t('set.folderList.remove'),
+      addLabel: t('set.folderList.addAria'),
+    });
   }
 
   display() {
@@ -77,33 +151,7 @@ class ReferenceLinkerSettingTab extends PluginSettingTab {
       containerEl.createEl('div', { cls: 'reference-linker-note is-error', text: t('set.scanFolders.notFound', { folders: missing.join(', ') }) });
     }
 
-    new Setting(containerEl)
-      .setName(t('set.extensions.name'))
-      .setDesc(t('set.extensions.desc'))
-      .addText((c) => {
-        this.extInput = c;
-        wide(c).setPlaceholder('.pdf .pptx .png').setValue(s.extensions).onChange(async (v) => { s.extensions = v; await save(false); });
-        c.inputEl.addEventListener('blur', () => this.plugin.rebuildIndex(false));
-      })
-      // The field starts empty and nothing is indexed until it is filled, so the list of what
-      // the plugin can actually read has to be reachable without going to the docs for it.
-      .addExtraButton((c) => c
-        .setIcon('list-plus')
-        .setTooltip(t('set.extensions.addAll'))
-        .onClick(async () => {
-          s.extensions = knownExtensions().join(' ');
-          if (this.extInput) this.extInput.setValue(s.extensions);
-          await save(false);
-          this.plugin.rebuildIndex(true);
-        }));
-    containerEl.createEl('div', { cls: 'reference-linker-note', text: t('set.extensions.known', { exts: knownExtensions().join(' ') }) });
-    // A list written before a format existed never picks it up, and nothing else would ever say
-    // so: the formats were there, indexed nothing, and read as unsupported.
-    const enabled = parseExtensions(s.extensions);
-    const off = knownExtensions().filter((e) => !enabled.has(e));
-    if (off.length && enabled.size) {
-      containerEl.createEl('div', { cls: 'reference-linker-note', text: t('set.extensions.off', { exts: off.join(' ') }) });
-    }
+    this.renderExtensions(containerEl, save);
 
     folderList(t('set.skipFolders.name'), t('set.skipFolders.desc'), 'skipDirs');
 

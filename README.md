@@ -223,7 +223,7 @@ The selection commands are also in the editor's right-click menu. Right-clicking
 | --- | --- | --- |
 | **Reference root** | vault's parent folder | Base folder the scan paths resolve against. Empty = the folder containing the vault. |
 | **Scan folders** | whole root | One path per line, relative to the reference root. Empty scans the whole root. |
-| **File extensions** | none | Which file types to index, space- or comma-separated (`.pdf .pptx .png`). Empty means nothing is indexed, so set this first. |
+| **File extensions** | none | A list of every format the plugin reads: turn on the ones to index, or open a format to pick single extensions. Anything else goes under **Other extensions** and is found by file name only. Nothing is indexed until something is on, so set this first. |
 | **Skip folders** | `.git`, `node_modules`, `.obsidian` | A bare name is skipped at any depth; a path with a slash skips only that folder. |
 | **Auto-refresh index** | on | Watch the scan folders and rebuild when documents change. Not available on Linux, which lacks recursive watching; rebuild manually there. |
 
@@ -332,7 +332,7 @@ This plugin is desktop-only, since it reads the filesystem.
 
 **Beta builds via [BRAT](https://github.com/TfTHacker/obsidian42-brat).** Add the repository `max-fluff/obsidian-reference-linker` to test unreleased changes before they reach the catalog.
 
-After enabling, set **Reference root** and **File extensions** in settings. The index stays empty until extensions are set.
+After enabling, set **Reference root** and turn on the **File extensions** to index. The index stays empty until at least one of them is on.
 
 ## Compatibility
 

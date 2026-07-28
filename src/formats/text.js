@@ -88,6 +88,7 @@ async function render(el, req) {
 }
 
 module.exports = {
+  id: 'text',
   exts: ['md', 'markdown', 'txt', 'text', 'log'],
   anchorKind: null, // no viewer honours a position in a text file
   outline: readOutline,
