@@ -66,7 +66,7 @@ The inserted link looks like:
 [paper-with-outline](file:///{ref-root}/papers/paper-with-outline.pdf)
 ```
 
-Filter a common name by an inline prefix: an extension (`pdf:`, `pptx:`, `png:`) or `sec:` to match only sections.
+Filter a common name by an inline prefix: an extension (`pdf:`, `pptx:`, `png:`), `sec:` for sections only, or `file:` for whole files only. They stack, so `@!pdf:sec:intro` is the *Introduction* of a PDF and nothing else, and a prefix with no name yet (`@!pdf:`) simply lists what passes it. The same prefixes resolve an embed's target.
 
 ### Document sections
 
@@ -152,13 +152,13 @@ papers/paper-with-outline.pdf#page=3
 ```
 ````
 
-- A path (`papers/report.pdf`) shows the first page; add `#page=N` (or `:N`) for a specific page.
+- A path (`papers/report.pdf`) shows the first page; add `#page=N` (or the older `:N` / `:N-M` suffix) for a specific page.
 - An `#id` anchor works too (`guide.html#_options`) — the same fragment a copied HTML section link carries — resolved through the index to its section.
 - A name or section (`Introduction`) is resolved through the index to its file and page.
-- An image path shows the image; a `.pptx` path shows the slide's text; a spreadsheet shows the sheet as a table.
+- An image path shows the image; a `.pptx` path shows the slide drawn; a spreadsheet shows the sheet as a table.
 - A **range** stacks several pages or sections: `report.pdf#page=3-5`, or a `page: 3-5` line. Paged and sectioned formats range; images and media render once. Up to 20 at a time.
 - A recording is positioned **in time, not in pages**: `time: 1:30` (or `1:02:05`, or plain seconds), or `clip.mp4#t=1:30` in the target — the same timecode the header shows. Each format takes only its own unit: `page:` on a recording, or `time:` on a paged document, is an error that names the right key rather than quietly starting from the top.
-- Optional `key: value` lines after the target tune it: `page: N` (or `N-M`) for paged formats, `time: mm:ss` for recordings, plus `width: N`, `title: …`.
+- Optional `key: value` lines after the target tune it, and they are the whole set: `page: N` (or `N-M`) for paged formats, `time: mm:ss` for recordings, `width: N` (CSS px, 600 by default) and `title: …`, which replaces the header text — by default the section or document name and its position.
 
 <p align="center">
   <img src="docs/images/embed.png" alt="Two rendered reference-link embeds: a PDF page with a title, and an image" width="640">
@@ -241,6 +241,8 @@ The selection commands are also in the editor's right-click menu. Right-clicking
 | **Min characters / Max results** | `1` / `12` | When suggestions appear, and how many. |
 | **Viewer link preset** | file:// | The link format. With **ask-on-insert** you pick per link; add your own named URL templates under **Your viewers**. |
 | **Editor context menu** | on | Add the convert/open items to the editor right-click menu. |
+
+**Your viewers** are named URL templates. `{abs}`, `{path}`, `{page}` and `{name}` are filled in when the link is built; `{ref-root}` stays in the note and resolves when the link is opened or rendered. The result is handed to the OS as a URL, so a template has to be one, not a command line. A `file://` template that carries no fragment of its own gets the format's own (`#page=`, `#id`) appended when the entry is a section — under any other scheme the position goes only where you put `{page}`.
 
 **Hover preview**
 | Setting | Default | What it does |
