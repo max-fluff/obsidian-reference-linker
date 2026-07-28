@@ -43,10 +43,10 @@ const tmpMedia = (name, bytes) => {
   return p;
 };
 
-const render = (abs, ext, page) => {
+const render = (abs, ext, position) => {
   const root = el();
   const media = require('../src/formats/media');
-  return media.render(root, { abs, ext, page, width: 600, isCurrent: () => true })
+  return media.render(root, { abs, ext, position, width: 600, isCurrent: () => true })
     .then((cleanup) => ({ root, media: root.children[0], cleanup }));
 };
 
@@ -145,7 +145,7 @@ describe('media preview', () => {
     const root = el();
     const media = require('../src/formats/media');
     const out = await media.render(root, {
-      abs: path.join(os.tmpdir(), 'no-such-reflinker.mp4'), ext: 'mp4', page: 1, width: 600, isCurrent: () => true,
+      abs: path.join(os.tmpdir(), 'no-such-reflinker.mp4'), ext: 'mp4', position: 1, width: 600, isCurrent: () => true,
     });
     assert.strictEqual(out, false);
   }));

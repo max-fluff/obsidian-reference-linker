@@ -54,6 +54,8 @@ module.exports = {
   'embed.fmt.file': 'Документ (первая страница)',
   'embed.fmt.section': 'Раздел «{name}»',
   'embed.unsupported': 'Reference Linker: нет инлайн-превью для {path}',
+  'embed.needsTime': 'Reference Linker: {path} — запись, позиция задаётся «time: 1:30» или «#t=1:30», а не страницей',
+  'embed.needsPage': 'Reference Linker: у {path} страницы, а не время — позиция задаётся «page: 3» или «#page=3»',
   'preview.empty': 'Здесь нечего показать',
   'embed.menu.open': 'Открыть документ',
   'embed.notFound': 'Reference Linker: нет документа для «{query}»',
@@ -79,6 +81,7 @@ module.exports = {
   'set.extensions.desc': 'Какие типы файлов индексировать, через пробел или запятую (напр. .pdf .pptx .png). Пусто = ничего не индексируется.',
   'set.extensions.known': 'Превью и индексация разделов: {exts}. Остальные расширения индексируются только по имени файла.',
   'set.extensions.addAll': 'Добавить все поддерживаемые расширения',
+  'set.extensions.off': 'Поддерживаются, но здесь не включены: {exts}',
   'set.skipFolders.desc': 'Просто имя (node_modules) пропускается на любой глубине; путь со слэшем (archive/raw) пропускает только эту папку относительно корня.',
   'set.autoRefresh.desc': 'Следить за папками сканирования и перестраивать индекс при изменении документов.',
   'set.info': 'Корень документов: {root} · проиндексировано {entries}',
@@ -95,6 +98,10 @@ module.exports = {
   'set.contextMenu.desc': 'Добавлять «Найти и превратить в ссылку» и «Найти и открыть документ» в меню по правому клику — плюс «Скопировать ссылку на документ» при клике по ссылке.',
 
   // Settings — hover preview
+  'set.documentView.name': 'Вид превью документа',
+  'set.documentView.desc': 'Как раскладывается превью Word или OpenDocument. В обоих случаях размер листа и поля берутся из самого файла.',
+  'set.documentView.column': 'Колонка текста — высота по содержимому',
+  'set.documentView.page': 'Целая страница — лист, объявленный документом',
   'set.hoverPreview.name': 'Превью при наведении',
   'set.hoverPreview.desc': 'Показывать документ при наведении на ссылку. В режиме live preview удерживайте Ctrl/Cmd; в режиме чтения достаточно простого наведения.',
 

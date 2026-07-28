@@ -180,6 +180,10 @@ var require_constants = __commonJS({
       // watch scan folders and rebuild the index when files change
       hoverPreview: true,
       // show the preview popover when hovering a reference link
+      // How a document preview is shaped. 'column' keeps the page's width and side margins and lets
+      // the height follow the content, which suits a section; 'page' draws the whole sheet the
+      // document declares, top and bottom margins included. Either way the size comes from the file.
+      documentView: "column",
       markStaleLinks: true,
       // underline links whose target document moved or is gone
       minChars: 1,
@@ -1484,7 +1488,7 @@ var require_pdf = __commonJS({
             const page = await pageOf(doc, it.dest);
             const title = it.title && it.title.trim();
             if (title && page)
-              out.push({ title, page });
+              out.push({ title, position: page });
             if (it.items && it.items.length)
               await walk(it.items);
           }
@@ -1555,7 +1559,7 @@ var require_pdf2 = __commonJS({
       if (!req.isCurrent() || !doc)
         return false;
       const canvas = el.createEl("canvas");
-      const ok = await renderPageToCanvas(doc, req.page, canvas, req.width);
+      const ok = await renderPageToCanvas(doc, req.position, canvas, req.width);
       if (!req.isCurrent() || !ok)
         return false;
       return null;
@@ -1563,7 +1567,7 @@ var require_pdf2 = __commonJS({
     module2.exports = {
       exts: ["pdf"],
       anchorKind: "page",
-      anchorFor: (e) => e.kind === "section" && e.page ? "page=" + e.page : null,
+      anchorFor: (e) => e.kind === "section" && e.position ? "page=" + e.position : null,
       positionLabel: (n, to) => "p." + n + (to && to > n ? "\u2013" + to : ""),
       outline: readOutline,
       render,
@@ -1779,6 +1783,19 @@ var require_xml = __commonJS({
       }
       return out;
     }
+    function elementsOf(xml, tags) {
+      const out = [];
+      const open = new RegExp("<(" + tags.join("|") + ")(?=[\\s/>])", "g");
+      let m;
+      while (m = open.exec(xml)) {
+        const end = scanElement(xml, m.index, m[1]);
+        if (end < 0)
+          break;
+        out.push({ tag: m[1], xml: xml.slice(m.index, end) });
+        open.lastIndex = end;
+      }
+      return out;
+    }
     function scanElement(xml, start, tag) {
       const open = "<" + tag;
       const close = "</" + tag + ">";
@@ -1830,7 +1847,7 @@ var require_xml = __commonJS({
         out += decodeEntities(m[1]);
       return out;
     }
-    module2.exports = { decodeEntities, elements, attr, textIn };
+    module2.exports = { decodeEntities, elements, elementsOf, attr, textIn };
   }
 });
 
@@ -1841,6 +1858,11 @@ var require_preview = __commonJS({
     var obsidian = require("obsidian");
     var { t: t2 } = require_i18n();
     var IMAGE_BUDGET = 24 * 1024 * 1024;
+    var VOID = /^(?:area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)$/i;
+    var expandSelfClosing = (html) => String(html).replace(
+      /<([a-z][\w:-]*)((?:"[^"]*"|'[^']*'|[^>"'])*?)\s*\/>/gi,
+      (all, tag, attrs) => VOID.test(tag) ? all : "<" + tag + attrs + "></" + tag + ">"
+    );
     var REMOTE = /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i;
     var IMAGE_MIME = {
       png: "image/png",
@@ -1888,6 +1910,113 @@ var require_preview = __commonJS({
         }
       }
     } : null;
+    function inlineImagesAsData(html, load) {
+      let spent = 0;
+      return String(html).replace(/(<img\b[^>]*?\bsrc\s*=\s*)(["'])(.*?)\2/gi, (whole, head, q, src) => {
+        if (!src || REMOTE.test(src))
+          return whole;
+        let buf = null;
+        try {
+          buf = load(src);
+        } catch (e) {
+          buf = null;
+        }
+        if (!buf || spent + buf.length > IMAGE_BUDGET)
+          return head + q + q;
+        spent += buf.length;
+        return head + q + "data:" + mimeForImage(src) + ";base64," + buf.toString("base64") + q;
+      });
+    }
+    var FRAME_MIN = 80;
+    var FRAME_MAX = 2e3;
+    var frameDoc = (html, css) => '<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>html,body{margin:0;padding:8px;overflow-x:auto}img,table,pre{max-width:100%}</style>' + (css ? "<style>" + String(css) + "</style>" : "") + "</head><body>" + html + "</body></html>";
+    function renderFrame(el, { html, css, width, loadImage, onFail }) {
+      if (typeof document === "undefined" || !el.createEl)
+        return false;
+      let frame;
+      try {
+        frame = el.createEl("iframe");
+        if (!frame)
+          return false;
+        frame.setAttribute("sandbox", "allow-same-origin");
+        frame.setAttribute("referrerpolicy", "no-referrer");
+        frame.style.width = width + "px";
+        frame.style.maxWidth = "100%";
+        frame.style.height = FRAME_MIN + "px";
+        frame.style.border = "0";
+        frame.style.display = "block";
+        frame.addEventListener("load", () => {
+          let body2 = null;
+          try {
+            body2 = frame.contentDocument && frame.contentDocument.body;
+          } catch (e) {
+            body2 = null;
+          }
+          if (!body2 || !body2.firstChild) {
+            try {
+              frame.remove();
+            } catch (e) {
+            }
+            if (onFail)
+              onFail();
+            return;
+          }
+          let height = 0;
+          try {
+            height = body2.getBoundingClientRect().height;
+          } catch (e) {
+            height = 0;
+          }
+          frame.style.height = Math.max(FRAME_MIN, Math.min(FRAME_MAX, (height || body2.scrollHeight) + 16)) + "px";
+        });
+        const body = expandSelfClosing(html);
+        frame.srcdoc = frameDoc(loadImage ? inlineImagesAsData(body, loadImage) : body, css);
+      } catch (e) {
+        if (frame && frame.remove)
+          frame.remove();
+        return false;
+      }
+      return null;
+    }
+    var scopeSeq = 0;
+    var CSS_LIMIT = 256 * 1024;
+    function scopeSelector(sel, scope) {
+      const s = sel.trim();
+      if (!s || s.startsWith("@"))
+        return "";
+      if (/^(?:html|body|:root)$/i.test(s))
+        return scope;
+      const m = /^(?:html|body|:root)\b([\s\S]*)$/i.exec(s);
+      if (m)
+        return scope + m[1];
+      if (s === "*")
+        return scope + " *";
+      return scope + " " + s;
+    }
+    var paper = (scope) => scope + "{background:#ffffff;color:#1a1a1a}";
+    var containment = (scope) => [
+      scope + "{max-width:100%;overflow-wrap:anywhere}",
+      scope + " img," + scope + " table," + scope + " pre," + scope + " svg{max-width:100%}",
+      scope + " pre{overflow-x:auto;white-space:pre-wrap}",
+      scope + " table{display:block;overflow-x:auto}"
+    ].join("\n");
+    function scopeCss(css, scope) {
+      let text = String(css).slice(0, CSS_LIMIT).replace(/\/\*[\s\S]*?\*\//g, "");
+      text = text.replace(/@[\w-]+[^{;]*(?:;|\{(?:[^{}]|\{[^}]*\})*\})/g, "");
+      const out = [paper(scope)];
+      const rule = /([^{}]+)\{([^{}]*)\}/g;
+      let m;
+      while (m = rule.exec(text)) {
+        const sels = m[1].split(",").map((s) => scopeSelector(s, scope)).filter(Boolean);
+        if (!sels.length)
+          continue;
+        const decls = m[2].replace(/position\s*:\s*(?:fixed|sticky)/gi, "position: static").trim();
+        if (decls)
+          out.push(sels.join(",") + "{" + decls + "}");
+      }
+      out.push(containment(scope));
+      return out.join("\n");
+    }
     async function renderMarkdown(el, { markdown, width, app, component, loadImage }) {
       const R = obsidian.MarkdownRenderer;
       const render = R && (R.render || R.renderMarkdown);
@@ -1906,13 +2035,20 @@ var require_preview = __commonJS({
       }
       return revoker(loadImage ? inlineImages(box, loadImage) : []);
     }
-    function renderHtml(el, { html, width, loadImage }) {
+    function renderHtml(el, { html, width, loadImage, css }) {
       if (typeof obsidian.sanitizeHTMLToDom !== "function")
         return false;
-      const box = el.createDiv({ cls: "reference-linker-rendered markdown-rendered" });
+      const scopeCls = "reference-linker-scope-" + ++scopeSeq;
+      const scoped = css && typeof document !== "undefined" ? scopeCss(css, "." + scopeCls) : "";
+      const box = el.createDiv({ cls: "reference-linker-rendered " + (scoped ? "" : "markdown-rendered ") + scopeCls });
       box.style.maxWidth = width + "px";
       try {
-        box.appendChild(obsidian.sanitizeHTMLToDom(html));
+        if (scoped) {
+          const style = document.createElement("style");
+          style.textContent = scoped;
+          box.appendChild(style);
+        }
+        box.appendChild(obsidian.sanitizeHTMLToDom(expandSelfClosing(html)));
       } catch (e) {
         box.remove();
         return false;
@@ -1931,7 +2067,17 @@ var require_preview = __commonJS({
       }
       return null;
     }
-    module2.exports = { renderLines, renderMarkdown, renderHtml, inlineImages };
+    module2.exports = {
+      renderLines,
+      renderMarkdown,
+      renderHtml,
+      renderFrame,
+      inlineImages,
+      inlineImagesAsData,
+      frameDoc,
+      scopeCss,
+      expandSelfClosing
+    };
   }
 });
 
@@ -1939,7 +2085,7 @@ var require_preview = __commonJS({
 var require_util = __commonJS({
   "src/formats/util.js"(exports2, module2) {
     "use strict";
-    var clampPage = (page, total) => Math.min(Math.max(1, page | 0), total);
+    var clampPosition = (position, total) => Math.min(Math.max(1, position | 0), total);
     function normPath(pathStr) {
       const out = [];
       for (const seg of String(pathStr).split("/")) {
@@ -1953,7 +2099,714 @@ var require_util = __commonJS({
       return out.join("/");
     }
     var assetSrc = (src) => decodeURIComponent(String(src).split(/[?#]/)[0]);
-    module2.exports = { clampPage, normPath, assetSrc };
+    function sectionEnd(headings, n, endOfDocument) {
+      const level = headings[n - 1].level || 1;
+      for (let i = n; i < headings.length; i++)
+        if ((headings[i].level || 1) <= level)
+          return headings[i].from;
+      return endOfDocument;
+    }
+    var escHtml = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    var escAttr = (s) => String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+    var MAX_ROWS = 100;
+    var MAX_COLS = 20;
+    var cellText = (c) => c && typeof c === "object" ? c.text || "" : c || "";
+    var COVERED = { text: "", covered: true };
+    var isCovered = (c) => !!(c && typeof c === "object" && c.covered);
+    var spanning = (cell, cols, rows) => Object.assign(
+      {},
+      typeof cell === "object" && cell ? cell : { text: cell || "" },
+      { cols, rows }
+    );
+    function usedRange(grid) {
+      let top = -1;
+      let bottom = -1;
+      let left = -1;
+      let right = -1;
+      grid.forEach((cells, r) => cells.forEach((c, i) => {
+        if (!cellText(c) && !isCovered(c))
+          return;
+        if (top < 0)
+          top = r;
+        bottom = r;
+        if (left < 0 || i < left)
+          left = i;
+        if (i > right)
+          right = i;
+      }));
+      return { top, bottom, left, right };
+    }
+    function gridToHtml(grid, opts = {}) {
+      const { top, bottom, left, right } = usedRange(grid);
+      if (top < 0)
+        return null;
+      const last = Math.min(right + 1, left + MAX_COLS);
+      const width = last - left;
+      const rows = grid.slice(top, Math.min(bottom + 1, top + MAX_ROWS)).map((cells) => Array.from({ length: width }, (_, i) => cells[left + i]));
+      const header = opts.header !== false;
+      const span = (n, room, name) => {
+        const at = Math.min(Math.max(1, n || 1), room);
+        return at > 1 ? " " + name + '="' + at + '"' : "";
+      };
+      const cellHtml = (c, tag, r, i) => {
+        if (isCovered(c))
+          return "";
+        const cls = c && typeof c === "object" && c.cls ? ' class="' + c.cls + '"' : "";
+        const merged = c && typeof c === "object" ? span(c.cols, width - i, "colspan") + span(c.rows, rows.length - r, "rowspan") : "";
+        return "<" + tag + cls + merged + ">" + escHtml(cellText(c)) + "</" + tag + ">";
+      };
+      const rowHtml = (cells, tag, r) => "<tr>" + cells.map((c, i) => cellHtml(c, tag, r, i)).join("") + "</tr>";
+      const cols = opts.cols || [];
+      const group = cols.length ? "<colgroup>" + Array.from({ length: width }, (_, i) => {
+        const col = cols[left + i] || {};
+        const style = col.width ? ' style="width:' + col.width + '"' : "";
+        const cls = col.cls ? ' class="' + col.cls + '"' : "";
+        return "<col" + style + cls + ">";
+      }).join("") + "</colgroup>" : "";
+      const head = header ? rowHtml(rows[0], "th", 0) : "";
+      const body = (header ? rows.slice(1) : rows).map((cs, i) => rowHtml(cs, "td", header ? i + 1 : i)).join("");
+      return "<table>" + group + head + body + "</table>";
+    }
+    module2.exports = {
+      clampPosition,
+      normPath,
+      assetSrc,
+      escHtml,
+      escAttr,
+      usedRange,
+      gridToHtml,
+      cellText,
+      spanning,
+      isCovered,
+      COVERED,
+      sectionEnd,
+      MAX_ROWS,
+      MAX_COLS
+    };
+  }
+});
+
+// src/formats/css.js
+var require_css = __commonJS({
+  "src/formats/css.js"(exports2, module2) {
+    "use strict";
+    var TWIP = 20;
+    var pt = (n) => Math.round(n * 100) / 100 + "pt";
+    var twips = (v) => pt(Number(v) / TWIP);
+    var halfPoints = (v) => pt(Number(v) / 2);
+    var eighthPoints = (v) => pt(Number(v) / 8);
+    var num = (v) => v === null || v === void 0 || v === "" || !Number.isFinite(Number(v)) ? null : Number(v);
+    function colour(v) {
+      const s = String(v || "").trim().replace(/^#/, "");
+      return /^[0-9a-f]{6}$/i.test(s) ? "#" + s.toLowerCase() : null;
+    }
+    var SERIF = /times|georgia|garamond|book|minion|cambria|constantia|palatino|serif/i;
+    var MONO = /courier|consolas|menlo|mono/i;
+    function fontFamily(name) {
+      const first = String(name || "").split(",")[0].trim().replace(/^["']|["']$/g, "");
+      if (!first)
+        return null;
+      const generic = MONO.test(first) ? "monospace" : SERIF.test(first) ? "serif" : "sans-serif";
+      return JSON.stringify(first) + ", " + generic;
+    }
+    var declaration = (props) => Object.keys(props).filter((k) => props[k] !== null && props[k] !== void 0 && props[k] !== "").sort().map((k) => k + ":" + props[k]).join(";");
+    function sheet(prefix) {
+      const byRule = /* @__PURE__ */ new Map();
+      const order = [];
+      return {
+        // The class for this set of CSS properties, or '' when there is nothing to say. `within`
+        // narrows the rule to a descendant — a table saying what its own cells look like.
+        cls(props, within) {
+          const rule = declaration(props || {});
+          if (!rule)
+            return "";
+          const key = (within || "") + "{" + rule;
+          let name = byRule.get(key);
+          if (!name) {
+            name = (prefix || "d") + byRule.size;
+            byRule.set(key, name);
+            order.push([name + (within ? " " + within : ""), rule]);
+          }
+          return name;
+        },
+        text() {
+          return order.map(([selector, rule]) => "." + selector + "{" + rule + "}").join("\n");
+        }
+      };
+    }
+    function pageCss(page, viewWidth, view) {
+      const width = page && page.width;
+      if (!width)
+        return { css: "", zoom: 1 };
+      const whole = view === "page";
+      const box = {
+        width: pt(width),
+        "min-height": whole && page.height ? pt(page.height) : null,
+        "padding-right": page.right ? pt(page.right) : null,
+        "padding-left": page.left ? pt(page.left) : null,
+        "padding-top": whole && page.top ? pt(page.top) : "12pt",
+        "padding-bottom": whole && page.bottom ? pt(page.bottom) : "12pt",
+        "box-sizing": "border-box",
+        background: "#ffffff",
+        color: "#1a1a1a",
+        margin: "0 auto",
+        "box-shadow": whole ? "0 0 0 1pt rgba(0,0,0,.15)" : null
+      };
+      return { css: ".page{" + declaration(box) + "}", zoom: Math.min(1, viewWidth / (width * (96 / 72))) };
+    }
+    var SHEET_RULES = [
+      "body{margin:0;background:transparent;color:#1a1a1a}",
+      "table{border-collapse:collapse;background:#fff;font:13px system-ui,sans-serif}",
+      "td,th{border:1px solid #d9d9d9;padding:2px 6px;white-space:nowrap}",
+      "th{background:#f3f3f3;font-weight:600;text-align:left}"
+    ].join("\n");
+    module2.exports = { sheet, pt, twips, halfPoints, eighthPoints, num, colour, fontFamily, declaration, pageCss, SHEET_RULES };
+  }
+});
+
+// src/formats/pptx-styles.js
+var require_pptx_styles = __commonJS({
+  "src/formats/pptx-styles.js"(exports2, module2) {
+    "use strict";
+    var { elements, attr } = require_xml();
+    var { pt, colour, fontFamily } = require_css();
+    var EMU = 12700;
+    var finite = (v) => {
+      if (v === null || v === void 0 || v === "")
+        return null;
+      return Number.isFinite(Number(v)) ? Number(v) : null;
+    };
+    var emu = (v) => finite(v) === null ? null : finite(v) / EMU;
+    var hundredths = (v) => finite(v) === null ? null : finite(v) / 100;
+    var ALIGN = { l: "left", ctr: "center", r: "right", just: "justify", dist: "justify" };
+    var ANCHOR = { t: "flex-start", ctr: "center", b: "flex-end" };
+    function readTheme(themeXml, masterXml) {
+      const scheme = /* @__PURE__ */ new Map();
+      const source = elements(themeXml || "", "a:clrScheme")[0] || "";
+      const re = /<a:(dk1|lt1|dk2|lt2|accent[1-6]|hlink|folHlink)>([\s\S]*?)<\/a:\1>/g;
+      let m;
+      while (m = re.exec(source)) {
+        const srgb = attr(elements(m[2], "a:srgbClr")[0] || "", "val");
+        const sys = attr(elements(m[2], "a:sysClr")[0] || "", "lastClr");
+        const value = colour(srgb || sys);
+        if (value)
+          scheme.set(m[1], value);
+      }
+      const map = /* @__PURE__ */ new Map();
+      const clrMap = elements(masterXml || "", "p:clrMap")[0] || "";
+      for (const name of [
+        "bg1",
+        "tx1",
+        "bg2",
+        "tx2",
+        "accent1",
+        "accent2",
+        "accent3",
+        "accent4",
+        "accent5",
+        "accent6",
+        "hlink",
+        "folHlink"
+      ]) {
+        const target = attr(clrMap, name);
+        if (target)
+          map.set(name, target);
+      }
+      const fonts = elements(themeXml || "", "a:fontScheme")[0] || "";
+      const face = (which) => attr(elements(elements(fonts, which)[0] || "", "a:latin")[0] || "", "typeface") || null;
+      return { scheme, map, major: face("a:majorFont"), minor: face("a:minorFont") };
+    }
+    var clamp01 = (n) => Math.min(1, Math.max(0, n));
+    var byte = (v) => Math.round(clamp01(v) * 255).toString(16).padStart(2, "0");
+    function toHsl(hex) {
+      const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+      const max = Math.max(r, g, b);
+      const min = Math.min(r, g, b);
+      const l = (max + min) / 2;
+      const d = max - min;
+      if (!d)
+        return { h: 0, s: 0, l };
+      const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+      const h = max === r ? (g - b) / d + (g < b ? 6 : 0) : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+      return { h: h / 6, s, l };
+    }
+    var channel = (p, q, t2) => {
+      const at = t2 < 0 ? t2 + 1 : t2 > 1 ? t2 - 1 : t2;
+      if (at < 1 / 6)
+        return p + (q - p) * 6 * at;
+      if (at < 1 / 2)
+        return q;
+      if (at < 2 / 3)
+        return p + (q - p) * (2 / 3 - at) * 6;
+      return p;
+    };
+    function toHex({ h, s, l }) {
+      if (!s)
+        return "#" + byte(l).repeat(3);
+      const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+      const p = 2 * l - q;
+      return "#" + byte(channel(p, q, h + 1 / 3)) + byte(channel(p, q, h)) + byte(channel(p, q, h - 1 / 3));
+    }
+    var mix = (hex, towards, amount) => "#" + [1, 3, 5].map((i) => {
+      const from = parseInt(hex.slice(i, i + 2), 16);
+      const to = parseInt(towards.slice(i, i + 2), 16);
+      return byte((from + (to - from) * amount) / 255);
+    }).join("");
+    function modified(hex, source) {
+      const pct = (tag) => {
+        const v = attr(elements(source || "", tag)[0] || "", "val");
+        return v === null ? null : Number(v) / 1e5;
+      };
+      let out = hex;
+      const lumMod = pct("a:lumMod");
+      const lumOff = pct("a:lumOff");
+      if (lumMod !== null || lumOff !== null) {
+        const hsl = toHsl(out);
+        hsl.l = clamp01(hsl.l * (lumMod === null ? 1 : lumMod) + (lumOff === null ? 0 : lumOff));
+        out = toHex(hsl);
+      }
+      const shade = pct("a:shade");
+      if (shade !== null)
+        out = mix(out, "#000000", 1 - shade);
+      const tint = pct("a:tint");
+      if (tint !== null)
+        out = mix(out, "#ffffff", 1 - tint);
+      return out;
+    }
+    function fillColour(source, theme) {
+      if (!source)
+        return null;
+      const srgb = elements(source, "a:srgbClr")[0];
+      const direct = colour(attr(srgb || "", "val"));
+      if (direct)
+        return modified(direct, srgb);
+      const scheme = elements(source, "a:schemeClr")[0];
+      const named = attr(scheme || "", "val");
+      if (!named || !theme)
+        return null;
+      const slot = theme.map.get(named) || named;
+      const value = theme.scheme.get(slot) || theme.scheme.get(named) || null;
+      return value ? modified(value, scheme) : null;
+    }
+    var solidFill = (pr, theme) => fillColour(elements(pr || "", "a:solidFill")[0], theme);
+    function groupFrame(grpSp, parent) {
+      const xfrm = elements(grpSp, "a:xfrm")[0];
+      if (!xfrm)
+        return parent || null;
+      const off = elements(xfrm, "a:off")[0];
+      const ext = elements(xfrm, "a:ext")[0];
+      const chOff = elements(xfrm, "a:chOff")[0];
+      const chExt = elements(xfrm, "a:chExt")[0];
+      if (!off || !ext || !chOff || !chExt)
+        return parent || null;
+      const cx = Number(attr(chExt, "cx"));
+      const cy = Number(attr(chExt, "cy"));
+      const own2 = {
+        x: Number(attr(off, "x")),
+        y: Number(attr(off, "y")),
+        scaleX: cx ? Number(attr(ext, "cx")) / cx : 1,
+        scaleY: cy ? Number(attr(ext, "cy")) / cy : 1,
+        childX: Number(attr(chOff, "x")),
+        childY: Number(attr(chOff, "y"))
+      };
+      if (!parent)
+        return own2;
+      return {
+        x: parent.x + (own2.x - parent.childX) * parent.scaleX,
+        y: parent.y + (own2.y - parent.childY) * parent.scaleY,
+        scaleX: own2.scaleX * parent.scaleX,
+        scaleY: own2.scaleY * parent.scaleY,
+        childX: own2.childX,
+        childY: own2.childY
+      };
+    }
+    function shapeBox(sp, frame) {
+      const xfrm = elements(sp, "a:xfrm")[0] || elements(sp, "p:xfrm")[0];
+      const off = xfrm && elements(xfrm, "a:off")[0];
+      const ext = xfrm && elements(xfrm, "a:ext")[0];
+      if (!off || !ext)
+        return null;
+      let x = Number(attr(off, "x"));
+      let y = Number(attr(off, "y"));
+      let cx = Number(attr(ext, "cx"));
+      let cy = Number(attr(ext, "cy"));
+      if (frame) {
+        x = frame.x + (x - frame.childX) * frame.scaleX;
+        y = frame.y + (y - frame.childY) * frame.scaleY;
+        cx *= frame.scaleX;
+        cy *= frame.scaleY;
+      }
+      const box = {
+        left: emu(x),
+        top: emu(y),
+        width: emu(cx),
+        height: emu(cy),
+        // Rotation is in sixtieths of a thousandth of a degree, about the shape's own centre. The
+        // off/ext above is the box before it turns, so a quarter-turn shape read flat comes out as a
+        // vertical bar where the deck draws a horizontal one.
+        rotation: finite(attr(xfrm, "rot")) === null ? 0 : finite(attr(xfrm, "rot")) / 6e4,
+        flipH: attr(xfrm, "flipH") === "1",
+        flipV: attr(xfrm, "flipV") === "1"
+      };
+      return box.width === null || box.height === null ? null : box;
+    }
+    var transform = (box) => [
+      box.rotation ? "rotate(" + Math.round(box.rotation * 100) / 100 + "deg)" : "",
+      box.flipH ? "scaleX(-1)" : "",
+      box.flipV ? "scaleY(-1)" : ""
+    ].filter(Boolean).join(" ") || null;
+    var boxCss = (box) => ({
+      position: "absolute",
+      "box-sizing": "border-box",
+      left: pt(box.left),
+      top: pt(box.top),
+      width: pt(box.width),
+      height: pt(box.height),
+      transform: transform(box)
+    });
+    var DASH = { dash: "dashed", sysDash: "dashed", lgDash: "dashed", dashDot: "dashed", dot: "dotted", sysDot: "dotted" };
+    var END = /* @__PURE__ */ new Set(["triangle", "arrow", "stealth", "diamond", "oval"]);
+    var endType = (ln, tag) => {
+      const type = attr(elements(ln || "", tag)[0] || "", "type");
+      return END.has(type) ? type : null;
+    };
+    function linePen(spPr, theme, sp) {
+      const ln = elements(spPr || "", "a:ln")[0];
+      const ref = elements(elements(sp || "", "p:style")[0] || "", "a:lnRef")[0];
+      if (!ln && !ref)
+        return null;
+      if (ln && elements(ln, "a:noFill")[0])
+        return null;
+      const stroke = ln && solidFill(ln, theme) || fillColour(ref, theme);
+      if (!stroke)
+        return null;
+      const width = emu(attr(ln || "", "w"));
+      return {
+        width: width === null ? 1 : width,
+        colour: stroke,
+        dash: DASH[attr(elements(ln || "", "a:prstDash")[0] || "", "val")] || "solid",
+        head: endType(ln, "a:headEnd"),
+        tail: endType(ln, "a:tailEnd")
+      };
+    }
+    function styleFill(sp, theme) {
+      const ref = elements(elements(sp || "", "p:style")[0] || "", "a:fillRef")[0];
+      if (!ref || attr(ref, "idx") === "0")
+        return null;
+      return fillColour(ref, theme);
+    }
+    function lineCss(spPr, theme, sp) {
+      const pen = linePen(spPr, theme, sp);
+      return pen ? pt(pen.width) + " " + pen.dash + " " + pen.colour : null;
+    }
+    function outlineCss(box, line) {
+      if (!line)
+        return {};
+      if (!box.height)
+        return { "border-top": line };
+      if (!box.width)
+        return { "border-left": line };
+      return { border: line };
+    }
+    var ROUND = { ellipse: "50%", circle: "50%" };
+    var ROUNDED_RECT = /^round\w*Rect$/;
+    var BOXY = /^(?:rect|line|straightConnector\d*)$/;
+    var presetOf = (spPr) => attr(elements(spPr || "", "a:prstGeom")[0] || "", "prst");
+    var drawsAsBox = (spPr) => {
+      const prst = presetOf(spPr);
+      return !prst || !!ROUND[prst] || ROUNDED_RECT.test(prst) || BOXY.test(prst);
+    };
+    function geometryCss(spPr) {
+      const prst = presetOf(spPr);
+      if (!prst)
+        return {};
+      if (ROUND[prst])
+        return { "border-radius": ROUND[prst] };
+      return ROUNDED_RECT.test(prst) ? { "border-radius": "16.7%" } : {};
+    }
+    var ANGLE = 6e4;
+    var adjust = (spPr, name, fallback) => {
+      const gd = elements(elements(spPr || "", "a:avLst")[0] || "", "a:gd").find((g) => attr(g, "name") === name);
+      const value = gd && /val\s+(-?\d+)/.exec(attr(gd, "fmla") || "");
+      return value ? Number(value[1]) / ANGLE : fallback;
+    };
+    function arcPath(spPr, box) {
+      if (presetOf(spPr) !== "arc" || !box.width || !box.height)
+        return null;
+      const from = adjust(spPr, "adj1", 270);
+      const to = adjust(spPr, "adj2", 0);
+      const rx = box.width / 2;
+      const ry = box.height / 2;
+      const at = (deg) => {
+        const rad = deg * Math.PI / 180;
+        return (rx + rx * Math.cos(rad)).toFixed(2) + "," + (ry + ry * Math.sin(rad)).toFixed(2);
+      };
+      const swept = ((to - from) % 360 + 360) % 360;
+      return {
+        width: box.width,
+        height: box.height,
+        paths: [{ d: "M" + at(from) + "A" + rx + "," + ry + " 0 " + (swept > 180 ? 1 : 0) + " 1 " + at(to), filled: false, stroked: true }]
+      };
+    }
+    var VERB = /<a:(moveTo|lnTo|cubicBezTo|quadBezTo|close)\b(?:\s[^>]*)?(?:\/>|>([\s\S]*?)<\/a:\1>)/g;
+    var CMD = { moveTo: "M", lnTo: "L", cubicBezTo: "C", quadBezTo: "Q" };
+    var POINT = /<a:pt\s[^>]*\/>/g;
+    function pathD(pathXml) {
+      let d = "";
+      VERB.lastIndex = 0;
+      let verb;
+      while (verb = VERB.exec(pathXml)) {
+        if (verb[1] === "close") {
+          d += "Z";
+          continue;
+        }
+        const points = [];
+        POINT.lastIndex = 0;
+        let p;
+        while (p = POINT.exec(verb[2] || ""))
+          points.push(attr(p[0], "x") + "," + attr(p[0], "y"));
+        if (points.length)
+          d += CMD[verb[1]] + points.join(" ");
+      }
+      return d;
+    }
+    function customPaths(spPr) {
+      const geom = elements(spPr || "", "a:custGeom")[0];
+      if (!geom)
+        return null;
+      const paths = [];
+      let width = 0;
+      let height = 0;
+      for (const path of elements(elements(geom, "a:pathLst")[0] || "", "a:path")) {
+        const d = pathD(path);
+        if (!d)
+          continue;
+        width = width || Number(attr(path, "w")) || 0;
+        height = height || Number(attr(path, "h")) || 0;
+        paths.push({ d, filled: attr(path, "fill") !== "none", stroked: attr(path, "stroke") !== "0" });
+      }
+      return paths.length && width && height ? { paths, width, height } : null;
+    }
+    var EDGE = { "a:lnL": "border-left", "a:lnR": "border-right", "a:lnT": "border-top", "a:lnB": "border-bottom" };
+    var CELL_ANCHOR = { t: "top", ctr: "middle", b: "bottom" };
+    function cellCss(tcPr, theme) {
+      const source = tcPr || "";
+      let rest = source;
+      const out = {};
+      for (const [tag, prop] of Object.entries(EDGE)) {
+        for (const ln of elements(source, tag)) {
+          rest = rest.replace(ln, "");
+          if (elements(ln, "a:noFill")[0])
+            continue;
+          const width = emu(attr(ln, "w"));
+          const line = solidFill(ln, theme);
+          if (!line && width === null)
+            continue;
+          out[prop] = pt(width === null ? 1 : width) + " solid " + (line || "#808080");
+        }
+      }
+      const fill = solidFill(rest, theme);
+      if (fill)
+        out.background = fill;
+      out["vertical-align"] = CELL_ANCHOR[attr(source, "anchor") || "t"] || "top";
+      const inset = (name, fallback) => {
+        const v = emu(attr(source, name));
+        return pt(v === null ? fallback : v);
+      };
+      out.padding = [inset("marT", 3.6), inset("marR", 7.2), inset("marB", 3.6), inset("marL", 7.2)].join(" ");
+      return out;
+    }
+    function bodyCss(bodyPr) {
+      const out = { display: "flex", "flex-direction": "column", overflow: "hidden" };
+      out["justify-content"] = ANCHOR[attr(bodyPr || "", "anchor") || "t"] || "flex-start";
+      const inset = (name, fallback) => {
+        const v = emu(attr(bodyPr || "", name));
+        return pt(v === null ? fallback : v);
+      };
+      out.padding = [inset("tIns", 3.6), inset("rIns", 7.2), inset("bIns", 3.6), inset("lIns", 7.2)].join(" ");
+      return out;
+    }
+    function autofit(bodyPr) {
+      const fit = elements(bodyPr || "", "a:normAutofit")[0];
+      if (!fit)
+        return null;
+      const font = finite(attr(fit, "fontScale"));
+      const line = finite(attr(fit, "lnSpcReduction"));
+      return { font: font === null ? 1 : font / 1e5, line: line === null ? 0 : line / 1e5 };
+    }
+    function autoNumber(type, n) {
+      const alpha = /^alpha(Lc|Uc)/.exec(type || "");
+      let body = String(n);
+      if (alpha) {
+        let out = "";
+        for (let i = n; i > 0; i = Math.floor((i - 1) / 26))
+          out = String.fromCharCode(64 + (i - 1) % 26 + 1) + out;
+        body = alpha[1] === "Uc" ? out : out.toLowerCase();
+      }
+      const suffix = /ParenBoth$/.test(type) ? [")", "("] : /ParenR$/.test(type) ? [")", ""] : [".", ""];
+      return suffix[1] + body + suffix[0];
+    }
+    function bulletOf(layers, ordinal) {
+      for (let i = layers.length - 1; i >= 0; i--) {
+        const src = layers[i] || "";
+        if (elements(src, "a:buNone")[0])
+          return null;
+        const ch = elements(src, "a:buChar")[0];
+        if (ch)
+          return attr(ch, "char") || null;
+        const num = elements(src, "a:buAutoNum")[0];
+        if (num)
+          return autoNumber(attr(num, "type"), (finite(attr(num, "startAt")) || 1) + ordinal);
+      }
+      return null;
+    }
+    function hangOf(layers) {
+      for (let i = layers.length - 1; i >= 0; i--) {
+        const v = emu(own(layers[i], "indent"));
+        if (v !== null)
+          return v;
+      }
+      return null;
+    }
+    function gap(pPr, tag) {
+      const el = elements(pPr || "", tag)[0];
+      if (!el)
+        return null;
+      const points = attr(elements(el, "a:spcPts")[0] || "", "val");
+      if (points)
+        return pt(Number(points) / 100);
+      const percent = attr(elements(el, "a:spcPct")[0] || "", "val");
+      return percent ? Number(percent) / 1e5 + "em" : null;
+    }
+    var own = (src, name) => attr(String(src || "").slice(0, String(src || "").indexOf(">") + 1 || void 0), name);
+    function paraCss(pPr) {
+      const out = {};
+      const align = own(pPr, "algn");
+      if (align && ALIGN[align])
+        out["text-align"] = ALIGN[align];
+      const indent = emu(own(pPr, "marL"));
+      if (indent !== null)
+        out["padding-left"] = pt(indent);
+      const spacing = elements(pPr || "", "a:lnSpc")[0];
+      const percent = spacing && attr(elements(spacing, "a:spcPct")[0] || "", "val");
+      if (percent)
+        out["line-height"] = String(Math.round(Number(percent) / 1e5 * 1.2 * 100) / 100);
+      const exact = spacing && attr(elements(spacing, "a:spcPts")[0] || "", "val");
+      if (exact && !percent)
+        out["line-height"] = pt(Number(exact) / 100);
+      const before = gap(pPr, "a:spcBef");
+      if (before)
+        out["margin-top"] = before;
+      const after = gap(pPr, "a:spcAft");
+      if (after)
+        out["margin-bottom"] = after;
+      return out;
+    }
+    function runCss(rPr, theme) {
+      const out = {};
+      if (!rPr)
+        return out;
+      const size = hundredths(attr(rPr, "sz"));
+      if (size)
+        out["font-size"] = pt(size);
+      const bold = attr(rPr, "b");
+      if (bold !== null)
+        out["font-weight"] = bold === "1" ? "bold" : "normal";
+      const italic = attr(rPr, "i");
+      if (italic !== null)
+        out["font-style"] = italic === "1" ? "italic" : "normal";
+      const underline = attr(rPr, "u");
+      if (underline && underline !== "none")
+        out["text-decoration"] = "underline";
+      const fg = solidFill(rPr, theme);
+      if (fg)
+        out.color = fg;
+      const face = attr(elements(rPr, "a:latin")[0] || "", "typeface");
+      const named = /^\+mj/.test(face || "") ? theme && theme.major : /^\+mn/.test(face || "") ? theme && theme.minor : face;
+      const family = fontFamily(named);
+      if (family)
+        out["font-family"] = family;
+      return out;
+    }
+    var LEVEL = /<a:lvl([1-9])pPr\b[^>]*>([\s\S]*?)<\/a:lvl\1pPr>/g;
+    function levelStyles(lstStyle) {
+      const out = [];
+      if (!lstStyle)
+        return out;
+      LEVEL.lastIndex = 0;
+      let m;
+      while (m = LEVEL.exec(lstStyle)) {
+        out[Number(m[1]) - 1] = { rPr: elements(m[2], "a:defRPr")[0] || "", pPr: m[0] };
+      }
+      return out;
+    }
+    var TITLE_PH = /* @__PURE__ */ new Set(["title", "ctrTitle"]);
+    var BODY_PH = /* @__PURE__ */ new Set(["body", "subTitle", "obj", "outline", ""]);
+    function masterTextStyles(masterXml) {
+      const styles = elements(masterXml || "", "p:txStyles")[0] || "";
+      return {
+        title: levelStyles(elements(styles, "p:titleStyle")[0]),
+        body: levelStyles(elements(styles, "p:bodyStyle")[0]),
+        other: levelStyles(elements(styles, "p:otherStyle")[0])
+      };
+    }
+    var kindOf = (phType) => TITLE_PH.has(phType) ? "title" : BODY_PH.has(phType) ? "body" : "other";
+    function inherited(sources, level, kind, masterStyles, part) {
+      const layers = [];
+      const at = (levels) => levels && (levels[level] || levels[0]);
+      const fromMaster = at(masterStyles && masterStyles[kind]);
+      if (fromMaster)
+        layers.push(fromMaster[part]);
+      for (const source of sources) {
+        const level0 = at(Array.isArray(source) ? source : levelStyles(source));
+        if (level0)
+          layers.push(level0[part]);
+      }
+      return layers;
+    }
+    var inheritedRun = (sources, level, kind, masterStyles) => inherited(sources, level, kind, masterStyles, "rPr");
+    var inheritedPara = (sources, level, kind, masterStyles) => inherited(sources, level, kind, masterStyles, "pPr");
+    function slideSize(presentationXml) {
+      const size = elements(presentationXml || "", "p:sldSz")[0];
+      if (!size)
+        return null;
+      const width = emu(attr(size, "cx"));
+      const height = emu(attr(size, "cy"));
+      return width && height ? { width, height } : null;
+    }
+    module2.exports = {
+      emu,
+      hundredths,
+      readTheme,
+      fillColour,
+      solidFill,
+      groupFrame,
+      shapeBox,
+      boxCss,
+      linePen,
+      lineCss,
+      styleFill,
+      outlineCss,
+      geometryCss,
+      drawsAsBox,
+      customPaths,
+      arcPath,
+      pathD,
+      bodyCss,
+      cellCss,
+      paraCss,
+      runCss,
+      slideSize,
+      levelStyles,
+      masterTextStyles,
+      kindOf,
+      inheritedRun,
+      inheritedPara,
+      autofit,
+      autoNumber,
+      bulletOf,
+      hangOf
+    };
   }
 });
 
@@ -1962,9 +2815,11 @@ var require_pptx = __commonJS({
   "src/formats/pptx.js"(exports2, module2) {
     "use strict";
     var { openZip } = require_zip();
-    var { elements, attr, textIn } = require_xml();
-    var { renderLines } = require_preview();
-    var { clampPage, normPath } = require_util();
+    var { elements, elementsOf, attr, textIn } = require_xml();
+    var { renderLines, renderFrame } = require_preview();
+    var { clampPosition, normPath, assetSrc, escAttr, escHtml } = require_util();
+    var { sheet: cssSheet, pt } = require_css();
+    var pptxStyles = require_pptx_styles();
     var SLIDE_RE = /^ppt\/slides\/slide(\d+)\.xml$/;
     var TITLE_PH = /* @__PURE__ */ new Set(["title", "ctrTitle"]);
     var resolveTarget = (target) => normPath("ppt/" + String(target).replace(/^\/+/, ""));
@@ -2041,34 +2896,361 @@ var require_pptx = __commonJS({
           return;
         const title = slideTitle(xml);
         if (title)
-          out.push({ title, page: i + 1 });
+          out.push({ title, position: i + 1 });
       });
       return out;
     }
-    async function readSlide(absPath, page) {
+    async function readSlide(absPath, position) {
       const doc = readSlides(absPath);
       if (!doc)
         return null;
-      const n = clampPage(page, doc.parts.length);
+      const n = clampPosition(position, doc.parts.length);
       const xml = doc.zip.text(doc.parts[n - 1]);
       if (!xml)
         return null;
-      return { ...slideText(xml), page: n, total: doc.parts.length };
+      return { ...slideText(xml), position: n, total: doc.parts.length };
     }
+    var innerXml = (src) => {
+      const open = src.indexOf(">");
+      const close = src.lastIndexOf("</");
+      return open < 0 || close <= open ? "" : src.slice(open + 1, close);
+    };
+    var phKey = (sp) => {
+      const ph = elements(elements(sp, "p:nvSpPr")[0] || "", "p:ph")[0];
+      return ph ? (attr(ph, "type") || "body") + "#" + (attr(ph, "idx") || "0") : null;
+    };
+    function layoutBoxes(...sources) {
+      const out = /* @__PURE__ */ new Map();
+      for (const source of sources) {
+        for (const sp of elements(source || "", "p:sp")) {
+          const key = phKey(sp);
+          if (!key)
+            continue;
+          const previous = out.get(key) || {};
+          out.set(key, {
+            box: pptxStyles.shapeBox(sp) || previous.box,
+            lstStyle: elements(sp, "a:lstStyle")[0] || previous.lstStyle || ""
+          });
+        }
+      }
+      return out;
+    }
+    var phType = (sp) => {
+      const ph = elements(elements(sp, "p:nvSpPr")[0] || "", "p:ph")[0];
+      return ph ? attr(ph, "type") || "" : null;
+    };
+    function chainOf(sp, ctx) {
+      const type = phType(sp);
+      const key = phKey(sp);
+      const layout = key && ctx.layout.get(key) || {};
+      return {
+        sources: [layout.lstStyle || "", elements(sp, "a:lstStyle")[0] || ""].filter(Boolean).map(pptxStyles.levelStyles),
+        kind: type === null ? "other" : pptxStyles.kindOf(type),
+        fit: pptxStyles.autofit(elements(sp, "a:bodyPr")[0])
+      };
+    }
+    var scaled = (size, factor) => {
+      const n = parseFloat(size);
+      return Number.isFinite(n) ? pt(Math.round(n * factor * 100) / 100) : size;
+    };
+    function runStyle(chain, run, level, ctx) {
+      const out = Object.assign(
+        {},
+        ...pptxStyles.inheritedRun(chain.sources, level, chain.kind, ctx.master).map((rPr) => pptxStyles.runCss(rPr, ctx.theme)),
+        pptxStyles.runCss(elements(run, "a:rPr")[0], ctx.theme)
+      );
+      const { fit } = chain;
+      if (fit && fit.font !== 1 && out["font-size"])
+        out["font-size"] = scaled(out["font-size"], fit.font);
+      return out;
+    }
+    var paraLayers = (chain, para, level, ctx) => pptxStyles.inheritedPara(chain.sources, level, chain.kind, ctx.master).concat(para || "");
+    function paraStyle(chain, layers, hang) {
+      const out = Object.assign({ "margin-top": "0", "margin-bottom": "0" }, ...layers.map(pptxStyles.paraCss));
+      if (hang)
+        out["text-indent"] = pt(hang);
+      const { fit } = chain;
+      if (fit && fit.line)
+        out["line-height"] = String(Math.round((Number(out["line-height"]) || 1.2) * (1 - fit.line) * 100) / 100);
+      return out;
+    }
+    function bulletHtml(text, hang, ctx) {
+      const cls = hang && hang < 0 ? ctx.sheet.cls({ display: "inline-block", width: pt(-hang) }) : "";
+      return "<span" + (cls ? ' class="' + cls + '"' : "") + ">" + escHtml(text) + (cls ? "" : "\xA0") + "</span>";
+    }
+    function textHtml(sp, ctx) {
+      const body = elements(sp, "p:txBody")[0] || elements(sp, "a:txBody")[0];
+      if (!body)
+        return "";
+      let html = "";
+      const seen = /* @__PURE__ */ new Map();
+      const chain = chainOf(sp, ctx);
+      for (const p of elements(body, "a:p")) {
+        const para = elements(p, "a:pPr")[0];
+        const level = Number(attr(para || "", "lvl") || "0") || 0;
+        const runs = elementsOf(p, ["a:br", "a:r"]).map(({ tag, xml }) => {
+          if (tag === "a:br")
+            return "<br>";
+          const cls2 = ctx.sheet.cls(runStyle(chain, xml, level, ctx));
+          const text = escHtml(textIn(xml, "a:t"));
+          return cls2 ? '<span class="' + cls2 + '">' + text + "</span>" : text;
+        }).join("");
+        if (!runs)
+          continue;
+        const layers = paraLayers(chain, para, level, ctx);
+        const bullet = pptxStyles.bulletOf(layers, seen.get(level) || 0);
+        if (bullet !== null)
+          seen.set(level, (seen.get(level) || 0) + 1);
+        const hang = bullet === null ? null : pptxStyles.hangOf(layers);
+        const cls = ctx.sheet.cls(paraStyle(chain, layers, hang));
+        html += "<p" + (cls ? ' class="' + cls + '"' : "") + ">" + (bullet === null ? "" : bulletHtml(bullet, hang, ctx)) + runs + "</p>";
+      }
+      return html;
+    }
+    function pictureHtml(pic, ctx, frame) {
+      const box = pptxStyles.shapeBox(pic, frame);
+      const src = ctx.images.get(attr(elements(pic, "a:blip")[0] || "", "r:embed"));
+      if (!box || !src)
+        return "";
+      const cls = ctx.sheet.cls(Object.assign(pptxStyles.boxCss(box), { "object-fit": "contain" }));
+      return '<img class="' + cls + '" src="' + escAttr(src) + '">';
+    }
+    var MARKER = {
+      triangle: "M0,0 L10,5 L0,10 z",
+      arrow: "M0,0 L10,5 L0,10 z",
+      stealth: "M0,0 L10,5 L0,10 L3,5 z",
+      diamond: "M0,5 L5,0 L10,5 L5,10 z",
+      oval: "M0,5 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0"
+    };
+    var markerSeq = 0;
+    function customHtml(drawn, box, fill, pen) {
+      const ends = pen && [pen.head && ["start", pen.head], pen.tail && ["end", pen.tail]].filter(Boolean);
+      const ids = /* @__PURE__ */ new Map();
+      const defs = !ends || !ends.length ? "" : "<defs>" + ends.map(([where, type]) => {
+        const id = "m" + (markerSeq += 1);
+        ids.set(where, id);
+        return '<marker id="' + id + '" viewBox="0 0 10 10" refX="' + (where === "start" ? 0 : 10) + '" refY="5" markerWidth="4" markerHeight="4" orient="auto-start-reverse" markerUnits="strokeWidth"><path d="' + MARKER[type] + '" fill="' + pen.colour + '"/></marker>';
+      }).join("") + "</defs>";
+      const marker = (where) => ids.has(where) ? " marker-" + where + '="url(#' + ids.get(where) + ')"' : "";
+      const paint = (path) => (path.filled && fill ? ' fill="' + escAttr(fill) + '"' : ' fill="none"') + (path.stroked && pen ? ' stroke="' + escAttr(pen.colour) + '" style="stroke-width:' + pt(pen.width) + '" vector-effect="non-scaling-stroke"' + marker("start") + marker("end") : "");
+      return '<svg viewBox="0 0 ' + drawn.width + " " + drawn.height + '" preserveAspectRatio="none">' + defs + drawn.paths.map((p) => '<path d="' + p.d + '"' + paint(p) + "/>").join("") + "</svg>";
+    }
+    function shapeHtml(sp, ctx, frame) {
+      const box = pptxStyles.shapeBox(sp, frame) || !frame && (ctx.layout.get(phKey(sp)) || {}).box;
+      if (!box)
+        return "";
+      const inner = textHtml(sp, ctx);
+      const spPr = elements(sp, "p:spPr")[0] || "";
+      const outline = elements(spPr, "a:ln")[0];
+      const pen = pptxStyles.linePen(spPr, ctx.theme, sp);
+      const bare = outline ? spPr.replace(outline, "") : spPr;
+      const fill = elements(bare, "a:noFill")[0] ? null : pptxStyles.solidFill(bare, ctx.theme) || pptxStyles.styleFill(sp, ctx.theme);
+      const drawn = pptxStyles.customPaths(spPr) || pptxStyles.arcPath(spPr, box);
+      const boxy = pptxStyles.drawsAsBox(spPr);
+      if (!inner && !drawn && !(boxy && (fill || pen)))
+        return "";
+      const css = Object.assign(pptxStyles.boxCss(box), pptxStyles.bodyCss(elements(sp, "a:bodyPr")[0]));
+      if (drawn)
+        Object.assign(css, { padding: "0" });
+      else if (boxy) {
+        Object.assign(css, pptxStyles.geometryCss(spPr), pptxStyles.outlineCss(box, pptxStyles.lineCss(spPr, ctx.theme, sp)));
+        if (fill)
+          css.background = fill;
+      }
+      const body = drawn ? customHtml(drawn, box, fill, pen) + inner : inner;
+      return '<div class="' + ctx.sheet.cls(css) + '">' + body + "</div>";
+    }
+    function tableHtml(graphicFrame, ctx, frame) {
+      const tbl = elements(graphicFrame, "a:tbl")[0];
+      const box = pptxStyles.shapeBox(graphicFrame, frame);
+      if (!tbl || !box)
+        return "";
+      const widths = elements(elements(tbl, "a:tblGrid")[0] || "", "a:gridCol").map((col) => pptxStyles.emu(attr(col, "w")));
+      const group = "<colgroup>" + widths.map((w) => "<col" + (w ? ' style="width:' + pt(w) + '"' : "") + ">").join("") + "</colgroup>";
+      const rows = elements(tbl, "a:tr").map((tr) => {
+        const cells = elements(tr, "a:tc").map((tc) => {
+          if (attr(tc, "hMerge") === "1" || attr(tc, "vMerge") === "1")
+            return "";
+          const span = Number(attr(tc, "gridSpan") || "1") || 1;
+          const down = Number(attr(tc, "rowSpan") || "1") || 1;
+          const cls = ctx.sheet.cls(pptxStyles.cellCss(elements(tc, "a:tcPr")[0], ctx.theme));
+          return "<td" + (span > 1 ? ' colspan="' + span + '"' : "") + (down > 1 ? ' rowspan="' + down + '"' : "") + ' class="' + cls + '">' + textHtml(tc, ctx) + "</td>";
+        }).join("");
+        const height = pptxStyles.emu(attr(tr, "h"));
+        return cells ? "<tr" + (height ? ' class="' + ctx.sheet.cls({ height: pt(height) }) + '"' : "") + ">" + cells + "</tr>" : "";
+      }).filter(Boolean).join("");
+      if (!rows)
+        return "";
+      return '<div class="' + ctx.sheet.cls(pptxStyles.boxCss(box)) + '"><table>' + group + rows + "</table></div>";
+    }
+    function shapesHtml(source, ctx, frame) {
+      const spans = [];
+      for (const tag of ["p:sp", "p:cxnSp", "p:pic", "p:grpSp", "p:graphicFrame"]) {
+        let at = 0;
+        for (const src of elements(source, tag)) {
+          const from = source.indexOf(src, at);
+          if (from < 0)
+            continue;
+          spans.push({ from, to: from + src.length, tag, src });
+          at = from + src.length;
+        }
+      }
+      spans.sort((a, b) => a.from - b.from || b.to - a.to);
+      let end = -1;
+      let html = "";
+      for (const s of spans) {
+        if (s.from < end)
+          continue;
+        end = s.to;
+        if (s.tag === "p:grpSp")
+          html += shapesHtml(innerXml(s.src), ctx, pptxStyles.groupFrame(s.src, frame));
+        else if (s.tag === "p:pic")
+          html += pictureHtml(s.src, ctx, frame);
+        else if (s.tag === "p:graphicFrame")
+          html += tableHtml(s.src, ctx, frame);
+        else
+          html += shapeHtml(s.src, ctx, frame);
+      }
+      return html;
+    }
+    var SLIDE_RULES = [
+      "body{margin:0;background:transparent}",
+      ".slide{position:relative;overflow:hidden;background:#ffffff;color:#1a1a1a;margin:0 auto;box-shadow:0 0 0 1pt rgba(0,0,0,.15)}",
+      // Only display — a picture's size is the box the slide gives it, and `.slide img` outranks
+      // the class that box is written on, so anything more here overrides the placement.
+      ".slide img{display:block}",
+      // Nothing here that a cell's own class also states, for that same reason: `.slide td` would
+      // outrank it. The table fills the box its frame was given.
+      ".slide table{border-collapse:collapse;table-layout:fixed;width:100%;height:100%}",
+      ".slide svg{display:block;width:100%;height:100%;overflow:visible}"
+    ].join("\n");
+    var decorationOnly = (source) => {
+      let html = source || "";
+      for (const sp of elements(html, "p:sp")) {
+        if (elements(elements(sp, "p:nvSpPr")[0] || "", "p:ph")[0])
+          html = html.replace(sp, "");
+      }
+      return html;
+    };
+    function backgroundCss(sources, theme) {
+      for (const source of sources) {
+        const bg = elements(source || "", "p:bg")[0];
+        if (!bg)
+          continue;
+        const fill = pptxStyles.solidFill(elements(bg, "p:bgPr")[0] || "", theme) || pptxStyles.fillColour(elements(bg, "p:bgRef")[0], theme);
+        if (fill)
+          return fill;
+      }
+      return null;
+    }
+    function slidePage(zip, part, width) {
+      const xml = zip.text(part);
+      if (!xml)
+        return null;
+      const size = pptxStyles.slideSize(zip.text("ppt/presentation.xml"));
+      if (!size)
+        return null;
+      const layoutPart = layoutPartOf(zip, part);
+      const layoutXml = layoutPart && zip.text(layoutPart) || "";
+      const masterPart = masterPartOf(zip, layoutPart);
+      const masterXml = masterPart && zip.text(masterPart) || "";
+      const theme = pptxStyles.readTheme(zip.text(themePartOf(zip, masterPart)), masterXml);
+      const ctx = {
+        theme,
+        layout: layoutBoxes(masterXml, layoutXml),
+        master: pptxStyles.masterTextStyles(masterXml),
+        images: partImages(zip, part),
+        sheet: cssSheet("s")
+      };
+      const under = [];
+      const inherits = (source) => attr(source, "showMasterSp") !== "0";
+      if (masterXml && inherits(layoutXml) && inherits(xml)) {
+        under.push(shapesHtml(decorationOnly(masterXml), { ...ctx, images: partImages(zip, masterPart) }, null));
+      }
+      if (layoutXml && inherits(xml)) {
+        under.push(shapesHtml(decorationOnly(layoutXml), { ...ctx, images: partImages(zip, layoutPart) }, null));
+      }
+      const background = backgroundCss([xml, layoutXml, masterXml], theme);
+      const zoom = Math.min(1, width / (size.width * (96 / 72)));
+      return {
+        html: '<div class="slide">' + under.join("") + shapesHtml(xml, ctx, null) + "</div>",
+        css: [
+          SLIDE_RULES,
+          ".slide{width:" + pt(size.width) + ";height:" + pt(size.height) + (background ? ";background:" + background : "") + "}",
+          "html{zoom:" + zoom + "}",
+          ctx.sheet.text()
+        ].join("\n")
+      };
+    }
+    function partImages(zip, part) {
+      const out = /* @__PURE__ */ new Map();
+      if (!part)
+        return out;
+      const folder = part.slice(0, part.lastIndexOf("/"));
+      const rels = zip.text(folder + "/_rels/" + part.slice(part.lastIndexOf("/") + 1) + ".rels") || "";
+      for (const r of elements(rels, "Relationship")) {
+        const id = attr(r, "Id");
+        const target = attr(r, "Target") || "";
+        if (id && /media\//.test(target))
+          out.set(id, normPath(folder + "/" + target));
+      }
+      return out;
+    }
+    function relatedPart(zip, part, pattern) {
+      if (!part)
+        return null;
+      const folder = part.slice(0, part.lastIndexOf("/"));
+      const rels = zip.text(folder + "/_rels/" + part.slice(part.lastIndexOf("/") + 1) + ".rels") || "";
+      for (const r of elements(rels, "Relationship")) {
+        const target = attr(r, "Target") || "";
+        if (pattern.test(target)) {
+          const resolved = normPath(folder + "/" + target);
+          if (zip.has(resolved))
+            return resolved;
+        }
+      }
+      return null;
+    }
+    var layoutPartOf = (zip, slidePart) => relatedPart(zip, slidePart, /slideLayout\d+\.xml$/);
+    var masterPartOf = (zip, layoutPart) => relatedPart(zip, layoutPart, /slideMaster\d+\.xml$/);
+    var themePartOf = (zip, masterPart) => relatedPart(zip, masterPart, /theme\d+\.xml$/) || "ppt/theme/theme1.xml";
     async function render(el, req) {
-      const slide = await readSlide(req.abs, req.page);
+      const doc = readSlides(req.abs);
+      if (!req.isCurrent() || !doc)
+        return false;
+      const n = clampPosition(req.position, doc.parts.length);
+      const page = slidePage(doc.zip, doc.parts[n - 1], req.width);
+      if (page) {
+        const loadImage = (src) => doc.zip.read(assetSrc(src));
+        const framed = renderFrame(el, {
+          html: page.html,
+          css: page.css,
+          width: req.width,
+          loadImage,
+          onFail: () => {
+            const slide2 = slideText(doc.zip.text(doc.parts[n - 1]) || "");
+            renderLines(el, { title: slide2.title, body: slide2.body, width: req.width });
+          }
+        });
+        if (framed !== false)
+          return framed;
+      }
+      const slide = await readSlide(req.abs, req.position);
       if (!req.isCurrent() || !slide)
         return false;
       return renderLines(el, { title: slide.title, body: slide.body, width: req.width });
     }
     module2.exports = {
-      exts: ["pptx"],
+      exts: ["pptx", "pptm", "potx", "potm"],
       anchorKind: null,
       // PowerPoint takes a fragment as part of the file name and finds nothing
       outline: readOutline,
       render,
       readOutline,
-      readSlide
+      readSlide,
+      slidePage,
+      layoutBoxes,
+      shapesHtml
     };
   }
 });
@@ -2080,8 +3262,8 @@ var require_html = __commonJS({
     var fs2 = require("fs");
     var nodePath2 = require("path");
     var { decodeEntities } = require_xml();
-    var { renderLines, renderHtml } = require_preview();
-    var { clampPage, assetSrc } = require_util();
+    var { renderLines, renderHtml, renderFrame } = require_preview();
+    var { clampPosition, assetSrc, sectionEnd } = require_util();
     function assetLoader(htmlAbs) {
       const dir = nodePath2.dirname(htmlAbs);
       return (src) => {
@@ -2125,7 +3307,7 @@ var require_html = __commonJS({
       while (m = HEADING.exec(html)) {
         const title = inlineText(m[3]);
         if (title)
-          out.push({ title, anchor: idOf(m[2], m[3]), from: m.index, to: HEADING.lastIndex });
+          out.push({ title, level: Number(m[1]), anchor: idOf(m[2], m[3]), from: m.index, to: HEADING.lastIndex });
       }
       return out;
     }
@@ -2133,28 +3315,43 @@ var require_html = __commonJS({
       const html = read(absPath);
       if (!html)
         return [];
-      return headings(html).map((h, i) => ({ title: h.title, page: i + 1, anchor: h.anchor || void 0 }));
+      return headings(html).map((h, i) => ({ title: h.title, position: i + 1, anchor: h.anchor || void 0 }));
     }
-    async function readSection(absPath, page) {
+    async function readSection(absPath, position) {
       const html = read(absPath);
       if (!html)
         return null;
       const hs = headings(html);
       if (!hs.length)
-        return { title: "", body: blockLines(html).slice(0, MAX_LINES), page: 1, total: 1 };
-      const n = clampPage(page, hs.length);
+        return { title: "", body: blockLines(html).slice(0, MAX_LINES), position: 1, total: 1 };
+      const n = clampPosition(position, hs.length);
       const here = hs[n - 1];
-      const next = hs[n];
-      const end = next ? next.from : html.length;
+      const end = sectionEnd(hs, n, html.length);
       const body = blockLines(html.slice(here.to, end));
-      return { title: here.title, body: body.slice(0, MAX_LINES), raw: html.slice(here.from, end), page: n, total: hs.length };
+      return { title: here.title, body: body.slice(0, MAX_LINES), raw: html.slice(here.from, end), css: styleText(html), position: n, total: hs.length };
     }
+    var styleText = (html) => {
+      const out = [];
+      const re = /<style\b[^>]*>([\s\S]*?)<\/style>/gi;
+      let m;
+      while (m = re.exec(html))
+        out.push(m[1]);
+      return out.join("\n");
+    };
     async function render(el, req) {
-      const sec = await readSection(req.abs, req.page);
+      const sec = await readSection(req.abs, req.position);
       if (!req.isCurrent() || !sec)
         return false;
       if (sec.raw) {
-        const done = renderHtml(el, { html: sec.raw.replace(DROP, ""), width: req.width, loadImage: assetLoader(req.abs) });
+        const body = sec.raw.replace(DROP, "");
+        const load = assetLoader(req.abs);
+        const themed = () => renderHtml(el, { html: body, css: sec.css, width: req.width, loadImage: load });
+        if (sec.css) {
+          const framed = renderFrame(el, { html: body, css: sec.css, width: req.width, loadImage: load, onFail: themed });
+          if (framed !== false)
+            return framed;
+        }
+        const done = themed();
         if (done !== false)
           return done;
       }
@@ -2185,7 +3382,7 @@ var require_text = __commonJS({
     var { isFenceLine } = require_markdown();
     var { renderLines, renderMarkdown } = require_preview();
     var { assetLoader } = require_html();
-    var { clampPage } = require_util();
+    var { clampPosition } = require_util();
     var ATX = /^(#{1,6})\s+(.+?)\s*#*\s*$/;
     var SETEXT = /^(=+|-{2,})\s*$/;
     var MAX_LINES = 60;
@@ -2209,13 +3406,13 @@ var require_text = __commonJS({
           continue;
         const atx = ATX.exec(line);
         if (atx) {
-          out.push({ title: atx[2].trim(), page: i + 1 });
+          out.push({ title: atx[2].trim(), position: i + 1 });
           continue;
         }
         if (SETEXT.test(line) && i > 0) {
           const above = lines[i - 1].trim();
           if (above && !ATX.test(above) && !isFenceLine(above))
-            out.push({ title: above, page: i });
+            out.push({ title: above, position: i });
         }
       }
       return out;
@@ -2224,33 +3421,33 @@ var require_text = __commonJS({
       const lines = readLines(absPath);
       return lines ? headings(lines) : [];
     }
-    async function readSection(absPath, page) {
+    async function readSection(absPath, position) {
       const lines = readLines(absPath);
       if (!lines)
         return null;
       const hs = headings(lines);
       if (!hs.length) {
-        return { title: "", body: lines.map((l) => l.trimEnd()).filter(Boolean).slice(0, MAX_LINES), page: 1, total: 1 };
+        return { title: "", body: lines.map((l) => l.trimEnd()).filter(Boolean).slice(0, MAX_LINES), position: 1, total: 1 };
       }
-      const n = clampPage(page, lines.length);
-      let at = hs.findIndex((h) => h.page === n);
+      const n = clampPosition(position, lines.length);
+      let at = hs.findIndex((h) => h.position === n);
       if (at < 0)
         at = 0;
       const here = hs[at];
       const next = hs[at + 1];
-      const slice = lines.slice(here.page, next ? next.page - 1 : lines.length).map((l) => l.trimEnd());
+      const slice = lines.slice(here.position, next ? next.position - 1 : lines.length).map((l) => l.trimEnd());
       const body = slice.filter(Boolean);
       return {
         title: here.title,
         body: body.slice(0, MAX_LINES),
         raw: slice.slice(0, MAX_LINES).join("\n"),
-        page: here.page,
+        position: here.position,
         total: hs.length
       };
     }
     var MARKDOWN = /* @__PURE__ */ new Set(["md", "markdown"]);
     async function render(el, req) {
-      const sec = await readSection(req.abs, req.page);
+      const sec = await readSection(req.abs, req.position);
       if (!req.isCurrent() || !sec)
         return false;
       if (MARKDOWN.has(req.ext) && sec.raw !== void 0) {
@@ -2287,7 +3484,7 @@ var require_epub = __commonJS({
     var { elements, attr, textIn } = require_xml();
     var { blockLines, inlineText } = require_html();
     var { renderLines, renderHtml } = require_preview();
-    var { clampPage, normPath, assetSrc } = require_util();
+    var { clampPosition, normPath, assetSrc } = require_util();
     var MAX_LINES = 60;
     var resolve = (base, href) => normPath((base ? base.split("/").slice(0, -1).join("/") + "/" : "") + href);
     var dropFragment = (href) => String(href).split("#")[0];
@@ -2381,31 +3578,31 @@ var require_epub = __commonJS({
       const out = [];
       const seen = /* @__PURE__ */ new Set();
       for (const entry of readToc(doc.zip, doc.spine)) {
-        const page = at.get(entry.path);
-        if (!page || seen.has(entry.title + "|" + page))
+        const position = at.get(entry.path);
+        if (!position || seen.has(entry.title + "|" + position))
           continue;
-        seen.add(entry.title + "|" + page);
-        out.push({ title: entry.title, page });
+        seen.add(entry.title + "|" + position);
+        out.push({ title: entry.title, position });
       }
       return out;
     }
-    function chapterAt(doc, page) {
-      const n = clampPage(page, doc.spine.order.length);
+    function chapterAt(doc, position) {
+      const n = clampPosition(position, doc.spine.order.length);
       const path = doc.spine.order[n - 1];
       const xhtml = doc.zip.text(path);
       if (!xhtml)
         return null;
       const body = elements(xhtml, "body")[0] || xhtml;
       const lines = blockLines(body);
-      return { title: lines[0] || "", body: lines.slice(1, MAX_LINES), raw: body, path, page: n, total: doc.spine.order.length };
+      return { title: lines[0] || "", body: lines.slice(1, MAX_LINES), raw: body, path, position: n, total: doc.spine.order.length };
     }
-    async function readChapter(absPath, page) {
+    async function readChapter(absPath, position) {
       const doc = open(absPath);
-      return doc ? chapterAt(doc, page) : null;
+      return doc ? chapterAt(doc, position) : null;
     }
     async function render(el, req) {
       const doc = open(req.abs);
-      const ch = doc && chapterAt(doc, req.page);
+      const ch = doc && chapterAt(doc, req.position);
       if (!req.isCurrent() || !ch)
         return false;
       if (ch.raw) {
@@ -2468,7 +3665,7 @@ var require_media = __commonJS({
       media.preload = "metadata";
       media.style.width = req.width + "px";
       media.style.maxWidth = "100%";
-      const at = Math.max(0, (req.page | 0) - (req.page > 1 ? 0 : 1));
+      const at = Math.max(0, (req.position | 0) - (req.position > 1 ? 0 : 1));
       const seek = () => {
         try {
           if (at > 0)
@@ -2517,9 +3714,187 @@ var require_media = __commonJS({
       exts: [...Object.keys(VIDEO), ...Object.keys(AUDIO)],
       anchorKind: null,
       // no outline, so nothing writes an anchor; a hand-written #t= still previews
+      positionUnit: "time",
       positionLabel,
       render
     };
+  }
+});
+
+// src/formats/odf-styles.js
+var require_odf_styles = __commonJS({
+  "src/formats/odf-styles.js"(exports2, module2) {
+    "use strict";
+    var { elements, attr } = require_xml();
+    var { pt, colour, fontFamily } = require_css();
+    var PER_PT = { cm: 72 / 2.54, mm: 72 / 25.4, in: 72, pt: 1, pc: 12, px: 0.75 };
+    function points(value) {
+      const m = /^\s*(-?[\d.]+)\s*(cm|mm|in|pt|pc|px)\s*$/i.exec(String(value || ""));
+      if (!m)
+        return null;
+      const n = Number(m[1]);
+      return Number.isFinite(n) ? n * PER_PT[m[2].toLowerCase()] : null;
+    }
+    var length = (value) => {
+      const n = points(value);
+      return n === null ? null : pt(n);
+    };
+    var ALIGN = { start: "left", end: "right", left: "left", right: "right", center: "center", justify: "justify" };
+    function textCss(props) {
+      if (!props)
+        return {};
+      const out = {};
+      const family = fontFamily(attr(props, "fo:font-family") || attr(props, "style:font-name"));
+      if (family)
+        out["font-family"] = family;
+      const size = length(attr(props, "fo:font-size"));
+      if (size)
+        out["font-size"] = size;
+      const weight = attr(props, "fo:font-weight");
+      if (weight)
+        out["font-weight"] = weight;
+      const style = attr(props, "fo:font-style");
+      if (style)
+        out["font-style"] = style;
+      const fg = colour(attr(props, "fo:color"));
+      if (fg)
+        out.color = fg;
+      const bg = colour(attr(props, "fo:background-color"));
+      if (bg)
+        out.background = bg;
+      const lines = [];
+      const underline = attr(props, "style:text-underline-style");
+      const strike = attr(props, "style:text-line-through-style");
+      if (underline && !/^none$/i.test(underline))
+        lines.push("underline");
+      if (strike && !/^none$/i.test(strike))
+        lines.push("line-through");
+      if (lines.length)
+        out["text-decoration"] = lines.join(" ");
+      const caps = attr(props, "fo:text-transform");
+      if (caps && caps !== "none")
+        out["text-transform"] = caps;
+      const variant = attr(props, "fo:font-variant");
+      if (variant && variant !== "normal")
+        out["font-variant"] = variant;
+      const position = attr(props, "style:text-position");
+      if (position)
+        out["vertical-align"] = /^-/.test(position.trim()) ? "sub" : "super";
+      return out;
+    }
+    function paraCss(props) {
+      if (!props)
+        return {};
+      const out = {};
+      const align = attr(props, "fo:text-align");
+      if (align && ALIGN[align])
+        out["text-align"] = ALIGN[align];
+      for (const [from, to] of [
+        ["fo:margin-top", "margin-top"],
+        ["fo:margin-bottom", "margin-bottom"],
+        ["fo:margin-left", "padding-left"],
+        ["fo:margin-right", "padding-right"],
+        ["fo:text-indent", "text-indent"]
+      ]) {
+        const value = length(attr(props, from));
+        if (value)
+          out[to] = value;
+      }
+      const line = attr(props, "fo:line-height");
+      if (line && /%$/.test(line))
+        out["line-height"] = String(parseFloat(line) / 100);
+      else if (line && length(line))
+        out["line-height"] = length(line);
+      const bg = colour(attr(props, "fo:background-color"));
+      if (bg)
+        out.background = bg;
+      const border = attr(props, "fo:border");
+      if (border)
+        out.border = border;
+      return out;
+    }
+    function cellCss(props) {
+      if (!props)
+        return {};
+      const out = {};
+      const bg = colour(attr(props, "fo:background-color"));
+      if (bg)
+        out.background = bg;
+      for (const [from, to] of [
+        ["fo:border", "border"],
+        ["fo:border-top", "border-top"],
+        ["fo:border-right", "border-right"],
+        ["fo:border-bottom", "border-bottom"],
+        ["fo:border-left", "border-left"]
+      ]) {
+        const value = attr(props, from);
+        if (value)
+          out[to] = /^none$/i.test(value.trim()) ? "0" : value;
+      }
+      const align = attr(props, "style:vertical-align");
+      if (align)
+        out["vertical-align"] = align === "middle" ? "middle" : align;
+      return out;
+    }
+    function columnCss(props) {
+      const width = props && length(attr(props, "style:column-width"));
+      return width ? { width } : {};
+    }
+    function readStyles(contentXml, stylesXml) {
+      const table = /* @__PURE__ */ new Map();
+      for (const source of [stylesXml || "", contentXml || ""]) {
+        for (const style of elements(source, "style:style")) {
+          const name = attr(style, "style:name");
+          if (!name)
+            continue;
+          table.set(name, {
+            parent: attr(style, "style:parent-style-name"),
+            family: attr(style, "style:family") || "paragraph",
+            para: elements(style, "style:paragraph-properties")[0] || "",
+            text: elements(style, "style:text-properties")[0] || "",
+            cell: elements(style, "style:table-cell-properties")[0] || "",
+            column: elements(style, "style:table-column-properties")[0] || ""
+          });
+        }
+      }
+      return table;
+    }
+    function chain(table, name) {
+      const out = [];
+      const seen = /* @__PURE__ */ new Set();
+      let at = name;
+      while (at && table.has(at) && !seen.has(at)) {
+        seen.add(at);
+        out.unshift(table.get(at));
+        at = table.get(at).parent;
+      }
+      return out;
+    }
+    var styleCss = (table, name) => Object.assign(
+      {},
+      ...chain(table, name).flatMap((s) => [paraCss(s.para), textCss(s.text), cellCss(s.cell), columnCss(s.column)])
+    );
+    function pageOf(stylesXml) {
+      const master = elements(stylesXml || "", "style:master-page")[0];
+      const named = master && attr(master, "style:page-layout-name");
+      const layouts = elements(stylesXml || "", "style:page-layout");
+      const layout = named && layouts.find((l) => attr(l, "style:name") === named) || layouts[0];
+      const props = layout && elements(layout, "style:page-layout-properties")[0];
+      if (!props)
+        return null;
+      const width = points(attr(props, "fo:page-width"));
+      if (!width)
+        return null;
+      return {
+        width,
+        height: points(attr(props, "fo:page-height")),
+        top: points(attr(props, "fo:margin-top")),
+        right: points(attr(props, "fo:margin-right")),
+        bottom: points(attr(props, "fo:margin-bottom")),
+        left: points(attr(props, "fo:margin-left"))
+      };
+    }
+    module2.exports = { points, length, textCss, paraCss, cellCss, columnCss, readStyles, chain, styleCss, pageOf };
   }
 });
 
@@ -2528,13 +3903,22 @@ var require_odf = __commonJS({
   "src/formats/odf.js"(exports2, module2) {
     "use strict";
     var { openZip } = require_zip();
-    var { elements, attr, decodeEntities } = require_xml();
-    var { renderLines } = require_preview();
-    var { clampPage } = require_util();
+    var { elements, elementsOf, attr, decodeEntities } = require_xml();
+    var { renderLines, renderHtml, renderFrame } = require_preview();
+    var { clampPosition, assetSrc, escAttr, gridToHtml, cellText: textOf, spanning, isCovered, COVERED, sectionEnd, MAX_ROWS, MAX_COLS } = require_util();
+    var { sheet: cssSheet, pageCss, pt, SHEET_RULES } = require_css();
+    var odfStyles = require_odf_styles();
     var MAX_LINES = 60;
+    var KIND = { ott: "odt", ots: "ods", otp: "odp", odg: "odp", otg: "odp" };
+    var kindOf = (ext) => KIND[String(ext || "").toLowerCase()] || ext;
+    var DRAWING = /* @__PURE__ */ new Set(["odg", "otg"]);
+    var named = (ext) => DRAWING.has(String(ext || "").toLowerCase());
+    var without = (xml, tag) => elements(xml, tag).reduce((acc, src) => acc.replace(src, ""), xml);
+    var ASIDES = ["office:annotation", "office:annotation-end", "text:tracked-changes", "text:note"];
+    var readable = (xml) => xml ? ASIDES.reduce(without, xml) : xml;
     function contentOf(absPath) {
       const zip = openZip(absPath);
-      return zip ? zip.text("content.xml") : null;
+      return zip ? readable(zip.text("content.xml")) : null;
     }
     var TEXT_BLOCK = /<text:(?:h|p)\b[^>]*>([\s\S]*?)<\/text:(?:h|p)>/g;
     function textLines(xml) {
@@ -2550,50 +3934,190 @@ var require_odf = __commonJS({
     function odtOutline(xml) {
       const out = [];
       let m;
+      let n = 0;
       const re = /<text:h\b[^>]*>([\s\S]*?)<\/text:h>/g;
       while (m = re.exec(xml)) {
+        n += 1;
         const title = decodeEntities(m[1].replace(/<[^>]*>/g, "")).replace(/\s+/g, " ").trim();
         if (title)
-          out.push({ title, page: out.length + 1 });
+          out.push({ title, position: n });
       }
       return out;
     }
-    function slideText(page) {
-      let title = "";
-      const body = [];
-      for (const frame of elements(page, "draw:frame")) {
-        const lines = textLines(frame);
-        if (!title && (attr(frame, "presentation:class") || "") === "title")
-          title = lines.join(" ");
-        else
-          body.push(...lines);
+    function slideText(slide) {
+      const body = textLines(slide);
+      const titled = elements(slide, "draw:frame").find((frame) => (attr(frame, "presentation:class") || "") === "title");
+      const titleLines = titled ? textLines(titled) : [];
+      for (const line of titleLines) {
+        const at = body.indexOf(line);
+        if (at >= 0)
+          body.splice(at, 1);
       }
-      if (!title)
-        title = body.shift() || "";
-      return { title, body };
+      return { title: titleLines.join(" ") || body.shift() || "", body };
     }
-    function odpOutline(xml) {
+    function pageOutline(xml, named2) {
       const out = [];
-      for (const page of elements(xml, "draw:page")) {
-        const title = slideText(page).title;
+      elements(xml, "draw:page").forEach((page, i) => {
+        const title = slideText(page).title || (named2 ? attr(page, "draw:name") || "" : "");
         if (title)
-          out.push({ title, page: out.length + 1 });
-      }
+          out.push({ title, position: i + 1 });
+      });
       return out;
     }
     function odsOutline(xml) {
       const out = [];
-      for (const table of elements(xml, "table:table")) {
+      elements(xml, "table:table").forEach((table, i) => {
         const name = attr(table, "table:name");
         if (name)
-          out.push({ title: name, page: out.length + 1 });
+          out.push({ title: name, position: i + 1 });
+      });
+      return out;
+    }
+    var cellText = (cell) => textLines(cell).join(" ").trim();
+    var repeat = (source, name) => Math.max(1, parseInt(attr(source, name) || "1", 10) || 1);
+    function sheetGrid(tableXml, ctx) {
+      const rows = [];
+      for (const row of elements(tableXml, "table:table-row")) {
+        if (rows.length >= MAX_ROWS)
+          break;
+        const cells = [];
+        for (const { tag, xml } of elementsOf(row, ["table:covered-table-cell", "table:table-cell"])) {
+          const covered = tag === "table:covered-table-cell";
+          const text = cellText(xml);
+          const cls = ctx && ctx.sheet ? ctx.sheet.cls(odfStyles.styleCss(ctx.styles, ownAttr(xml, "table:style-name"))) : "";
+          const across = repeat(xml, "table:number-columns-spanned");
+          const down = repeat(xml, "table:number-rows-spanned");
+          let value = cls ? { text, cls } : text;
+          if (covered)
+            value = COVERED;
+          else if (across > 1 || down > 1)
+            value = spanning(value, across, down);
+          for (let i = 0; i < repeat(xml, "table:number-columns-repeated") && cells.length <= MAX_COLS; i++)
+            cells.push(value);
+        }
+        for (let r = 0; r < repeat(row, "table:number-rows-repeated") && rows.length < MAX_ROWS; r++)
+          rows.push(cells.slice());
+      }
+      let lastRow = -1;
+      let lastCol = -1;
+      rows.forEach((cs, ri) => cs.forEach((c, ci) => {
+        if (textOf(c) || isCovered(c)) {
+          lastRow = Math.max(lastRow, ri);
+          lastCol = Math.max(lastCol, ci);
+        }
+      }));
+      if (lastRow < 0)
+        return [];
+      return rows.slice(0, lastRow + 1).map((cs) => cs.slice(0, Math.min(lastCol + 1, MAX_COLS)));
+    }
+    function sheetColumns(tableXml, ctx) {
+      const out = [];
+      for (const col of elements(tableXml, "table:table-column")) {
+        const width = odfStyles.styleCss(ctx.styles, ownAttr(col, "table:style-name")).width || null;
+        for (let i = 0; i < repeat(col, "table:number-columns-repeated") && out.length <= MAX_COLS; i++) {
+          out.push(width ? { width } : {});
+        }
       }
       return out;
     }
+    var sheetTable = (tableXml, ctx) => gridToHtml(sheetGrid(tableXml, ctx), {
+      header: false,
+      cols: ctx ? sheetColumns(tableXml, ctx) : []
+    });
+    var cleanTitle = (hXml) => decodeEntities(hXml.replace(/<[^>]*>/g, "")).replace(/\s+/g, " ").trim();
+    var openingTag = (src) => src.slice(0, src.indexOf(">") + 1 || src.length);
+    var ownAttr = (src, name) => attr(openingTag(src), name);
+    var headingLevel = (src) => Math.min(6, Math.max(1, parseInt(ownAttr(src, "text:outline-level") || "1", 10) || 1));
+    function odtHeadings(xml) {
+      const out = [];
+      const re = /<text:h\b[^>]*>[\s\S]*?<\/text:h>/g;
+      let m;
+      while (m = re.exec(xml)) {
+        out.push({ from: m.index, to: re.lastIndex, title: cleanTitle(m[0]), level: headingLevel(m[0]) });
+      }
+      return out;
+    }
+    var inlineHtml = (s, ctx) => s.replace(/<text:line-break\b[^>]*\/?>/g, "<br>").replace(/<text:(?:tab|s)\b[^>]*\/?>/g, " ").replace(/<text:span\b([^>]*)>/g, (m, a) => {
+      const cls = ctx && ctx.sheet ? ctx.sheet.cls(odfStyles.styleCss(ctx.styles, attr(m, "text:style-name"))) : "";
+      return cls ? '<span class="' + cls + '">' : "<span>";
+    }).replace(/<\/text:span>/g, "</span>").replace(/<(?!\/?(?:br|img|span)\b)[^>]+>/gi, "").replace(/<span>([\s\S]*?)<\/span>/g, "$1").replace(/\s+/g, " ").trim();
+    var BLOCK = ["text:h", "text:p", "text:list", "table:table"];
+    function blocks(xml) {
+      const spans = [];
+      for (const tag of BLOCK) {
+        let at = 0;
+        for (const src of elements(xml, tag)) {
+          const from = xml.indexOf(src, at);
+          if (from < 0)
+            continue;
+          spans.push({ from, to: from + src.length, tag, src });
+          at = from + src.length;
+        }
+      }
+      spans.sort((a, b) => a.from - b.from || b.to - a.to);
+      const out = [];
+      let end = -1;
+      for (const s of spans)
+        if (s.from >= end) {
+          out.push(s);
+          end = s.to;
+        }
+      return out;
+    }
+    var openTag = (tag, cls) => "<" + tag + (cls ? ' class="' + cls + '"' : "") + ">";
+    function tableHtml(table, ctx) {
+      const rows = elements(table, "table:table-row").map((row) => {
+        const cells = elements(row, "table:table-cell").map((cell) => {
+          const cls = ctx.sheet.cls(odfStyles.styleCss(ctx.styles, ownAttr(cell, "table:style-name")));
+          const inner = blocks(cell).map((b) => blockHtml(b, ctx)).join("");
+          const span = (name, as) => {
+            const n = parseInt(ownAttr(cell, name) || "1", 10) || 1;
+            return n > 1 ? " " + as + '="' + n + '"' : "";
+          };
+          return "<td" + span("table:number-columns-spanned", "colspan") + span("table:number-rows-spanned", "rowspan") + (cls ? ' class="' + cls + '"' : "") + ">" + inner + "</td>";
+        });
+        return cells.length ? "<tr>" + cells.join("") + "</tr>" : "";
+      }).filter(Boolean);
+      return rows.length ? "<table>" + rows.join("") + "</table>" : "";
+    }
+    function blockHtml(span, ctx) {
+      const { tag, src } = span;
+      if (tag === "table:table")
+        return ctx && ctx.sheet ? tableHtml(src, ctx) : sheetTable(src) || "";
+      if (tag === "text:list") {
+        const items = elements(src, "text:list-item").map((item) => blocks(item).map((b) => blockHtml(b, ctx)).join("")).filter(Boolean);
+        return items.length ? "<ul>" + items.map((i) => "<li>" + i + "</li>").join("") + "</ul>" : "";
+      }
+      const inner = inlineHtml(src.replace(/^<[^>]*>/, "").replace(/<\/[^>]*>$/, ""), ctx);
+      if (!inner)
+        return "";
+      const cls = ctx && ctx.sheet ? ctx.sheet.cls(odfStyles.styleCss(ctx.styles, ownAttr(src, "text:style-name"))) : "";
+      const name = tag === "text:h" ? "h" + headingLevel(src) : "p";
+      return openTag(name, cls) + inner + "</" + name + ">";
+    }
+    function odtToHtml(xml, ctx) {
+      const body = readable(xml).replace(/<draw:image\b[^>]*\/?>/g, (m) => {
+        const href = attr(m, "xlink:href");
+        return href ? '<img src="' + escAttr(href) + '">' : "";
+      });
+      return blocks(body).map((b) => blockHtml(b, ctx)).join("");
+    }
+    function odtSectionXml(xml, position) {
+      const hs = odtHeadings(xml);
+      if (!hs.length)
+        return { title: "", xml, total: 1, n: 1 };
+      const n = clampPosition(position, hs.length);
+      return {
+        title: hs[n - 1].title,
+        xml: xml.slice(hs[n - 1].from, sectionEnd(hs, n, xml.length)),
+        total: hs.length,
+        n
+      };
+    }
     function outlineFor(ext, xml) {
-      if (ext === "odp")
-        return odpOutline(xml);
-      if (ext === "ods")
+      if (kindOf(ext) === "odp")
+        return pageOutline(xml, named(ext));
+      if (kindOf(ext) === "ods")
         return odsOutline(xml);
       return odtOutline(xml);
     }
@@ -2601,48 +4125,1444 @@ var require_odf = __commonJS({
       const xml = contentOf(absPath);
       return xml ? outlineFor(ext, xml) : [];
     }
-    async function readSection(absPath, ext, page) {
+    async function readSection(absPath, ext, position) {
       const xml = contentOf(absPath);
       if (!xml)
         return null;
-      if (ext === "odp") {
-        const pages = elements(xml, "draw:page");
-        if (!pages.length)
+      if (kindOf(ext) === "odp") {
+        const slides = elements(xml, "draw:page");
+        if (!slides.length)
           return null;
-        const n2 = clampPage(page, pages.length);
-        const { title, body: body2 } = slideText(pages[n2 - 1]);
-        return { title, body: body2.slice(0, MAX_LINES), page: n2, total: pages.length };
+        const n = clampPosition(position, slides.length);
+        const { title, body } = slideText(slides[n - 1]);
+        return {
+          title: title || (named(ext) ? attr(slides[n - 1], "draw:name") || "" : ""),
+          body: body.slice(0, MAX_LINES),
+          position: n,
+          total: slides.length
+        };
       }
-      if (ext === "ods") {
+      if (kindOf(ext) === "ods") {
         const tables = elements(xml, "table:table");
         if (!tables.length)
           return null;
-        const n2 = clampPage(page, tables.length);
-        return { title: attr(tables[n2 - 1], "table:name") || "", body: textLines(tables[n2 - 1]).slice(0, MAX_LINES), page: n2, total: tables.length };
+        const n = clampPosition(position, tables.length);
+        return { title: attr(tables[n - 1], "table:name") || "", body: textLines(tables[n - 1]).slice(0, MAX_LINES), position: n, total: tables.length };
       }
-      const hs = odtOutline(xml);
-      const lines = textLines(xml);
-      if (!hs.length)
-        return { title: "", body: lines.slice(0, MAX_LINES), page: 1, total: 1 };
-      const n = clampPage(page, hs.length);
-      const here = lines.indexOf(hs[n - 1].title);
-      const next = hs[n] ? lines.indexOf(hs[n].title, here + 1) : lines.length;
-      const body = lines.slice(here + 1, next < 0 ? lines.length : next);
-      return { title: hs[n - 1].title, body: body.slice(0, MAX_LINES), page: n, total: hs.length };
+      if (!odtHeadings(xml).length)
+        return { title: "", body: textLines(xml).slice(0, MAX_LINES), position: 1, total: 1 };
+      const sec = odtSectionXml(xml, position);
+      const lines = textLines(sec.xml);
+      if (lines[0] === sec.title)
+        lines.shift();
+      return { title: sec.title, body: lines.slice(0, MAX_LINES), position: sec.n, total: sec.total };
+    }
+    var imageLoader = (zip) => (src) => zip ? zip.read(assetSrc(src)) : null;
+    var PAGE_RULES = [
+      "body{margin:0;background:transparent}",
+      ".page table{border-collapse:collapse}",
+      ".page td,.page th{border:1px solid #b9b9b9;padding:2pt 4pt;vertical-align:top}",
+      ".page img{max-width:100%;height:auto}",
+      ".page ul{margin:0;padding-left:1.5em}"
+    ].join("\n");
+    var SHAPE = ["draw:frame", "draw:custom-shape", "draw:text-box", "draw:g"];
+    var SLIDE_RULES = [
+      "body{margin:0;background:transparent}",
+      ".slide{position:relative;overflow:hidden;background:#ffffff;color:#1a1a1a;margin:0 auto;box-shadow:0 0 0 1pt rgba(0,0,0,.15)}",
+      ".slide p{margin:0}",
+      ".slide img{display:block;width:100%;height:100%;object-fit:contain}"
+    ].join("\n");
+    function shapeBox(shape) {
+      const box = {
+        left: odfStyles.length(ownAttr(shape, "svg:x")),
+        top: odfStyles.length(ownAttr(shape, "svg:y")),
+        width: odfStyles.length(ownAttr(shape, "svg:width")),
+        height: odfStyles.length(ownAttr(shape, "svg:height"))
+      };
+      return box.left && box.top && box.width ? box : null;
+    }
+    function shapeHtml(shape, ctx) {
+      const box = shapeBox(shape);
+      if (!box)
+        return "";
+      const image = elements(shape, "draw:image")[0];
+      const href = image && attr(openingTag(image), "xlink:href");
+      const css = Object.assign({ position: "absolute", overflow: "hidden" }, {
+        left: box.left,
+        top: box.top,
+        width: box.width,
+        height: box.height || null
+      }, odfStyles.styleCss(ctx.styles, ownAttr(shape, "draw:style-name")));
+      const cls = ctx.sheet.cls(css);
+      const inner = href ? '<img src="' + escAttr(href) + '">' : blocks(shape).map((b) => blockHtml(b, ctx)).join("");
+      return inner ? '<div class="' + cls + '">' + inner + "</div>" : "";
+    }
+    function slidePage(zip, xml, position, width) {
+      const slides = elements(xml, "draw:page");
+      if (!slides.length)
+        return null;
+      const page = odfStyles.pageOf(zip.text("styles.xml"));
+      if (!page)
+        return null;
+      const slide = slides[clampPosition(position, slides.length) - 1];
+      const ctx = { styles: odfStyles.readStyles(zip.text("content.xml"), zip.text("styles.xml")), sheet: cssSheet("o") };
+      const shapes = SHAPE.flatMap((tag) => elements(slide, tag)).map((s) => ({ at: slide.indexOf(s), html: shapeHtml(s, ctx) })).filter((s) => s.html).sort((a, b) => a.at - b.at).map((s) => s.html).join("");
+      return {
+        html: '<div class="slide">' + shapes + "</div>",
+        css: [
+          SLIDE_RULES,
+          ".slide{width:" + pt(page.width) + ";height:" + pt(page.height) + "}",
+          "html{zoom:" + Math.min(1, width / (page.width * (96 / 72))) + "}",
+          ctx.sheet.text()
+        ].join("\n")
+      };
+    }
+    function documentPage(zip, xml, position, width, view) {
+      const sec = odtSectionXml(xml, position);
+      const ctx = { styles: odfStyles.readStyles(zip.text("content.xml"), zip.text("styles.xml")), sheet: cssSheet("o") };
+      const body = odtToHtml(sec.xml, ctx);
+      const page = pageCss(odfStyles.pageOf(zip.text("styles.xml")), width, view);
+      return {
+        html: '<div class="page">' + body + "</div>",
+        css: [PAGE_RULES, page.css, "html{zoom:" + page.zoom + "}", ctx.sheet.text()].filter(Boolean).join("\n")
+      };
     }
     async function render(el, req) {
-      const sec = await readSection(req.abs, req.ext, req.page);
+      const kind = kindOf(req.ext);
+      if (kind === "ods") {
+        const zip = openZip(req.abs);
+        const xml = zip ? readable(zip.text("content.xml")) : null;
+        const tables = xml ? elements(xml, "table:table") : [];
+        if (req.isCurrent() && tables.length) {
+          const ctx = { styles: odfStyles.readStyles(zip.text("content.xml"), zip.text("styles.xml")), sheet: cssSheet("o") };
+          const html = sheetTable(tables[clampPosition(req.position, tables.length) - 1], ctx);
+          if (html) {
+            const css = [SHEET_RULES, ctx.sheet.text()].join("\n");
+            const framed = renderFrame(el, {
+              html,
+              css,
+              width: req.width,
+              onFail: () => {
+                renderHtml(el, { html, width: req.width, css });
+              }
+            });
+            if (framed !== false)
+              return framed;
+            const done = renderHtml(el, { html, width: req.width, css });
+            if (done !== false)
+              return done;
+          }
+        }
+      }
+      if (kind === "odt") {
+        const zip = openZip(req.abs);
+        const xml = zip ? readable(zip.text("content.xml")) : null;
+        if (req.isCurrent() && xml) {
+          const page = documentPage(zip, xml, req.position, req.width, req.view);
+          const loadImage = imageLoader(zip);
+          const framed = renderFrame(el, {
+            html: page.html,
+            css: page.css,
+            width: req.width,
+            loadImage,
+            onFail: () => {
+              renderHtml(el, { html: page.html, width: req.width, loadImage });
+            }
+          });
+          if (framed !== false)
+            return framed;
+          const done = renderHtml(el, { html: page.html, width: req.width, loadImage });
+          if (done !== false)
+            return done;
+        }
+      }
+      if (kind === "odp") {
+        const zip = openZip(req.abs);
+        const xml = zip ? readable(zip.text("content.xml")) : null;
+        const page = xml && req.isCurrent() ? slidePage(zip, xml, req.position, req.width) : null;
+        if (page) {
+          const loadImage = imageLoader(zip);
+          const flat = () => readSection(req.abs, req.ext, req.position).then((sec2) => sec2 && renderLines(el, { title: sec2.title, body: sec2.body, width: req.width }));
+          const framed = renderFrame(el, {
+            html: page.html,
+            css: page.css,
+            width: req.width,
+            loadImage,
+            onFail: flat
+          });
+          if (framed !== false)
+            return framed;
+        }
+      }
+      const sec = await readSection(req.abs, req.ext, req.position);
       if (!req.isCurrent() || !sec)
         return false;
       return renderLines(el, { title: sec.title, body: sec.body, width: req.width });
     }
     module2.exports = {
-      exts: ["odt", "ods", "odp"],
+      exts: ["odt", "ods", "odp", "odg", "ott", "ots", "otp", "otg"],
       anchorKind: null,
       outline: (abs, ext) => readOutline(abs, ext),
       render,
       readOutline,
-      readSection
+      readSection,
+      sheetTable,
+      sheetGrid,
+      odtToHtml,
+      odtSectionXml,
+      documentPage,
+      slidePage
+    };
+  }
+});
+
+// src/formats/docx-styles.js
+var require_docx_styles = __commonJS({
+  "src/formats/docx-styles.js"(exports2, module2) {
+    "use strict";
+    var { elements, attr } = require_xml();
+    var { pt, twips, halfPoints, eighthPoints, num, colour, fontFamily } = require_css();
+    function flag(pr, tag) {
+      const el = elements(pr || "", tag)[0];
+      if (!el)
+        return null;
+      const val = attr(el, "w:val");
+      return val === null || !/^(0|false|off)$/i.test(val);
+    }
+    var ALIGN = {
+      left: "left",
+      start: "left",
+      right: "right",
+      end: "right",
+      center: "center",
+      both: "justify",
+      distribute: "justify"
+    };
+    function runCss(rPr) {
+      if (!rPr)
+        return {};
+      const out = {};
+      const fonts = elements(rPr, "w:rFonts")[0];
+      if (fonts) {
+        const family = fontFamily(attr(fonts, "w:ascii") || attr(fonts, "w:hAnsi") || attr(fonts, "w:cs"));
+        if (family)
+          out["font-family"] = family;
+      }
+      const size = num(attr(elements(rPr, "w:sz")[0] || "", "w:val"));
+      if (size !== null)
+        out["font-size"] = halfPoints(size);
+      const bold = flag(rPr, "w:b");
+      if (bold !== null)
+        out["font-weight"] = bold ? "bold" : "normal";
+      const italic = flag(rPr, "w:i");
+      if (italic !== null)
+        out["font-style"] = italic ? "italic" : "normal";
+      const underline = attr(elements(rPr, "w:u")[0] || "", "w:val");
+      const struck = flag(rPr, "w:strike");
+      const lines = [];
+      if (underline && !/^none$/i.test(underline))
+        lines.push("underline");
+      if (struck)
+        lines.push("line-through");
+      if (lines.length)
+        out["text-decoration"] = lines.join(" ");
+      else if (underline || struck === false)
+        out["text-decoration"] = "none";
+      const fg = colour(attr(elements(rPr, "w:color")[0] || "", "w:val"));
+      if (fg)
+        out.color = fg;
+      const shade = elements(rPr, "w:shd")[0];
+      const bg = shade && colour(attr(shade, "w:fill"));
+      if (bg)
+        out.background = bg;
+      if (flag(rPr, "w:caps"))
+        out["text-transform"] = "uppercase";
+      if (flag(rPr, "w:smallCaps"))
+        out["font-variant"] = "small-caps";
+      const spacing = num(attr(elements(rPr, "w:spacing")[0] || "", "w:val"));
+      if (spacing)
+        out["letter-spacing"] = twips(spacing);
+      return out;
+    }
+    function paraCss(pPr) {
+      if (!pPr)
+        return {};
+      const out = {};
+      const jc = attr(elements(pPr, "w:jc")[0] || "", "w:val");
+      if (jc && ALIGN[jc])
+        out["text-align"] = ALIGN[jc];
+      const spacing = elements(pPr, "w:spacing")[0];
+      if (spacing) {
+        const before = num(attr(spacing, "w:before"));
+        const after = num(attr(spacing, "w:after"));
+        if (before !== null)
+          out["margin-top"] = twips(before);
+        if (after !== null)
+          out["margin-bottom"] = twips(after);
+        const line = num(attr(spacing, "w:line"));
+        if (line !== null) {
+          out["line-height"] = /^(atLeast|exact)$/i.test(attr(spacing, "w:lineRule") || "auto") ? twips(line) : String(Math.round(line / 240 * 100) / 100);
+        }
+      }
+      const ind = elements(pPr, "w:ind")[0];
+      if (ind) {
+        const left = num(attr(ind, "w:left") || attr(ind, "w:start"));
+        const right = num(attr(ind, "w:right") || attr(ind, "w:end"));
+        const first = num(attr(ind, "w:firstLine"));
+        const hanging = num(attr(ind, "w:hanging"));
+        if (left !== null)
+          out["padding-left"] = twips(left);
+        if (right !== null)
+          out["padding-right"] = twips(right);
+        if (hanging !== null)
+          out["text-indent"] = twips(-hanging);
+        else if (first !== null)
+          out["text-indent"] = twips(first);
+      }
+      return out;
+    }
+    var BORDER_SIDE = { top: "border-top", left: "border-left", bottom: "border-bottom", right: "border-right" };
+    function edgeValue(edge) {
+      if (!edge)
+        return null;
+      const kind = (attr(edge, "w:val") || "").toLowerCase();
+      if (!kind || kind === "nil" || kind === "none")
+        return "0";
+      const size = num(attr(edge, "w:sz"));
+      const style = /dash/.test(kind) ? "dashed" : /dot/.test(kind) ? "dotted" : /double/.test(kind) ? "double" : "solid";
+      return eighthPoints(size === null ? 4 : Math.max(2, size)) + " " + style + " " + (colour(attr(edge, "w:color")) || "#767676");
+    }
+    function borderCss(pr, tag) {
+      const box = elements(pr || "", tag)[0];
+      if (!box)
+        return {};
+      const out = {};
+      for (const [side, prop] of Object.entries(BORDER_SIDE)) {
+        const value = edgeValue(elements(box, "w:" + side)[0]);
+        if (value !== null)
+          out[prop] = value;
+      }
+      return out;
+    }
+    function cellCss(tcPr) {
+      const out = Object.assign({}, borderCss(tcPr, "w:tcBorders"));
+      const shade = elements(tcPr || "", "w:shd")[0];
+      const fill = shade && colour(attr(shade, "w:fill"));
+      if (fill)
+        out.background = fill;
+      const width = elements(tcPr || "", "w:tcW")[0];
+      const w = width && num(attr(width, "w:w"));
+      if (w && (attr(width, "w:type") || "dxa") === "dxa")
+        out.width = twips(w);
+      const valign = attr(elements(tcPr || "", "w:vAlign")[0] || "", "w:val");
+      if (valign)
+        out["vertical-align"] = valign === "center" ? "middle" : valign;
+      return out;
+    }
+    function splitStyle(src) {
+      const pPr = elements(src, "w:pPr")[0] || "";
+      const rest = pPr ? src.replace(pPr, "") : src;
+      return { pPr, rPr: elements(rest, "w:rPr")[0] || "" };
+    }
+    function styleTable(stylesXml) {
+      const out = /* @__PURE__ */ new Map();
+      for (const style of elements(stylesXml || "", "w:style")) {
+        const id = attr(style, "w:styleId");
+        if (!id)
+          continue;
+        const parts = splitStyle(style);
+        out.set(id, {
+          basedOn: attr(elements(style, "w:basedOn")[0] || "", "w:val"),
+          pPr: parts.pPr,
+          rPr: parts.rPr,
+          // A table style holds the borders every cell in the table gets. Real documents lean on
+          // these entirely: across a corpus not one table states its borders on the table itself.
+          tblPr: elements(style, "w:tblPr")[0] || ""
+        });
+      }
+      return out;
+    }
+    function tableCss(styles, tblPr) {
+      const named = attr(elements(tblPr || "", "w:tblStyle")[0] || "", "w:val");
+      const layers = [...chain(styles, named).map((s) => s.tblPr), tblPr || ""];
+      const outer = Object.assign({}, ...layers.map((pr) => borderCss(pr, "w:tblBorders")));
+      const inside = {};
+      for (const pr of layers) {
+        const box = elements(pr, "w:tblBorders")[0];
+        if (!box)
+          continue;
+        const h = edgeValue(elements(box, "w:insideH")[0]);
+        const v = edgeValue(elements(box, "w:insideV")[0]);
+        if (h !== null) {
+          inside["border-top"] = h;
+          inside["border-bottom"] = h;
+        }
+        if (v !== null) {
+          inside["border-left"] = v;
+          inside["border-right"] = v;
+        }
+      }
+      return { table: outer, cell: inside };
+    }
+    function docDefaults(stylesXml) {
+      const defaults = elements(stylesXml || "", "w:docDefaults")[0] || "";
+      return {
+        rPr: elements(elements(defaults, "w:rPrDefault")[0] || "", "w:rPr")[0] || "",
+        pPr: elements(elements(defaults, "w:pPrDefault")[0] || "", "w:pPr")[0] || ""
+      };
+    }
+    function readStyles(stylesXml) {
+      return { table: styleTable(stylesXml), defaults: docDefaults(stylesXml) };
+    }
+    function chain(styles, id) {
+      const out = [];
+      const seen = /* @__PURE__ */ new Set();
+      let at = id;
+      while (at && styles.table.has(at) && !seen.has(at)) {
+        seen.add(at);
+        out.unshift(styles.table.get(at));
+        at = styles.table.get(at).basedOn;
+      }
+      return out;
+    }
+    function paragraphCss(styles, pPr, styleId) {
+      const layers = [
+        paraCss(styles.defaults.pPr),
+        runCss(styles.defaults.rPr),
+        ...chain(styles, styleId).flatMap((s) => [paraCss(s.pPr), runCss(s.rPr)]),
+        paraCss(pPr)
+      ];
+      return Object.assign({}, ...layers);
+    }
+    var characterCss = (styles, rPr, styleId) => Object.assign(
+      {},
+      ...chain(styles, styleId).map((s) => runCss(s.rPr)),
+      runCss(rPr)
+    );
+    function pageOf(body) {
+      const sects = elements(body || "", "w:sectPr");
+      const sect = sects[sects.length - 1] || "";
+      const size = elements(sect, "w:pgSz")[0];
+      if (!size)
+        return null;
+      const margin = elements(sect, "w:pgMar")[0] || "";
+      const points = (v) => num(v) === null ? null : num(v) / 20;
+      return {
+        width: points(attr(size, "w:w")),
+        height: points(attr(size, "w:h")),
+        top: points(attr(margin, "w:top")),
+        right: points(attr(margin, "w:right")),
+        bottom: points(attr(margin, "w:bottom")),
+        left: points(attr(margin, "w:left"))
+      };
+    }
+    module2.exports = {
+      flag,
+      runCss,
+      paraCss,
+      borderCss,
+      cellCss,
+      splitStyle,
+      styleTable,
+      docDefaults,
+      readStyles,
+      chain,
+      paragraphCss,
+      characterCss,
+      pageOf,
+      pt,
+      edgeValue,
+      tableCss
+    };
+  }
+});
+
+// src/formats/docx.js
+var require_docx = __commonJS({
+  "src/formats/docx.js"(exports2, module2) {
+    "use strict";
+    var { openZip } = require_zip();
+    var { elements, attr, textIn, decodeEntities } = require_xml();
+    var { renderLines, renderHtml, renderFrame } = require_preview();
+    var { clampPosition, normPath, assetSrc, escHtml, escAttr, sectionEnd } = require_util();
+    var { sheet: cssSheet, pageCss, num } = require_css();
+    var docxStyles = require_docx_styles();
+    var MAX_LINES = 60;
+    var para = () => /<w:p(?=[\s>])[^>]*>[\s\S]*?<\/w:p>|<w:p\b[^>]*\/>/g;
+    var squeeze = (s) => decodeEntities(s).replace(/\s+/g, " ");
+    var clean = (s) => squeeze(s).trim();
+    function relTargets(zip) {
+      const out = /* @__PURE__ */ new Map();
+      for (const r of elements(zip.text("word/_rels/document.xml.rels") || "", "Relationship")) {
+        const id = attr(r, "Id");
+        const target = attr(r, "Target");
+        if (id && target)
+          out.set(id, normPath("word/" + target.replace(/^\/+/, "")));
+      }
+      return out;
+    }
+    function headingStyles(stylesXml) {
+      const out = /* @__PURE__ */ new Map();
+      for (const style of elements(stylesXml || "", "w:style")) {
+        const id = attr(style, "w:styleId");
+        const level = /^heading\s*([1-9])/i.exec(attr(elements(style, "w:name")[0] || "", "w:val") || "");
+        if (id && level)
+          out.set(id, Number(level[1]));
+      }
+      return out;
+    }
+    function headingLevel(p, styles) {
+      const pPr = elements(p, "w:pPr")[0];
+      if (!pPr)
+        return 0;
+      const styleId = attr(elements(pPr, "w:pStyle")[0] || "", "w:val");
+      if (styleId) {
+        if (styles.has(styleId))
+          return styles.get(styleId);
+        const builtin = /^heading\s*([1-9])$/i.exec(styleId);
+        if (builtin)
+          return Number(builtin[1]);
+      }
+      const lvl = attr(elements(pPr, "w:outlineLvl")[0] || "", "w:val");
+      const n = lvl === null ? NaN : parseInt(lvl, 10);
+      return n >= 0 && n <= 8 ? n + 1 : 0;
+    }
+    function tableSpans(xml) {
+      const out = [];
+      let at = 0;
+      for (const table of elements(xml, "w:tbl")) {
+        const from = xml.indexOf(table, at);
+        if (from < 0)
+          continue;
+        out.push({ from, to: from + table.length, xml: table });
+        at = from + table.length;
+      }
+      return out;
+    }
+    function maskTables(xml) {
+      let out = xml;
+      for (const s of tableSpans(xml))
+        out = out.slice(0, s.from) + " ".repeat(s.to - s.from) + out.slice(s.to);
+      return out;
+    }
+    function headings(body, styles) {
+      const masked = maskTables(body);
+      const out = [];
+      const re = para();
+      let m;
+      while (m = re.exec(masked)) {
+        const level = headingLevel(m[0], styles);
+        if (!level)
+          continue;
+        const title = clean(textIn(m[0], "w:t"));
+        if (title)
+          out.push({ from: m.index, to: re.lastIndex, title, level });
+      }
+      return out;
+    }
+    var isOn = (rPr, tag) => docxStyles.flag(rPr, tag) === true;
+    var context = (parts, images) => ({
+      levels: parts.styles,
+      styles: parts.formatting || docxStyles.readStyles(""),
+      images: images || /* @__PURE__ */ new Map(),
+      sheet: cssSheet("w")
+    });
+    var withClass = (tag, cls, inner) => "<" + tag + (cls ? ' class="' + cls + '"' : "") + ">" + inner + "</" + tag + ">";
+    function runHtml(run, ctx) {
+      let html = "";
+      for (const drawing of elements(run, "w:drawing")) {
+        const src = ctx.images.get(attr(elements(drawing, "a:blip")[0] || "", "r:embed"));
+        if (src)
+          html += '<img src="' + escAttr(src) + '">';
+      }
+      let inner = "";
+      for (const chunk of run.replace(/<w:tab\b[^>]*\/?>/g, "	").replace(/<w:br\b[^>]*\/?>/g, "\n").split(/([\n\t])/)) {
+        if (chunk === "\n")
+          inner += "<br>";
+        else if (chunk === "	")
+          inner += " ";
+        else
+          inner += escHtml(squeeze(textIn(chunk, "w:t")));
+      }
+      if (!inner.trim())
+        return html;
+      const rPr = elements(run, "w:rPr")[0] || "";
+      const align = attr(elements(rPr, "w:vertAlign")[0] || "", "w:val");
+      if (align === "superscript")
+        inner = "<sup>" + inner + "</sup>";
+      else if (align === "subscript")
+        inner = "<sub>" + inner + "</sub>";
+      if (isOn(rPr, "w:i"))
+        inner = "<em>" + inner + "</em>";
+      if (isOn(rPr, "w:b"))
+        inner = "<strong>" + inner + "</strong>";
+      const cls = ctx.sheet.cls(docxStyles.characterCss(ctx.styles, rPr, attr(elements(rPr, "w:rStyle")[0] || "", "w:val")));
+      return html + (cls ? withClass("span", cls, inner) : inner);
+    }
+    function paraHtml(p, ctx) {
+      const body = elements(p, "w:r").map((r) => runHtml(r, ctx)).join("").trim();
+      if (!body)
+        return "";
+      const pPr = elements(p, "w:pPr")[0] || "";
+      const styleId = attr(elements(pPr, "w:pStyle")[0] || "", "w:val");
+      const cls = ctx.sheet.cls(docxStyles.paragraphCss(ctx.styles, pPr, styleId));
+      const level = Math.min(6, headingLevel(p, ctx.levels));
+      if (level)
+        return withClass("h" + level, cls, body);
+      return withClass(elements(pPr, "w:numPr").length ? "li" : "p", cls, body);
+    }
+    function cellHtml(cell, ctx, down) {
+      const tcPr = elements(cell, "w:tcPr")[0] || "";
+      const inner = elements(cell, "w:p").map((p) => paraHtml(p, ctx)).join("");
+      const span = num(attr(elements(tcPr, "w:gridSpan")[0] || "", "w:val"));
+      const attrs = (span && span > 1 ? ' colspan="' + span + '"' : "") + (down > 1 ? ' rowspan="' + down + '"' : "");
+      const cls = ctx.sheet.cls(docxStyles.cellCss(tcPr));
+      return "<td" + attrs + (cls ? ' class="' + cls + '"' : "") + ">" + inner + "</td>";
+    }
+    var gridSpan = (tcPr) => Math.max(1, num(attr(elements(tcPr, "w:gridSpan")[0] || "", "w:val")) || 1);
+    function vertical(rows) {
+      const grid = rows.map((row) => {
+        let col = 0;
+        return elements(row, "w:tc").map((xml) => {
+          const tcPr = elements(xml, "w:tcPr")[0] || "";
+          const merge = elements(tcPr, "w:vMerge")[0];
+          const at = col;
+          col += gridSpan(tcPr);
+          return {
+            xml,
+            col: at,
+            start: !merge || attr(merge, "w:val") === "restart",
+            merged: !!merge,
+            down: 1
+          };
+        });
+      });
+      grid.forEach((cells, r) => cells.forEach((cell) => {
+        if (!cell.merged || !cell.start)
+          return;
+        for (let y = r + 1; y < grid.length; y++) {
+          const below = grid[y].find((c) => c.col === cell.col);
+          if (!below || !below.merged || below.start)
+            break;
+          cell.down++;
+        }
+      }));
+      return grid;
+    }
+    var isHeaderRow = (row) => !!elements(elements(row, "w:trPr")[0] || "", "w:tblHeader")[0];
+    function colGroup(table) {
+      const cols = elements(elements(table, "w:tblGrid")[0] || "", "w:gridCol").map((c) => num(attr(c, "w:w"))).filter((w) => w !== null);
+      if (!cols.length)
+        return "";
+      const total = cols.reduce((a, b) => a + b, 0) || 1;
+      return "<colgroup>" + cols.map((w) => '<col style="width:' + Math.round(w / total * 1e3) / 10 + '%">').join("") + "</colgroup>";
+    }
+    function tableHtml(table, ctx) {
+      const source = elements(table, "w:tr");
+      const rows = vertical(source).map((cells, r) => {
+        if (!cells.length)
+          return "";
+        const html = cells.filter((c) => c.start).map((c) => cellHtml(c.xml, ctx, c.down));
+        return "<tr>" + (isHeaderRow(source[r]) ? html.map((c) => c.replace(/^<td/, "<th").replace(/<\/td>$/, "</th>")) : html).join("") + "</tr>";
+      }).filter(Boolean);
+      if (!rows.length)
+        return "";
+      const tblPr = elements(table, "w:tblPr")[0] || "";
+      const look = docxStyles.tableCss(ctx.styles, tblPr);
+      const classes = [
+        ctx.sheet.cls(Object.assign({ "table-layout": "fixed", width: "100%" }, look.table)),
+        ctx.sheet.cls(look.cell, "td"),
+        ctx.sheet.cls(look.cell, "th")
+      ].filter(Boolean).join(" ");
+      return "<table" + (classes ? ' class="' + classes + '"' : "") + ">" + colGroup(table) + rows.join("") + "</table>";
+    }
+    function toHtml(xml, ctxOrLevels, images) {
+      const ctx = ctxOrLevels && ctxOrLevels.sheet ? ctxOrLevels : context({ styles: ctxOrLevels || /* @__PURE__ */ new Map() }, images);
+      const blocks = tableSpans(xml).map((s) => ({ at: s.from, html: tableHtml(s.xml, ctx) }));
+      const re = para();
+      let m;
+      const masked = maskTables(xml);
+      while (m = re.exec(masked))
+        blocks.push({ at: m.index, html: paraHtml(m[0], ctx) });
+      return blocks.sort((a, b) => a.at - b.at).map((b) => b.html).join("").replace(/(?:<li[^>]*>[\s\S]*?<\/li>)+/g, (run) => "<ul>" + run + "</ul>");
+    }
+    function partsOf(absPath) {
+      const zip = openZip(absPath);
+      const body = zip && zip.text("word/document.xml");
+      if (!body)
+        return null;
+      const stylesXml = zip.text("word/styles.xml");
+      return { zip, body, styles: headingStyles(stylesXml), formatting: docxStyles.readStyles(stylesXml) };
+    }
+    function altChunk(zip, body) {
+      const id = attr(elements(body, "w:altChunk")[0] || "", "r:id");
+      const target = id && relTargets(zip).get(id);
+      const buf = target && zip.read(target);
+      if (!buf)
+        return null;
+      const html = buf.toString("utf8");
+      const inner = /<body\b[^>]*>([\s\S]*)<\/body>/i.exec(html);
+      return inner ? inner[1] : html;
+    }
+    async function readOutline(absPath) {
+      const parts = partsOf(absPath);
+      if (!parts)
+        return [];
+      return headings(parts.body, parts.styles).map((h, i) => ({ title: h.title, position: i + 1 }));
+    }
+    function sectionXml(body, styles, position) {
+      const hs = headings(body, styles);
+      if (!hs.length)
+        return { title: "", xml: body, total: 1, n: 1 };
+      const n = clampPosition(position, hs.length);
+      return {
+        title: hs[n - 1].title,
+        xml: body.slice(hs[n - 1].from, sectionEnd(hs, n, body.length)),
+        total: hs.length,
+        n
+      };
+    }
+    async function readSection(absPath, position) {
+      const parts = partsOf(absPath);
+      if (!parts)
+        return null;
+      const sec = sectionXml(parts.body, parts.styles, position);
+      const re = para();
+      const body = [];
+      let m;
+      while ((m = re.exec(sec.xml)) && body.length <= MAX_LINES) {
+        const line = clean(textIn(m[0], "w:t"));
+        if (line && line !== sec.title)
+          body.push(line);
+      }
+      return { title: sec.title, body: body.slice(0, MAX_LINES), position: sec.n, total: sec.total };
+    }
+    async function render(el, req) {
+      const parts = partsOf(req.abs);
+      if (!req.isCurrent() || !parts)
+        return false;
+      const loadImage = (src) => parts.zip.read(assetSrc(src));
+      const chunk = altChunk(parts.zip, parts.body);
+      if (chunk) {
+        const done = renderHtml(el, { html: chunk, width: req.width, loadImage });
+        if (done !== false)
+          return done;
+      } else {
+        const page = documentPage(parts, req.position, req.width, req.view);
+        const framed = renderFrame(el, {
+          html: page.html,
+          css: page.css,
+          width: req.width,
+          loadImage,
+          onFail: () => {
+            renderHtml(el, { html: page.html, width: req.width, loadImage });
+          }
+        });
+        if (framed !== false)
+          return framed;
+        const done = renderHtml(el, { html: page.html, width: req.width, loadImage });
+        if (done !== false)
+          return done;
+      }
+      const sec = await readSection(req.abs, req.position);
+      if (!req.isCurrent() || !sec)
+        return false;
+      return renderLines(el, { title: sec.title, body: sec.body, width: req.width });
+    }
+    var PAGE_RULES = [
+      "body{margin:0;background:transparent}",
+      ".page table{border-collapse:collapse}",
+      ".page td,.page th{padding:2pt 4pt;vertical-align:top}",
+      ".page td>p:only-child,.page th>p:only-child{margin:0}",
+      ".page img{max-width:100%;height:auto}",
+      ".page ul{margin:0;padding-left:1.5em}"
+    ].join("\n");
+    function documentPage(parts, position, width, view) {
+      const sec = sectionXml(parts.body, parts.styles, position);
+      const ctx = context(parts, relTargets(parts.zip));
+      const body = toHtml(sec.xml, ctx);
+      const page = pageCss(docxStyles.pageOf(parts.body), width, view);
+      return {
+        html: '<div class="page">' + body + "</div>",
+        css: [PAGE_RULES, page.css, "html{zoom:" + page.zoom + "}", ctx.sheet.text()].filter(Boolean).join("\n")
+      };
+    }
+    module2.exports = {
+      // A macro-enabled document and a template are the same package: word/document.xml, read the
+      // same way. Only the .doc of old Word is a different format, and it is not one of these.
+      exts: ["docx", "docm", "dotx", "dotm"],
+      // Word takes the fragment as part of the file name and then opens nothing at all, exactly as
+      // PowerPoint does, so a link into a .docx carries no anchor.
+      anchorKind: null,
+      outline: readOutline,
+      render,
+      readOutline,
+      readSection,
+      headingStyles,
+      headingLevel,
+      headings,
+      toHtml,
+      documentPage,
+      sectionXml,
+      altChunk,
+      partsOf
+    };
+  }
+});
+
+// src/formats/xlsx-styles.js
+var require_xlsx_styles = __commonJS({
+  "src/formats/xlsx-styles.js"(exports2, module2) {
+    "use strict";
+    var { elements, attr } = require_xml();
+    var { colour } = require_css();
+    function argb(el) {
+      if (!el)
+        return null;
+      const rgb = attr(el, "rgb");
+      if (!rgb)
+        return null;
+      const hex = rgb.length === 8 ? rgb.slice(2) : rgb;
+      return colour(hex);
+    }
+    var at = (list, id) => id === null || id === void 0 ? null : list[Number(id)] || null;
+    function readFonts(stylesXml) {
+      return elements(elements(stylesXml, "fonts")[0] || "", "font").map((font) => {
+        const css = {};
+        if (elements(font, "b")[0])
+          css["font-weight"] = "bold";
+        if (elements(font, "i")[0])
+          css["font-style"] = "italic";
+        if (elements(font, "u")[0])
+          css["text-decoration"] = "underline";
+        const fg = argb(elements(font, "color")[0]);
+        if (fg)
+          css.color = fg;
+        const size = attr(elements(font, "sz")[0] || "", "val");
+        if (size)
+          css["font-size"] = Math.round(Number(size) * 100) / 100 + "pt";
+        return css;
+      });
+    }
+    function readFills(stylesXml) {
+      return elements(elements(stylesXml, "fills")[0] || "", "fill").map((fill) => {
+        const pattern = elements(fill, "patternFill")[0] || "";
+        if (!/patternType="solid"/.test(pattern))
+          return {};
+        const fg = argb(elements(pattern, "fgColor")[0]);
+        return fg ? { background: fg } : {};
+      });
+    }
+    var SIDE = { left: "border-left", right: "border-right", top: "border-top", bottom: "border-bottom" };
+    var edgeWidth = (style) => /thick|medium/.test(style) ? "2px" : "1px";
+    var edgeStyle = (style) => /dash/.test(style) ? "dashed" : /dot|hair/.test(style) ? "dotted" : /double/.test(style) ? "double" : "solid";
+    function readBorders(stylesXml) {
+      return elements(elements(stylesXml, "borders")[0] || "", "border").map((border) => {
+        const css = {};
+        for (const [side, prop] of Object.entries(SIDE)) {
+          const edge = elements(border, side)[0];
+          const style = edge && attr(edge, "style");
+          if (!style)
+            continue;
+          css[prop] = edgeWidth(style) + " " + edgeStyle(style) + " " + (argb(elements(edge, "color")[0]) || "#808080");
+        }
+        return css;
+      });
+    }
+    var HALIGN = { left: "left", center: "center", right: "right", justify: "justify" };
+    var VALIGN = { top: "top", center: "middle", bottom: "bottom" };
+    function readCellFormats(stylesXml, parts) {
+      return elements(elements(stylesXml, "cellXfs")[0] || "", "xf").map((xf) => {
+        const css = Object.assign(
+          {},
+          at(parts.fonts, attr(xf, "fontId")),
+          at(parts.fills, attr(xf, "fillId")),
+          at(parts.borders, attr(xf, "borderId"))
+        );
+        const align = elements(xf, "alignment")[0];
+        if (align) {
+          const h = HALIGN[attr(align, "horizontal")];
+          const v = VALIGN[attr(align, "vertical")];
+          if (h)
+            css["text-align"] = h;
+          if (v)
+            css["vertical-align"] = v;
+        }
+        return css;
+      });
+    }
+    function readStyles(stylesXml) {
+      const xml = stylesXml || "";
+      const parts = { fonts: readFonts(xml), fills: readFills(xml), borders: readBorders(xml) };
+      const formats2 = readCellFormats(xml, parts);
+      return { format: (s) => s === null || s === void 0 || s === "" ? {} : formats2[Number(s)] || {} };
+    }
+    function columnWidths(sheetXml) {
+      const out = [];
+      for (const col of elements(elements(sheetXml || "", "cols")[0] || "", "col")) {
+        const width = Number(attr(col, "width"));
+        const min = Number(attr(col, "min"));
+        const max = Number(attr(col, "max"));
+        if (!width || !min)
+          continue;
+        for (let c = min; c <= max; c++)
+          out[c - 1] = { width: Math.round(width * 7) + "px" };
+      }
+      return out;
+    }
+    module2.exports = { readStyles, columnWidths, argb, readFonts, readFills, readBorders };
+  }
+});
+
+// src/formats/xlsx-format.js
+var require_xlsx_format = __commonJS({
+  "src/formats/xlsx-format.js"(exports2, module2) {
+    "use strict";
+    var BUILTIN = {
+      0: "General",
+      1: "0",
+      2: "0.00",
+      3: "#,##0",
+      4: "#,##0.00",
+      9: "0%",
+      10: "0.00%",
+      11: "0.00E+00",
+      12: "# ?/?",
+      13: "# ??/??",
+      14: "m/d/yyyy",
+      15: "d-mmm-yy",
+      16: "d-mmm",
+      17: "mmm-yy",
+      18: "h:mm AM/PM",
+      19: "h:mm:ss AM/PM",
+      20: "h:mm",
+      21: "h:mm:ss",
+      22: "m/d/yyyy h:mm",
+      37: "#,##0 ;(#,##0)",
+      38: "#,##0 ;[Red](#,##0)",
+      39: "#,##0.00;(#,##0.00)",
+      40: "#,##0.00;[Red](#,##0.00)",
+      45: "mm:ss",
+      46: "[h]:mm:ss",
+      47: "mmss.0",
+      48: "##0.0E+0",
+      49: "@"
+    };
+    function* tokens(code) {
+      for (let i = 0; i < code.length; ) {
+        const ch = code[i];
+        if (ch === '"') {
+          const end = code.indexOf('"', i + 1);
+          const to = end < 0 ? code.length : end;
+          yield { literal: true, text: code.slice(i + 1, to) };
+          i = to + 1;
+        } else if (ch === "\\") {
+          yield { literal: true, text: code[i + 1] || "" };
+          i += 2;
+        } else if (ch === "_") {
+          yield { literal: true, text: " " };
+          i += 2;
+        } else if (ch === "*") {
+          i += 2;
+        } else if (ch === "[") {
+          const end = code.indexOf("]", i);
+          const to = end < 0 ? code.length : end;
+          yield { bracket: code.slice(i + 1, to) };
+          i = to + 1;
+        } else {
+          yield { text: ch };
+          i += 1;
+        }
+      }
+    }
+    function sections(code) {
+      const out = [[]];
+      for (const t2 of tokens(code)) {
+        if (!t2.literal && !t2.bracket && t2.text === ";")
+          out.push([]);
+        else
+          out[out.length - 1].push(t2);
+      }
+      return out;
+    }
+    var CURRENCY = /^\$([^-]*)/;
+    var bracketText = (body) => {
+      const m = CURRENCY.exec(body);
+      return m ? m[1] : "";
+    };
+    var DATE_CHARS = /[ymdhs]/i;
+    var isDate = (parts) => parts.some((t2) => !t2.literal && !t2.bracket && DATE_CHARS.test(t2.text));
+    var pad = (n, w) => String(Math.floor(Math.abs(n))).padStart(w, "0");
+    var dateOf = (serial) => new Date(Math.round((serial - 25569) * 864e5));
+    var MONTHS = [
+      "January",
+      "February",
+      "March",
+      "April",
+      "May",
+      "June",
+      "July",
+      "August",
+      "September",
+      "October",
+      "November",
+      "December"
+    ];
+    var DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    var LONG_AMPM = /^am\/pm$/i;
+    var SHORT_AMPM = /^a\/p$/i;
+    function dateParts(parts) {
+      const spelled = (at, n) => parts.slice(at, at + n).map((p) => p.literal || p.bracket !== void 0 ? " " : p.text).join("");
+      const out = [];
+      for (let i = 0; i < parts.length; ) {
+        const t2 = parts[i];
+        const marker = LONG_AMPM.test(spelled(i, 5)) ? 5 : SHORT_AMPM.test(spelled(i, 3)) ? 3 : 0;
+        if (marker && !t2.literal && t2.bracket === void 0) {
+          out.push({ ampm: marker === 3 });
+          i += marker;
+        } else if (t2.literal || t2.bracket !== void 0 || !DATE_CHARS.test(t2.text)) {
+          out.push(t2);
+          i += 1;
+        } else {
+          const last = out[out.length - 1];
+          if (last && last.date && last.text[0].toLowerCase() === t2.text.toLowerCase())
+            last.text += t2.text;
+          else
+            out.push({ date: true, text: t2.text });
+          i += 1;
+        }
+      }
+      return out;
+    }
+    function formatDate(serial, parts) {
+      const d = dateOf(serial);
+      if (Number.isNaN(d.getTime()))
+        return null;
+      const run = dateParts(parts);
+      const twelve = run.some((t2) => t2.ampm !== void 0);
+      const hours = twelve ? d.getUTCHours() % 12 || 12 : d.getUTCHours();
+      const near = (i, step) => {
+        for (let j = i + step; j >= 0 && j < run.length; j += step) {
+          if (run[j].date)
+            return run[j].text[0].toLowerCase();
+        }
+        return "";
+      };
+      let out = "";
+      run.forEach((t2, i) => {
+        if (t2.bracket !== void 0)
+          return;
+        if (t2.ampm !== void 0) {
+          out += (d.getUTCHours() < 12 ? "AM" : "PM").slice(0, t2.ampm ? 1 : 2);
+          return;
+        }
+        if (!t2.date) {
+          out += t2.text;
+          return;
+        }
+        const code = t2.text.toLowerCase();
+        const n = code.length;
+        if (code[0] === "y")
+          out += n <= 2 ? pad(d.getUTCFullYear() % 100, 2) : String(d.getUTCFullYear());
+        else if (code[0] === "d") {
+          if (n >= 4)
+            out += DAYS[d.getUTCDay()];
+          else if (n === 3)
+            out += DAYS[d.getUTCDay()].slice(0, 3);
+          else
+            out += n === 2 ? pad(d.getUTCDate(), 2) : String(d.getUTCDate());
+        } else if (code[0] === "h")
+          out += n >= 2 ? pad(hours, 2) : String(hours);
+        else if (code[0] === "s")
+          out += n >= 2 ? pad(d.getUTCSeconds(), 2) : String(d.getUTCSeconds());
+        else if (code[0] === "m" && (near(i, -1) === "h" || near(i, 1) === "s")) {
+          out += n >= 2 ? pad(d.getUTCMinutes(), 2) : String(d.getUTCMinutes());
+        } else if (n >= 4)
+          out += MONTHS[d.getUTCMonth()];
+        else if (n === 3)
+          out += MONTHS[d.getUTCMonth()].slice(0, 3);
+        else
+          out += n === 2 ? pad(d.getUTCMonth() + 1, 2) : String(d.getUTCMonth() + 1);
+      });
+      return out;
+    }
+    var PLACEHOLDER = /[0#?]/;
+    function shape(parts) {
+      let digits = "";
+      let percent = 0;
+      const before = [];
+      const after = [];
+      for (const t2 of parts) {
+        if (t2.bracket !== void 0) {
+          (digits ? after : before).push(bracketText(t2.bracket));
+          continue;
+        }
+        if (t2.literal) {
+          (digits ? after : before).push(t2.text);
+          continue;
+        }
+        if (t2.text === "%") {
+          percent += 1;
+          (digits ? after : before).push("%");
+          continue;
+        }
+        if (PLACEHOLDER.test(t2.text) || t2.text === "." || t2.text === "," && digits) {
+          digits += t2.text;
+          continue;
+        }
+        (digits ? after : before).push(t2.text);
+      }
+      return { digits, percent, before: before.join(""), after: after.join("") };
+    }
+    function digitsOf(value, digits) {
+      const dot = digits.indexOf(".");
+      const whole = (dot < 0 ? digits : digits.slice(0, dot)).replace(/,/g, "");
+      const fraction = dot < 0 ? "" : digits.slice(dot + 1).replace(/,/g, "");
+      const decimals = (fraction.match(/[0#?]/g) || []).length;
+      const grouped = /,/.test(dot < 0 ? digits : digits.slice(0, dot));
+      const scale = (/[0#?](,+)$/.exec(digits.replace(/\..*$/, "")) || [, ""])[1].length;
+      let n = Math.abs(value) / Math.pow(1e3, scale);
+      const text = n.toFixed(decimals);
+      let [int, frac] = text.split(".");
+      const least = (whole.match(/0/g) || []).length;
+      if (int === "0" && !least)
+        int = "";
+      else
+        int = int.padStart(least, "0");
+      if (grouped)
+        int = int.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+      return int + (frac ? "." + frac : "");
+    }
+    var UNTRANSLATED = (parts) => parts.some((t2) => !t2.literal && t2.bracket === void 0 && /[eE/]/.test(t2.text));
+    function applySection(value, parts) {
+      if (isDate(parts))
+        return formatDate(value, parts);
+      if (UNTRANSLATED(parts))
+        return null;
+      const { digits, percent, before, after } = shape(parts);
+      if (!PLACEHOLDER.test(digits))
+        return before + after || null;
+      return before + digitsOf(value * Math.pow(100, percent), digits) + after;
+    }
+    var plain = (n) => String(Number(n.toPrecision(11)));
+    function format(value, code) {
+      const n = Number(value);
+      if (!Number.isFinite(n))
+        return null;
+      if (!code || /general/i.test(code))
+        return plain(n);
+      const parts = sections(code);
+      const negative = n < 0 && parts.length > 1;
+      const zero = n === 0 && parts.length > 2;
+      const out = applySection(n, parts[negative ? 1 : zero ? 2 : 0]);
+      if (out === null)
+        return plain(n);
+      return (n < 0 && !negative ? "-" + out : out).trim();
+    }
+    var codeFor = (id, custom) => (custom && custom[id] !== void 0 ? custom[id] : BUILTIN[id]) || null;
+    module2.exports = { format, codeFor, BUILTIN };
+  }
+});
+
+// src/formats/xlsx.js
+var require_xlsx = __commonJS({
+  "src/formats/xlsx.js"(exports2, module2) {
+    "use strict";
+    var { openZip } = require_zip();
+    var { elements, attr, textIn, decodeEntities } = require_xml();
+    var { renderLines, renderHtml, renderFrame } = require_preview();
+    var { clampPosition, normPath, gridToHtml, cellText: textOf, spanning, COVERED, MAX_ROWS, MAX_COLS } = require_util();
+    var { sheet: cssSheet, SHEET_RULES } = require_css();
+    var xlsxStyles = require_xlsx_styles();
+    var xlsxFormat = require_xlsx_format();
+    var MAX_LINES = 60;
+    var SHEET_RE = /^xl\/worksheets\/sheet(\d+)\.xml$/;
+    var clean = (s) => decodeEntities(s).replace(/\s+/g, " ").trim();
+    function colIndex(ref) {
+      let n = 0;
+      for (const ch of String(ref).toUpperCase()) {
+        const code = ch.charCodeAt(0);
+        if (code < 65 || code > 90)
+          break;
+        n = n * 26 + (code - 64);
+      }
+      return n - 1;
+    }
+    function sheetParts(zip) {
+      const rels = /* @__PURE__ */ new Map();
+      for (const r of elements(zip.text("xl/_rels/workbook.xml.rels") || "", "Relationship")) {
+        const id = attr(r, "Id");
+        const target = attr(r, "Target");
+        if (id && target)
+          rels.set(id, normPath("xl/" + target.replace(/^\/+/, "")));
+      }
+      const out = [];
+      for (const sheet of elements(elements(zip.text("xl/workbook.xml") || "", "sheets")[0] || "", "sheet")) {
+        const name = attr(sheet, "name");
+        const part = rels.get(attr(sheet, "r:id"));
+        if (name && part && zip.has(part))
+          out.push({ name, part });
+      }
+      if (out.length)
+        return out;
+      return zip.names().filter((n) => SHEET_RE.test(n)).sort((a, b) => Number(SHEET_RE.exec(a)[1]) - Number(SHEET_RE.exec(b)[1])).map((part, i) => ({ name: "Sheet" + (i + 1), part }));
+    }
+    var sharedStrings = (zip) => elements(zip.text("xl/sharedStrings.xml") || "", "si").map((si) => clean(textIn(si, "t")));
+    function numberFormats(stylesXml) {
+      const custom = {};
+      for (const fmt of elements(stylesXml || "", "numFmt")) {
+        const id = attr(fmt, "numFmtId");
+        if (id)
+          custom[id] = attr(fmt, "formatCode") || "";
+      }
+      return elements(elements(stylesXml || "", "cellXfs")[0] || "", "xf").map((xf) => xlsxFormat.codeFor(attr(xf, "numFmtId") || "0", custom));
+    }
+    function cellText(cell, book) {
+      const type = attr(cell, "t");
+      if (type === "inlineStr")
+        return clean(textIn(cell, "t"));
+      const raw = clean(textIn(cell, "v"));
+      if (!raw)
+        return "";
+      if (type === "s")
+        return book.strings[Number(raw)] || "";
+      if (type === "b")
+        return raw === "0" ? "FALSE" : "TRUE";
+      if (type === "e" || type === "str")
+        return raw;
+      const shown = xlsxFormat.format(raw, (book.formats || [])[Number(attr(cell, "s") || "0")]);
+      return shown === null ? raw : shown;
+    }
+    function makeCell(cell, book, ctx) {
+      const text = cellText(cell, book);
+      if (!ctx || !ctx.sheet)
+        return text;
+      const cls = ctx.sheet.cls(book.styles.format(attr(cell, "s")));
+      return cls ? { text, cls } : text;
+    }
+    var NO_STYLES = { format: () => ({}) };
+    var rowIndex = (ref) => (parseInt(String(ref).replace(/^[A-Za-z]+/, ""), 10) || 0) - 1;
+    function applyMerges(grid, sheetXml, firstRow) {
+      for (const m of elements(elements(sheetXml, "mergeCells")[0] || "", "mergeCell")) {
+        const [from, to] = String(attr(m, "ref") || "").split(":");
+        if (!to)
+          continue;
+        const top = rowIndex(from) - firstRow;
+        const bottom = rowIndex(to) - firstRow;
+        const left = colIndex(from);
+        const right = Math.min(colIndex(to), left + MAX_COLS);
+        if (top < 0 || left < 0 || !grid[top])
+          continue;
+        grid[top][left] = spanning(grid[top][left], right - left + 1, bottom - top + 1);
+        for (let r = top; r <= bottom && grid[r]; r++) {
+          for (let c = left; c <= right; c++)
+            if (r !== top || c !== left)
+              grid[r][c] = COVERED;
+        }
+      }
+      return grid;
+    }
+    function sheetGrid(sheetXml, book, ctx) {
+      if (!book.styles) {
+        book = { strings: book.strings || [], formats: book.formats || [], styles: NO_STYLES };
+      }
+      const rows = /* @__PURE__ */ new Map();
+      for (const row of elements(sheetXml, "row")) {
+        const cells = [];
+        for (const cell of elements(row, "c")) {
+          const at = colIndex(attr(cell, "r") || "");
+          if (at >= 0 && at < MAX_COLS * 4)
+            cells[at] = makeCell(cell, book, ctx);
+        }
+        if (!cells.some((c) => textOf(c)))
+          continue;
+        rows.set(parseInt(attr(row, "r") || "0", 10) || rows.size + 1, cells);
+        if (rows.size >= MAX_ROWS)
+          break;
+      }
+      if (!rows.size)
+        return [];
+      const keys = [...rows.keys()];
+      const first = Math.min(...keys);
+      const out = [];
+      for (let r = first; r <= Math.max(...keys) && out.length < MAX_ROWS; r++) {
+        const cells = rows.get(r) || [];
+        out.push(Array.from({ length: cells.length }, (_, i) => cells[i] || ""));
+      }
+      return applyMerges(out, sheetXml, first - 1);
+    }
+    function bookOf(absPath) {
+      const zip = openZip(absPath);
+      if (!zip)
+        return null;
+      const sheets = sheetParts(zip);
+      if (!sheets.length)
+        return null;
+      const stylesXml = zip.text("xl/styles.xml");
+      return {
+        zip,
+        sheets,
+        strings: sharedStrings(zip),
+        formats: numberFormats(stylesXml),
+        styles: xlsxStyles.readStyles(stylesXml)
+      };
+    }
+    var gridAt = (book, position, ctx) => {
+      const n = clampPosition(position, book.sheets.length);
+      const sheetXml = book.zip.text(book.sheets[n - 1].part) || "";
+      return { n, name: book.sheets[n - 1].name, sheetXml, grid: sheetGrid(sheetXml, book, ctx) };
+    };
+    async function readOutline(absPath) {
+      const book = bookOf(absPath);
+      return book ? book.sheets.map((s, i) => ({ title: s.name, position: i + 1 })) : [];
+    }
+    async function readSection(absPath, position) {
+      const book = bookOf(absPath);
+      if (!book)
+        return null;
+      const { n, name, grid } = gridAt(book, position);
+      const lines = grid.map((cells) => cells.map(textOf).filter(Boolean).join(" \xB7 ")).filter(Boolean);
+      return { title: name, body: lines.slice(0, MAX_LINES), position: n, total: book.sheets.length };
+    }
+    async function render(el, req) {
+      const book = bookOf(req.abs);
+      if (!req.isCurrent() || !book)
+        return false;
+      const ctx = { sheet: cssSheet("x") };
+      const { name, sheetXml, grid } = gridAt(book, req.position, ctx);
+      const html = gridToHtml(grid, { header: false, cols: xlsxStyles.columnWidths(sheetXml) });
+      if (html) {
+        const css = [SHEET_RULES, ctx.sheet.text()].join("\n");
+        const framed = renderFrame(el, {
+          html,
+          css,
+          width: req.width,
+          onFail: () => {
+            renderHtml(el, { html, width: req.width, css });
+          }
+        });
+        if (framed !== false)
+          return framed;
+        const done = renderHtml(el, { html, width: req.width, css });
+        if (done !== false)
+          return done;
+      }
+      const lines = grid.map((cells) => cells.map(textOf).filter(Boolean).join(" \xB7 ")).filter(Boolean);
+      return renderLines(el, { title: name, body: lines.slice(0, MAX_LINES), width: req.width });
+    }
+    module2.exports = {
+      exts: ["xlsx", "xlsm", "xltx", "xltm"],
+      // Excel takes the fragment as part of the file name, exactly as Word and PowerPoint do.
+      anchorKind: null,
+      outline: readOutline,
+      render,
+      readOutline,
+      readSection,
+      sheetParts,
+      sheetGrid,
+      bookOf,
+      gridAt,
+      colIndex,
+      numberFormats
+    };
+  }
+});
+
+// src/formats/csv.js
+var require_csv = __commonJS({
+  "src/formats/csv.js"(exports2, module2) {
+    "use strict";
+    var fs2 = require("fs");
+    var { renderLines, renderHtml } = require_preview();
+    var { gridToHtml, MAX_ROWS, MAX_COLS } = require_util();
+    var { SHEET_RULES } = require_css();
+    var MAX_LINES = 60;
+    function delimiter(text, ext) {
+      if (ext === "tsv")
+        return "	";
+      const line = text.slice(0, text.indexOf("\n") + 1 || text.length);
+      const count = (ch) => line.split(ch).length - 1;
+      const tabs = count("	");
+      const semis = count(";");
+      const commas = count(",");
+      if (tabs >= semis && tabs >= commas && tabs)
+        return "	";
+      if (semis > commas)
+        return ";";
+      return ",";
+    }
+    function parse(text, sep) {
+      const rows = [];
+      let row = [];
+      let field = "";
+      let quoted = false;
+      for (let i = 0; i < text.length; i++) {
+        const c = text[i];
+        if (quoted) {
+          if (c === '"') {
+            if (text[i + 1] === '"') {
+              field += '"';
+              i++;
+            } else
+              quoted = false;
+          } else
+            field += c;
+        } else if (c === '"') {
+          quoted = true;
+        } else if (c === sep) {
+          row.push(field);
+          field = "";
+        } else if (c === "\n" || c === "\r") {
+          if (c === "\r" && text[i + 1] === "\n")
+            i++;
+          row.push(field);
+          rows.push(row);
+          row = [];
+          field = "";
+          if (rows.length > MAX_ROWS + 1)
+            break;
+        } else
+          field += c;
+      }
+      if (field !== "" || row.length) {
+        row.push(field);
+        rows.push(row);
+      }
+      return rows.filter((r) => r.some((cell) => cell.trim() !== ""));
+    }
+    function grid(absPath, ext) {
+      let text;
+      try {
+        text = fs2.readFileSync(absPath, "utf8").replace(/^﻿/, "");
+      } catch (e) {
+        return null;
+      }
+      if (!text.trim())
+        return [];
+      const rows = parse(text, delimiter(text, ext));
+      return rows.slice(0, MAX_ROWS).map((r) => r.slice(0, MAX_COLS).map((c) => c.trim()));
+    }
+    async function render(el, req) {
+      const rows = grid(req.abs, req.ext);
+      if (!req.isCurrent() || !rows)
+        return false;
+      const html = gridToHtml(rows, { header: rows.length > 1 });
+      if (html) {
+        const done = renderHtml(el, { html, width: req.width, css: SHEET_RULES });
+        if (done !== false)
+          return done;
+      }
+      const lines = rows.map((r) => r.filter(Boolean).join(" \xB7 ")).filter(Boolean);
+      return renderLines(el, { title: "", body: lines.slice(0, MAX_LINES), width: req.width });
+    }
+    module2.exports = {
+      exts: ["csv", "tsv"],
+      // A CSV is opened in whatever the OS hands .csv to; there is no page to land on.
+      anchorKind: null,
+      render,
+      parse,
+      delimiter,
+      grid
     };
   }
 });
@@ -2659,7 +5579,10 @@ var require_formats = __commonJS({
     var epub = require_epub();
     var media = require_media();
     var odf = require_odf();
-    var HANDLERS = [pdf, image, pptx, html, text, epub, media, odf];
+    var docx = require_docx();
+    var xlsx = require_xlsx();
+    var csv = require_csv();
+    var HANDLERS = [pdf, image, pptx, html, text, epub, media, odf, docx, xlsx, csv];
     var byExt = /* @__PURE__ */ new Map();
     for (const h of HANDLERS)
       for (const e of h.exts)
@@ -2685,6 +5608,10 @@ var require_formats = __commonJS({
       return h.anchorFor(entry) || null;
     };
     var hasOsAnchor = (ext) => anchorKind(ext) !== null;
+    var positionUnit = (ext) => {
+      const h = handlerFor(ext);
+      return h && h.positionUnit || "page";
+    };
     var positionLabel = (ext, n, to) => {
       if (!(n > 1) && !(to > 1))
         return null;
@@ -2729,6 +5656,7 @@ var require_formats = __commonJS({
       anchorKind,
       anchorFor,
       hasOsAnchor,
+      positionUnit,
       positionLabel,
       outline,
       render,
@@ -2750,7 +5678,7 @@ var require_suggest2 = __commonJS({
       kindText: (e) => {
         if (e.kind !== "section")
           return e.lang;
-        return formats2.anchorKind(e.lang) === "page" ? "p." + e.page : baseName(e.path);
+        return formats2.anchorKind(e.lang) === "page" ? "p." + e.position : baseName(e.path);
       }
     });
     module2.exports = { ReferenceSuggest: ReferenceSuggest2 };
@@ -2913,7 +5841,7 @@ var require_hover = __commonJS({
     var formats2 = require_formats();
     var { Popover } = require_popover();
     var PREVIEW_WIDTH = 420;
-    var keyOf = (e) => e.path + ":" + (e.page || e.line || 1);
+    var keyOf = (e) => e.path + ":" + (e.position || e.line || 1);
     var HoverPreview2 = class {
       constructor(plugin) {
         this.plugin = plugin;
@@ -2961,17 +5889,18 @@ var require_hover = __commonJS({
         const root = this.plugin.codeRoot();
         const abs = root ? nodePath2.join(root, entry.path) : entry.path;
         const ext = (entry.lang || "").toLowerCase();
-        const page = entry.page || 1;
+        const position = entry.position || 1;
         const label = entry.title || entry.name;
-        const pos = formats2.positionLabel(ext, page);
+        const pos = formats2.positionLabel(ext, position);
         el.createDiv({ cls: "reference-linker-hover-header", text: pos ? label + "  \xB7  " + pos : label });
         const body = el.createDiv({ cls: "reference-linker-hover-body" });
         this.release();
         const cleanup = await formats2.render(body, {
           abs,
           ext,
-          page,
+          position,
           width: PREVIEW_WIDTH,
+          view: this.plugin.settings.documentView,
           app: this.plugin.app,
           component: this.plugin,
           isCurrent: () => ctx.isCurrent()
@@ -3015,13 +5944,22 @@ var require_embed = __commonJS({
       const from = parseInt(m[1], 10);
       return { from, to: Math.max(from, m[2] ? parseInt(m[2], 10) : from) };
     }
+    function parseTimecode(s) {
+      const t3 = String(s).trim();
+      if (/^\d+$/.test(t3))
+        return parseInt(t3, 10);
+      const m = /^(?:(\d+):)?(\d{1,2}):(\d{2})$/.exec(t3);
+      if (!m)
+        return null;
+      return parseInt(m[1] || "0", 10) * 3600 + parseInt(m[2], 10) * 60 + parseInt(m[3], 10);
+    }
     function parseSpec(source) {
-      const spec = { target: "", page: "", width: "", title: "" };
+      const spec = { target: "", page: "", time: "", width: "", title: "" };
       for (const raw of source.split("\n")) {
         const line = raw.trim();
         if (!line)
           continue;
-        const m = /^(page|width|title)\s*:\s*(.*)$/i.exec(line);
+        const m = /^(page|time|width|title)\s*:\s*(.*)$/i.exec(line);
         if (m)
           spec[m[1].toLowerCase()] = m[2].trim();
         else if (!spec.target)
@@ -3035,7 +5973,7 @@ var require_embed = __commonJS({
         return { path: target.slice(0, h), frag: target.slice(h + 1).trim() };
       const m = /^(.+?):(\d+(?:-\d+)?)\s*$/.exec(target);
       if (m)
-        return { path: m[1], frag: "page=" + m[2] };
+        return { path: m[1], frag: "at=" + m[2] };
       return { path: target, frag: "" };
     }
     function resolve(plugin, spec) {
@@ -3043,19 +5981,12 @@ var require_embed = __commonJS({
       if (!target)
         return { error: t2("embed.empty") };
       const { path: rawPath, frag } = splitTarget2(target);
-      let relPath, name = null, page = null, to = null, anchor = null;
+      let relPath, name = null, position = null, to = null, anchor = null;
       const byPath = looksLikePath(rawPath);
       if (byPath) {
         const norm = rawPath.split("\\").join("/").replace(/^\.?\//, "");
         const hit = plugin.lookup(norm)[0];
         relPath = hit ? hit.path : norm;
-        const pm = /^(?:page|t)=(\d+(?:[-–]\d+)?)$/i.exec(frag);
-        if (pm) {
-          const sp = parseSpan(pm[1]);
-          page = sp.from;
-          to = sp.to;
-        } else if (frag)
-          anchor = frag;
       } else {
         const f = plugin.parseQuery(target);
         const matches = plugin.entriesByName(f.name).filter((m) => plugin.entryPassesFilter(m, f));
@@ -3067,34 +5998,75 @@ var require_embed = __commonJS({
         const e = matches.find((m) => m.kind === "section") || matches[0];
         relPath = e.path;
         name = e.name;
-        page = e.page;
+        position = e.position;
       }
       const ext = nodePath2.extname(relPath).slice(1).toLowerCase();
+      const timed = formats2.positionUnit(ext) === "time";
+      const wrongUnit = () => ({ error: t2(timed ? "embed.needsTime" : "embed.needsPage", { path: relPath }) });
+      if (byPath && frag) {
+        const pm = /^page=(\d+(?:[-–]\d+)?)$/i.exec(frag);
+        const tm = /^t=(.+)$/i.exec(frag);
+        const legacy = /^at=(\d+(?:-\d+)?)$/i.exec(frag);
+        if (legacy) {
+          const sp = parseSpan(legacy[1]);
+          position = sp.from;
+          to = timed ? sp.from : sp.to;
+        } else if (pm) {
+          if (timed)
+            return wrongUnit();
+          const sp = parseSpan(pm[1]);
+          position = sp.from;
+          to = sp.to;
+        } else if (tm) {
+          if (!timed)
+            return wrongUnit();
+          const at = parseTimecode(tm[1]);
+          if (at == null)
+            return wrongUnit();
+          position = at;
+          to = at;
+        } else {
+          anchor = frag;
+        }
+      }
       if (anchor) {
         const sec = plugin.entriesIn(relPath).find((x) => x.kind === "section" && x.anchor === anchor);
         if (!sec)
           return { error: t2("embed.notFound", { query: target }) };
-        page = sec.page;
+        position = sec.position;
         name = sec.name;
       }
-      const span = parseSpan(spec.page);
-      if (span) {
-        page = span.from;
-        to = span.to;
+      if (spec.page) {
+        if (timed)
+          return wrongUnit();
+        const span = parseSpan(spec.page);
+        if (span) {
+          position = span.from;
+          to = span.to;
+        }
       }
-      page = page || 1;
-      to = to && to >= page ? to : page;
+      if (spec.time) {
+        if (!timed)
+          return wrongUnit();
+        const at = parseTimecode(spec.time);
+        if (at == null)
+          return wrongUnit();
+        position = at;
+        to = at;
+      }
+      position = position || 1;
+      to = to && to >= position ? to : position;
       if (!formats2.canOutline(ext))
-        to = page;
-      to = Math.min(to, page + MAX_RANGE - 1);
+        to = position;
+      to = Math.min(to, position + MAX_RANGE - 1);
       if (name === null) {
-        const sec = page === to && plugin.entriesIn(relPath).find((x) => x.kind === "section" && x.page === page);
+        const sec = position === to && plugin.entriesIn(relPath).find((x) => x.kind === "section" && x.position === position);
         name = sec ? sec.name : baseName(relPath);
       }
       const root = plugin.codeRoot();
       const absPath = root ? nodePath2.join(root, relPath) : relPath;
-      const kind = page > 1 || to > page ? "section" : "file";
-      return { absPath, relPath, ext, page, to, name, entry: { name, kind, path: relPath, line: page, page } };
+      const kind = position > 1 || to > position ? "section" : "file";
+      return { absPath, relPath, ext, position, to, name, entry: { name, kind, path: relPath, line: position, position } };
     }
     var ReferenceEmbed = class extends MarkdownRenderChild {
       constructor(containerEl, plugin, spec) {
@@ -3114,7 +6086,7 @@ var require_embed = __commonJS({
           this.unsub();
         this.release();
       }
-      // Open the embedded document at its page — the same path the open/insert commands use.
+      // Open the embedded document where it points — the same path the open/insert commands use.
       open() {
         const e = this.res && this.res.entry;
         if (!e)
@@ -3155,7 +6127,7 @@ var require_embed = __commonJS({
         this.res = res;
         const cached = res.relPath && this.plugin.fileCache.get(res.relPath);
         const mtime = cached ? cached.mtimeMs : null;
-        const sig = res.error ? "err:" + res.error : res.absPath + "|" + res.page + "-" + res.to + "|" + mtime + "|" + this.width();
+        const sig = res.error ? "err:" + res.error : res.absPath + "|" + res.position + "-" + res.to + "|" + mtime + "|" + this.width();
         if (!force && sig === this.lastSig && (res.error || mtime != null))
           return;
         this.lastSig = sig;
@@ -3167,7 +6139,7 @@ var require_embed = __commonJS({
         el.empty();
         el.addClass("reference-linker-embed");
         const header = el.createDiv({ cls: "reference-linker-embed-header mod-clickable" });
-        const pos = formats2.positionLabel(res.ext, res.page, res.to);
+        const pos = formats2.positionLabel(res.ext, res.position, res.to);
         header.createSpan({ text: this.spec.title || res.name + (pos ? "  \xB7  " + pos : "") });
         header.addEventListener("click", () => this.open());
         const body = el.createDiv({ cls: "reference-linker-embed-body" });
@@ -3179,13 +6151,14 @@ var require_embed = __commonJS({
         this.release();
         const cleanups = [];
         let drew = false;
-        for (let p = res.page; p <= res.to; p++) {
-          const slot = res.to > res.page ? body.createDiv({ cls: "reference-linker-embed-slot" }) : body;
+        for (let p = res.position; p <= res.to; p++) {
+          const slot = res.to > res.position ? body.createDiv({ cls: "reference-linker-embed-slot" }) : body;
           const cleanup = await formats2.render(slot, {
             abs: res.absPath,
             ext: res.ext,
-            page: p,
+            position: p,
             width: this.width(),
+            view: this.plugin.settings.documentView,
             app: this.plugin.app,
             component: this,
             isCurrent: () => token === this.renderId
@@ -3231,7 +6204,7 @@ var require_embed = __commonJS({
         ctx.addChild(new ReferenceEmbed(el, plugin, parseSpec(source)));
       });
     }
-    module2.exports = { registerEmbed: registerEmbed2, resolve, splitTarget: splitTarget2, parseSpan, parseSpec };
+    module2.exports = { registerEmbed: registerEmbed2, resolve, splitTarget: splitTarget2, parseSpan, parseSpec, parseTimecode };
   }
 });
 
@@ -3524,7 +6497,7 @@ var require_actualize2 = __commonJS({
         return url.replace(/#.*$/, "") + "#" + r.anchor;
       return POS_RE.test(url) ? url.replace(POS_RE, (_, sep, key) => sep + key + "=" + r.line) : url + "#page=" + r.line;
     };
-    var movedFrom = (plugin, url, r) => r.anchor != null ? plugin.targetAnchor(url) || "\u2014" : String(plugin.targetPage(url));
+    var movedFrom = (plugin, url, r) => r.anchor != null ? plugin.targetAnchor(url) || "\u2014" : String(plugin.targetPosition(url));
     var movedTo = (r) => r.anchor != null ? r.anchor : String(r.line);
     var rewriteUpdates = (plugin, text, selected) => {
       const collect = selected == null;
@@ -3552,7 +6525,7 @@ var require_actualize2 = __commonJS({
       const { url, title } = splitTarget2(target);
       if (title)
         return null;
-      const sec = plugin.sectionAtLinkPage(url);
+      const sec = plugin.sectionAtLink(url);
       return sec ? "[" + name + "](" + withTitle2(url, formatBinding2({ sec: sec.name })) + ")" : null;
     });
     var { refreshStaleLinks } = shared;
@@ -3562,7 +6535,7 @@ var require_actualize2 = __commonJS({
       if (!url || !/^file:\/\//i.test(url))
         return null;
       const b = ownsBinding2(title, OWNER2) ? parseBinding2(title) : null;
-      return b ? plugin.urlBindState(url, b, plugin.targetPage(url)) : null;
+      return b ? plugin.urlBindState(url, b, plugin.targetPosition(url)) : null;
     }
     var methods = {
       linkState(target) {
@@ -3903,7 +6876,7 @@ var require_settings_tab = __commonJS({
   "src/settings-tab.js"(exports2, module2) {
     "use strict";
     var { PluginSettingTab, Setting } = require("obsidian");
-    var { PRESETS: PRESETS2 } = require_constants();
+    var { PRESETS: PRESETS2, parseExtensions: parseExtensions2 } = require_constants();
     var { knownExtensions } = require_formats();
     var { FolderSuggest, folderSuggestAvailable } = require_folder_suggest();
     var { renderFolderList } = require_folder_list();
@@ -3992,6 +6965,11 @@ var require_settings_tab = __commonJS({
           this.plugin.rebuildIndex(true);
         }));
         containerEl.createEl("div", { cls: "reference-linker-note", text: t2("set.extensions.known", { exts: knownExtensions().join(" ") }) });
+        const enabled = parseExtensions2(s.extensions);
+        const off = knownExtensions().filter((e) => !enabled.has(e));
+        if (off.length && enabled.size) {
+          containerEl.createEl("div", { cls: "reference-linker-note", text: t2("set.extensions.off", { exts: off.join(" ") }) });
+        }
         folderList(t2("set.skipFolders.name"), t2("set.skipFolders.desc"), "skipDirs");
         new Setting(containerEl).setName(t2("set.autoRefresh.name")).setDesc(t2("set.autoRefresh.desc")).addToggle((c) => c.setValue(s.autoRefresh).onChange(async (v) => {
           s.autoRefresh = v;
@@ -4096,6 +7074,10 @@ var require_settings_tab = __commonJS({
           s.hoverPreview = v;
           await save(false);
         }));
+        new Setting(containerEl).setName(t2("set.documentView.name")).setDesc(t2("set.documentView.desc")).addDropdown((c) => c.addOption("column", t2("set.documentView.column")).addOption("page", t2("set.documentView.page")).setValue(s.documentView === "page" ? "page" : "column").onChange(async (v) => {
+          s.documentView = v;
+          await save(false);
+        }));
         new Setting(containerEl).setName(t2("set.heading.links")).setHeading();
         new Setting(containerEl).setName(t2("set.markStaleLinks.name")).setDesc(t2("set.markStaleLinks.desc")).addToggle((c) => c.setValue(s.markStaleLinks).onChange(async (v) => {
           s.markStaleLinks = v;
@@ -4127,7 +7109,7 @@ var require_api = __commonJS({
     var { splitTarget: splitTarget2 } = require_markdown();
     var { bindingOwner: bindingOwner2, ownsBinding: ownsBinding2 } = require_binding();
     var OWNER2 = "reference";
-    var pick = (e) => ({ name: e.name, kind: e.kind, ext: e.lang, path: e.path, page: e.page || 1 });
+    var pick = (e) => ({ name: e.name, kind: e.kind, ext: e.lang, path: e.path, position: e.position || 1 });
     module2.exports = {
       buildApi() {
         const plugin = this;
@@ -4135,7 +7117,7 @@ var require_api = __commonJS({
           version: this.manifest.version,
           // The absolute reference root the scan paths resolve against.
           root: () => this.codeRoot(),
-          // Every indexed entry: { name, kind, ext, path, page } (kind is 'file' or 'section').
+          // Every indexed entry: { name, kind, ext, path, position } (kind is 'file' or 'section').
           getEntries: () => this.index.map(pick),
           // One row per indexed file: { name, path, ext, entries }.
           getFiles: () => this.apiFiles(),
@@ -4280,6 +7262,8 @@ var require_en = __commonJS({
       "embed.fmt.file": "Document (first page)",
       "embed.fmt.section": "Section \u201C{name}\u201D",
       "embed.unsupported": "Reference Linker: no inline preview for {path}",
+      "embed.needsTime": "Reference Linker: {path} is a recording \u2014 position it with \u201Ctime: 1:30\u201D or \u201C#t=1:30\u201D, not a page",
+      "embed.needsPage": "Reference Linker: {path} has pages, not a running time \u2014 position it with \u201Cpage: 3\u201D or \u201C#page=3\u201D",
       "preview.empty": "Nothing to show here",
       "embed.menu.open": "Open document",
       "embed.notFound": "Reference Linker: no document matches \u201C{query}\u201D",
@@ -4301,6 +7285,7 @@ var require_en = __commonJS({
       "set.extensions.desc": "Which file types to index, space- or comma-separated (e.g. .pdf .pptx .png). Empty = nothing is indexed.",
       "set.extensions.known": "Previews and section indexing: {exts}. Any other extension is indexed by file name only.",
       "set.extensions.addAll": "Add every supported extension",
+      "set.extensions.off": "Supported but not enabled here: {exts}",
       "set.skipFolders.desc": "A bare name (node_modules) is skipped at any depth; a path with a slash (archive/raw) skips only that folder, relative to the reference root.",
       "set.autoRefresh.desc": "Watch the scan folders and rebuild the index when documents change.",
       "set.info": "Reference root: {root} \xB7 {entries} indexed",
@@ -4315,6 +7300,10 @@ var require_en = __commonJS({
       "set.editors.add": "+ Add viewer",
       "set.contextMenu.desc": "Add \u201CFind and convert to link\u201D and \u201CFind and open document\u201D to the editor right-click menu \u2014 plus \u201CCopy reference link\u201D when you right-click a reference link.",
       // Settings — hover preview
+      "set.documentView.name": "Document preview shape",
+      "set.documentView.desc": "How a Word or OpenDocument preview is laid out. Either way the page size and margins come from the file itself.",
+      "set.documentView.column": "Text column \u2014 height follows the content",
+      "set.documentView.page": "Whole page \u2014 the sheet the document declares",
       "set.hoverPreview.name": "Preview on hover",
       "set.hoverPreview.desc": "Preview the referenced document when you hover a link. In live preview, hold Ctrl/Cmd; in reading view a plain hover is enough.",
       // Settings — links
@@ -4376,6 +7365,8 @@ var require_ru = __commonJS({
       "embed.fmt.file": "\u0414\u043E\u043A\u0443\u043C\u0435\u043D\u0442 (\u043F\u0435\u0440\u0432\u0430\u044F \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0430)",
       "embed.fmt.section": "\u0420\u0430\u0437\u0434\u0435\u043B \xAB{name}\xBB",
       "embed.unsupported": "Reference Linker: \u043D\u0435\u0442 \u0438\u043D\u043B\u0430\u0439\u043D-\u043F\u0440\u0435\u0432\u044C\u044E \u0434\u043B\u044F {path}",
+      "embed.needsTime": "Reference Linker: {path} \u2014 \u0437\u0430\u043F\u0438\u0441\u044C, \u043F\u043E\u0437\u0438\u0446\u0438\u044F \u0437\u0430\u0434\u0430\u0451\u0442\u0441\u044F \xABtime: 1:30\xBB \u0438\u043B\u0438 \xAB#t=1:30\xBB, \u0430 \u043D\u0435 \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0435\u0439",
+      "embed.needsPage": "Reference Linker: \u0443 {path} \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u044B, \u0430 \u043D\u0435 \u0432\u0440\u0435\u043C\u044F \u2014 \u043F\u043E\u0437\u0438\u0446\u0438\u044F \u0437\u0430\u0434\u0430\u0451\u0442\u0441\u044F \xABpage: 3\xBB \u0438\u043B\u0438 \xAB#page=3\xBB",
       "preview.empty": "\u0417\u0434\u0435\u0441\u044C \u043D\u0435\u0447\u0435\u0433\u043E \u043F\u043E\u043A\u0430\u0437\u0430\u0442\u044C",
       "embed.menu.open": "\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442",
       "embed.notFound": "Reference Linker: \u043D\u0435\u0442 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430 \u0434\u043B\u044F \xAB{query}\xBB",
@@ -4397,6 +7388,7 @@ var require_ru = __commonJS({
       "set.extensions.desc": "\u041A\u0430\u043A\u0438\u0435 \u0442\u0438\u043F\u044B \u0444\u0430\u0439\u043B\u043E\u0432 \u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u0442\u044C, \u0447\u0435\u0440\u0435\u0437 \u043F\u0440\u043E\u0431\u0435\u043B \u0438\u043B\u0438 \u0437\u0430\u043F\u044F\u0442\u0443\u044E (\u043D\u0430\u043F\u0440. .pdf .pptx .png). \u041F\u0443\u0441\u0442\u043E = \u043D\u0438\u0447\u0435\u0433\u043E \u043D\u0435 \u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u0443\u0435\u0442\u0441\u044F.",
       "set.extensions.known": "\u041F\u0440\u0435\u0432\u044C\u044E \u0438 \u0438\u043D\u0434\u0435\u043A\u0441\u0430\u0446\u0438\u044F \u0440\u0430\u0437\u0434\u0435\u043B\u043E\u0432: {exts}. \u041E\u0441\u0442\u0430\u043B\u044C\u043D\u044B\u0435 \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u044F \u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u0443\u044E\u0442\u0441\u044F \u0442\u043E\u043B\u044C\u043A\u043E \u043F\u043E \u0438\u043C\u0435\u043D\u0438 \u0444\u0430\u0439\u043B\u0430.",
       "set.extensions.addAll": "\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u0432\u0441\u0435 \u043F\u043E\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0435\u043C\u044B\u0435 \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u044F",
+      "set.extensions.off": "\u041F\u043E\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u044E\u0442\u0441\u044F, \u043D\u043E \u0437\u0434\u0435\u0441\u044C \u043D\u0435 \u0432\u043A\u043B\u044E\u0447\u0435\u043D\u044B: {exts}",
       "set.skipFolders.desc": "\u041F\u0440\u043E\u0441\u0442\u043E \u0438\u043C\u044F (node_modules) \u043F\u0440\u043E\u043F\u0443\u0441\u043A\u0430\u0435\u0442\u0441\u044F \u043D\u0430 \u043B\u044E\u0431\u043E\u0439 \u0433\u043B\u0443\u0431\u0438\u043D\u0435; \u043F\u0443\u0442\u044C \u0441\u043E \u0441\u043B\u044D\u0448\u0435\u043C (archive/raw) \u043F\u0440\u043E\u043F\u0443\u0441\u043A\u0430\u0435\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u044D\u0442\u0443 \u043F\u0430\u043F\u043A\u0443 \u043E\u0442\u043D\u043E\u0441\u0438\u0442\u0435\u043B\u044C\u043D\u043E \u043A\u043E\u0440\u043D\u044F.",
       "set.autoRefresh.desc": "\u0421\u043B\u0435\u0434\u0438\u0442\u044C \u0437\u0430 \u043F\u0430\u043F\u043A\u0430\u043C\u0438 \u0441\u043A\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F \u0438 \u043F\u0435\u0440\u0435\u0441\u0442\u0440\u0430\u0438\u0432\u0430\u0442\u044C \u0438\u043D\u0434\u0435\u043A\u0441 \u043F\u0440\u0438 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0438 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u043E\u0432.",
       "set.info": "\u041A\u043E\u0440\u0435\u043D\u044C \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u043E\u0432: {root} \xB7 \u043F\u0440\u043E\u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043E {entries}",
@@ -4411,6 +7403,10 @@ var require_ru = __commonJS({
       "set.editors.add": "+ \u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u043F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0449\u0438\u043A",
       "set.contextMenu.desc": "\u0414\u043E\u0431\u0430\u0432\u043B\u044F\u0442\u044C \xAB\u041D\u0430\u0439\u0442\u0438 \u0438 \u043F\u0440\u0435\u0432\u0440\u0430\u0442\u0438\u0442\u044C \u0432 \u0441\u0441\u044B\u043B\u043A\u0443\xBB \u0438 \xAB\u041D\u0430\u0439\u0442\u0438 \u0438 \u043E\u0442\u043A\u0440\u044B\u0442\u044C \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\xBB \u0432 \u043C\u0435\u043D\u044E \u043F\u043E \u043F\u0440\u0430\u0432\u043E\u043C\u0443 \u043A\u043B\u0438\u043A\u0443 \u2014 \u043F\u043B\u044E\u0441 \xAB\u0421\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\xBB \u043F\u0440\u0438 \u043A\u043B\u0438\u043A\u0435 \u043F\u043E \u0441\u0441\u044B\u043B\u043A\u0435.",
       // Settings — hover preview
+      "set.documentView.name": "\u0412\u0438\u0434 \u043F\u0440\u0435\u0432\u044C\u044E \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430",
+      "set.documentView.desc": "\u041A\u0430\u043A \u0440\u0430\u0441\u043A\u043B\u0430\u0434\u044B\u0432\u0430\u0435\u0442\u0441\u044F \u043F\u0440\u0435\u0432\u044C\u044E Word \u0438\u043B\u0438 OpenDocument. \u0412 \u043E\u0431\u043E\u0438\u0445 \u0441\u043B\u0443\u0447\u0430\u044F\u0445 \u0440\u0430\u0437\u043C\u0435\u0440 \u043B\u0438\u0441\u0442\u0430 \u0438 \u043F\u043E\u043B\u044F \u0431\u0435\u0440\u0443\u0442\u0441\u044F \u0438\u0437 \u0441\u0430\u043C\u043E\u0433\u043E \u0444\u0430\u0439\u043B\u0430.",
+      "set.documentView.column": "\u041A\u043E\u043B\u043E\u043D\u043A\u0430 \u0442\u0435\u043A\u0441\u0442\u0430 \u2014 \u0432\u044B\u0441\u043E\u0442\u0430 \u043F\u043E \u0441\u043E\u0434\u0435\u0440\u0436\u0438\u043C\u043E\u043C\u0443",
+      "set.documentView.page": "\u0426\u0435\u043B\u0430\u044F \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0430 \u2014 \u043B\u0438\u0441\u0442, \u043E\u0431\u044A\u044F\u0432\u043B\u0435\u043D\u043D\u044B\u0439 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u043E\u043C",
       "set.hoverPreview.name": "\u041F\u0440\u0435\u0432\u044C\u044E \u043F\u0440\u0438 \u043D\u0430\u0432\u0435\u0434\u0435\u043D\u0438\u0438",
       "set.hoverPreview.desc": "\u041F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0442\u044C \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442 \u043F\u0440\u0438 \u043D\u0430\u0432\u0435\u0434\u0435\u043D\u0438\u0438 \u043D\u0430 \u0441\u0441\u044B\u043B\u043A\u0443. \u0412 \u0440\u0435\u0436\u0438\u043C\u0435 live preview \u0443\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0439\u0442\u0435 Ctrl/Cmd; \u0432 \u0440\u0435\u0436\u0438\u043C\u0435 \u0447\u0442\u0435\u043D\u0438\u044F \u0434\u043E\u0441\u0442\u0430\u0442\u043E\u0447\u043D\u043E \u043F\u0440\u043E\u0441\u0442\u043E\u0433\u043E \u043D\u0430\u0432\u0435\u0434\u0435\u043D\u0438\u044F.",
       // Settings — links
@@ -4468,12 +7464,12 @@ function namesPath(p, full) {
 }
 var previewEntry = (plugin, ref, title, url) => {
   const b = parseBinding(title);
-  const at = plugin.sectionAtLinkPage(url);
+  const at = plugin.sectionAtLink(url);
   if (b && b.sec) {
     const named = at && at.name === b.sec ? at : plugin.sectionNamed(ref.entry.path, b.sec);
-    return Object.assign({}, ref.entry, { page: named && named.page || ref.page, title: b.sec });
+    return Object.assign({}, ref.entry, { position: named && named.position || ref.position, title: b.sec });
   }
-  return Object.assign({}, ref.entry, { page: at && at.page || ref.page, title: at ? at.name : "" });
+  return Object.assign({}, ref.entry, { position: at && at.position || ref.position, title: at ? at.name : "" });
 };
 var ReferenceLinkerPlugin = class extends Plugin {
   async onload() {
@@ -4743,11 +7739,11 @@ var ReferenceLinkerPlugin = class extends Plugin {
   }
   // The position a link asks for — only ever read, never overridden. A #page fragment or a
   // {page} query both count, and #t= is the same question asked of a recording.
-  targetPage(dec) {
+  targetPosition(dec) {
     const m = /[#?&](?:page|t)=(\d+)/i.exec(dec);
     return m ? parseInt(m[1], 10) : 1;
   }
-  // The document a link points at, from its target alone: { entry, page }, or null for a
+  // The document a link points at, from its target alone: { entry, position }, or null for a
   // link into no indexed document. The label is never consulted.
   refForTarget(target) {
     if (!target)
@@ -4755,7 +7751,7 @@ var ReferenceLinkerPlugin = class extends Plugin {
     const dec = this.decodeTarget(target);
     const cached = this.fileCache.get(this.targetIndexedFile(dec));
     const entry = cached && cached.entries[0];
-    return entry ? { entry, page: this.targetPage(dec) } : null;
+    return entry ? { entry, position: this.targetPosition(dec) } : null;
   }
   entriesIn(rel) {
     return rel ? (this.fileCache.get(rel) || { entries: [] }).entries : [];
@@ -4772,7 +7768,7 @@ var ReferenceLinkerPlugin = class extends Plugin {
   // reference root pointed at the wrong folder, or a document not scanned yet, would
   // otherwise turn every link red at once. An unknown document gets no verdict rather than
   // a guess. Code Linker already worked this way; this is the two brought into line.
-  urlBindState(url, b, storedPage) {
+  urlBindState(url, b, storedPosition) {
     if (!b.sec)
       return null;
     const rel = this.targetIndexedFile(this.decodeTarget(url));
@@ -4786,7 +7782,7 @@ var ReferenceLinkerPlugin = class extends Plugin {
       return null;
     if (kind === "id")
       return this.idBindState(url, hits);
-    return bindStateFrom(hits.map((e) => e.page), storedPage);
+    return bindStateFrom(hits.map((e) => e.position), storedPosition);
   }
   // An id-anchored link drifts when its heading is still there under a different id, which
   // is what regenerating a doc site does. A heading with no id anchors as the empty fragment,
@@ -4807,7 +7803,7 @@ var ReferenceLinkerPlugin = class extends Plugin {
   }
   // The outline section beginning on a link's page — what it can be pinned to. Null when the
   // page is mid-section or the document has no outline.
-  sectionAtLinkPage(url) {
+  sectionAtLink(url) {
     const rel = url && this.targetIndexedFile(this.decodeTarget(url));
     if (!rel)
       return null;
@@ -4819,13 +7815,13 @@ var ReferenceLinkerPlugin = class extends Plugin {
       const frag = this.targetAnchor(this.decodeTarget(url));
       return frag && entries.find((e) => e.kind === "section" && e.anchor === frag) || null;
     }
-    const page = this.targetPage(url);
-    return entries.find((e) => e.kind === "section" && e.page === page) || null;
+    const position = this.targetPosition(url);
+    return entries.find((e) => e.kind === "section" && e.position === position) || null;
   }
   // The title pinning would produce and the section it pins to, or null when there's nothing
   // to pin or it would change nothing.
   linkPinOption(link) {
-    const sec = this.sectionAtLinkPage(link.target);
+    const sec = this.sectionAtLink(link.target);
     if (!sec)
       return null;
     const title = formatBinding({ sec: sec.name });
@@ -4916,7 +7912,7 @@ var ReferenceLinkerPlugin = class extends Plugin {
   // version (bumped when indexing logic changes, e.g. PDF sections were added). When it
   // changes, the per-file cache is stale even if mtimes haven't moved, so we drop it.
   indexSignature() {
-    return JSON.stringify({ v: 4, exts: [...parseExtensions(this.settings.extensions)].sort() });
+    return JSON.stringify({ v: 5, exts: [...parseExtensions(this.settings.extensions)].sort() });
   }
   async loadCache() {
     try {
@@ -5143,9 +8139,9 @@ var ReferenceLinkerPlugin = class extends Plugin {
     }
     const base = nodePath.basename(abs).replace(/\.[^.]+$/, "");
     const ext = nodePath.extname(abs).slice(1).toLowerCase();
-    const entries = [{ name: base, kind: "file", lang: ext, path: rel, line: 1, page: 1 }];
+    const entries = [{ name: base, kind: "file", lang: ext, path: rel, line: 1, position: 1 }];
     for (const s of await formats.outline(ext, abs)) {
-      const entry = { name: s.title, kind: "section", lang: ext, path: rel, line: s.page, page: s.page };
+      const entry = { name: s.title, kind: "section", lang: ext, path: rel, line: s.position, position: s.position };
       if (s.anchor)
         entry.anchor = s.anchor;
       entries.push(entry);
@@ -5162,7 +8158,7 @@ var ReferenceLinkerPlugin = class extends Plugin {
   buildUri(e, template) {
     const tpl = template || this.settings.uriTemplate;
     const absFwd = this.entryPath(e).split(nodePath.sep).join("/");
-    const page = String(e.page || 1);
+    const page = String(e.position || 1);
     const encPath = (p) => p.split("/").map(encodeURIComponent).join("/");
     let uri = tpl.replace(/{abs}/g, encodeURI(absFwd)).replace(/{path}/g, encPath(e.path)).replace(/{page}/g, page).replace(/{name}/g, encodeURIComponent(e.name));
     const anchor = formats.anchorFor(e);
@@ -5189,8 +8185,8 @@ var ReferenceLinkerPlugin = class extends Plugin {
   // (a #id for HTML, #page= for a PDF, the ordinal page otherwise), any document by its path.
   embedFormats(e) {
     const out = [];
-    if (e.kind === "section" && e.page) {
-      const frag = formats.anchorFor(e) || "page=" + e.page;
+    if (e.kind === "section" && e.position) {
+      const frag = formats.anchorFor(e) || "page=" + e.position;
       out.push({ label: t("embed.fmt.section", { name: e.name }), body: e.path + "#" + frag });
     }
     out.push({ label: t("embed.fmt.file"), body: e.path });

@@ -22,6 +22,10 @@ const DEFAULT_SETTINGS = {
   askOnInsert: true, // ask which viewer format to use on every insert (vs. the default)
   autoRefresh: true, // watch scan folders and rebuild the index when files change
   hoverPreview: true, // show the preview popover when hovering a reference link
+  // How a document preview is shaped. 'column' keeps the page's width and side margins and lets
+  // the height follow the content, which suits a section; 'page' draws the whole sheet the
+  // document declares, top and bottom margins included. Either way the size comes from the file.
+  documentView: 'column',
   markStaleLinks: true, // underline links whose target document moved or is gone
   minChars: 1,
   maxResults: 12,

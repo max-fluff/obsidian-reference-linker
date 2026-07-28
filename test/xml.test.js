@@ -42,3 +42,25 @@ describe('attr', () => {
     assert.strictEqual(attr('<rootfile media-type="x"/>', 'full-path'), null);
   });
 });
+
+describe('elementsOf', () => {
+  const { elementsOf } = require('../src/xml');
+
+  it('reads several tags in document order, not grouped by tag', () => {
+    // Read one tag at a time, an ODF row's covered cells cannot be put back where they sat, and
+    // every cell after one lands a column to the left of the column it belongs to.
+    const row = '<a:c>1</a:c><a:covered/><a:c>2</a:c>';
+    assert.deepStrictEqual(elementsOf(row, ['a:covered', 'a:c']).map((e) => e.tag),
+      ['a:c', 'a:covered', 'a:c']);
+  });
+
+  it('does not take a longer name for a shorter one', () => {
+    assert.strictEqual(elementsOf('<a:cell-ref/>', ['a:cell']).length, 0);
+  });
+
+  it('keeps a nested element inside its parent', () => {
+    const out = elementsOf('<a:g><a:g><a:x/></a:g></a:g>', ['a:g']);
+    assert.strictEqual(out.length, 1);
+    assert.strictEqual(out[0].xml, '<a:g><a:g><a:x/></a:g></a:g>');
+  });
+});

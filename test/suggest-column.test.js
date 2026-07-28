@@ -16,11 +16,11 @@ let kindText;
   const baseName = (p) => nodePath.basename(p).replace(/\.[^.]+$/, '');
   kindText = (e) => {
     if (e.kind !== 'section') return e.lang;
-    return formats.anchorKind(e.lang) === 'page' ? 'p.' + e.page : baseName(e.path);
+    return formats.anchorKind(e.lang) === 'page' ? 'p.' + e.position : baseName(e.path);
   };
 }
 
-const section = (lang, path, page) => ({ kind: 'section', lang, path, page });
+const section = (lang, path, position) => ({ kind: 'section', lang, path, position });
 
 describe('suggestion middle column', () => {
   it('shows the page for a PDF section — the page is real', () => {

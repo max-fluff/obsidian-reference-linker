@@ -15,7 +15,7 @@ const ReferenceSuggest = createSigilSuggest({
   cls: 'reference-linker',
   kindText: (e) => {
     if (e.kind !== 'section') return e.lang;
-    return formats.anchorKind(e.lang) === 'page' ? 'p.' + e.page : baseName(e.path);
+    return formats.anchorKind(e.lang) === 'page' ? 'p.' + e.position : baseName(e.path);
   },
 });
 

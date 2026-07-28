@@ -8,7 +8,7 @@ const { openZip } = require('../zip');
 const { elements, attr, textIn } = require('../xml');
 const { blockLines, inlineText } = require('./html');
 const { renderLines, renderHtml } = require('./preview');
-const { clampPage, normPath, assetSrc } = require('./util');
+const { clampPosition, normPath, assetSrc } = require('./util');
 
 const MAX_LINES = 60;
 
@@ -107,37 +107,37 @@ async function readOutline(absPath) {
   const out = [];
   const seen = new Set();
   for (const entry of readToc(doc.zip, doc.spine)) {
-    const page = at.get(entry.path);
+    const position = at.get(entry.path);
     // Several TOC entries can point into one chapter; only the first can be told apart by
     // position, and the rest would be duplicates under different names.
-    if (!page || seen.has(entry.title + '|' + page)) continue;
-    seen.add(entry.title + '|' + page);
-    out.push({ title: entry.title, page });
+    if (!position || seen.has(entry.title + '|' + position)) continue;
+    seen.add(entry.title + '|' + position);
+    out.push({ title: entry.title, position });
   }
   return out;
 }
 
 // `path` is the chapter's own zip path, kept so images inside it resolve against it.
-function chapterAt(doc, page) {
-  const n = clampPage(page, doc.spine.order.length);
+function chapterAt(doc, position) {
+  const n = clampPosition(position, doc.spine.order.length);
   const path = doc.spine.order[n - 1];
   const xhtml = doc.zip.text(path);
   if (!xhtml) return null;
   const body = elements(xhtml, 'body')[0] || xhtml;
   const lines = blockLines(body);
-  return { title: lines[0] || '', body: lines.slice(1, MAX_LINES), raw: body, path, page: n, total: doc.spine.order.length };
+  return { title: lines[0] || '', body: lines.slice(1, MAX_LINES), raw: body, path, position: n, total: doc.spine.order.length };
 }
 
-async function readChapter(absPath, page) {
+async function readChapter(absPath, position) {
   const doc = open(absPath);
-  return doc ? chapterAt(doc, page) : null;
+  return doc ? chapterAt(doc, position) : null;
 }
 
 // A chapter is XHTML, so it renders as markup, and its images live in the same zip — read
 // each member and hand it to the inliner as bytes.
 async function render(el, req) {
   const doc = open(req.abs);
-  const ch = doc && chapterAt(doc, req.page);
+  const ch = doc && chapterAt(doc, req.position);
   if (!req.isCurrent() || !ch) return false;
   if (ch.raw) {
     const done = renderHtml(el, { html: ch.raw, width: req.width, loadImage: imageLoader(doc, ch.path) });

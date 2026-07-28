@@ -19,24 +19,24 @@ const load = async () => {
   plugin.targetIndexedFile = (dec) => (/Deck/.test(dec) ? 'Deck.pptx' : /Doc/.test(dec) ? 'Doc.html' : 'Spec.pdf');
   plugin.fileCache = new Map([
     ['Spec.pdf', { entries: [
-      { name: 'Spec', kind: 'file', path: 'Spec.pdf', lang: 'pdf', page: 1 },
-      { name: 'Details', kind: 'section', path: 'Spec.pdf', lang: 'pdf', page: 7 },
+      { name: 'Spec', kind: 'file', path: 'Spec.pdf', lang: 'pdf', position: 1 },
+      { name: 'Details', kind: 'section', path: 'Spec.pdf', lang: 'pdf', position: 7 },
     ] }],
     // The title slide is a section too, which is what makes an unanchored link pinnable to
     // the wrong thing: every one of them reads as page 1.
     ['Deck.pptx', { entries: [
-      { name: 'Deck', kind: 'file', path: 'Deck.pptx', lang: 'pptx', page: 1 },
-      { name: 'Title Slide', kind: 'section', path: 'Deck.pptx', lang: 'pptx', page: 1 },
-      { name: 'Pan and Zoom', kind: 'section', path: 'Deck.pptx', lang: 'pptx', page: 7 },
+      { name: 'Deck', kind: 'file', path: 'Deck.pptx', lang: 'pptx', position: 1 },
+      { name: 'Title Slide', kind: 'section', path: 'Deck.pptx', lang: 'pptx', position: 1 },
+      { name: 'Pan and Zoom', kind: 'section', path: 'Deck.pptx', lang: 'pptx', position: 7 },
     ] }],
     // One heading anchors, one never had an id — the mix a real doc page has. "Notes" appears
     // twice: once with no id (a link pins to that), once with an id — the duplicate-heading trap.
     ['Doc.html', { entries: [
-      { name: 'Doc', kind: 'file', path: 'Doc.html', lang: 'html', page: 1 },
-      { name: 'Title', kind: 'section', path: 'Doc.html', lang: 'html', page: 1 },
-      { name: 'Options', kind: 'section', path: 'Doc.html', lang: 'html', page: 5, anchor: '_options' },
-      { name: 'Notes', kind: 'section', path: 'Doc.html', lang: 'html', page: 6 },
-      { name: 'Notes', kind: 'section', path: 'Doc.html', lang: 'html', page: 8, anchor: '_notes' },
+      { name: 'Doc', kind: 'file', path: 'Doc.html', lang: 'html', position: 1 },
+      { name: 'Title', kind: 'section', path: 'Doc.html', lang: 'html', position: 1 },
+      { name: 'Options', kind: 'section', path: 'Doc.html', lang: 'html', position: 5, anchor: '_options' },
+      { name: 'Notes', kind: 'section', path: 'Doc.html', lang: 'html', position: 6 },
+      { name: 'Notes', kind: 'section', path: 'Doc.html', lang: 'html', position: 8, anchor: '_notes' },
     ] }],
   ]);
   return plugin;
@@ -77,7 +77,7 @@ describe('stale marks', () => {
     const plugin = await load();
     const fixed = plugin.actualizedTarget(link('file:///x/Spec.pdf?page=3', 'Details'));
     assert.ok(/\?page=7/.test(fixed) && !/#page=/.test(fixed), 'query page not fixed in place: ' + fixed);
-    assert.strictEqual(plugin.targetPage(fixed), 7);
+    assert.strictEqual(plugin.targetPosition(fixed), 7);
   });
 
   it('does not flag a link pinned to an id-less heading that a same-named id sibling shadows', async () => {
@@ -128,23 +128,23 @@ describe('stale marks on id anchors', () => {
 describe('pinning', () => {
   it('pins an html link to the heading its fragment names', async () => {
     const plugin = await load();
-    const sec = plugin.sectionAtLinkPage('file:///x/Doc.html#_options');
+    const sec = plugin.sectionAtLink('file:///x/Doc.html#_options');
     assert.strictEqual(sec && sec.name, 'Options');
   });
 
   it('will not pin an html link whose fragment names no heading', async () => {
     const plugin = await load();
-    assert.strictEqual(plugin.sectionAtLinkPage('file:///x/Doc.html#_nope'), null);
+    assert.strictEqual(plugin.sectionAtLink('file:///x/Doc.html#_nope'), null);
   });
 
   it('will not pin an unanchored link, which has no page to read a section off', async () => {
     const plugin = await load();
-    assert.strictEqual(plugin.sectionAtLinkPage('file:///x/Deck.pptx'), null);
+    assert.strictEqual(plugin.sectionAtLink('file:///x/Deck.pptx'), null);
   });
 
   it('still pins a PDF link to the section on its page', async () => {
     const plugin = await load();
-    const sec = plugin.sectionAtLinkPage('file:///x/Spec.pdf#page=7');
+    const sec = plugin.sectionAtLink('file:///x/Spec.pdf#page=7');
     assert.strictEqual(sec && sec.name, 'Details');
   });
 });

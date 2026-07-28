@@ -18,12 +18,12 @@ const tmp = (body) => {
 describe('html outline', () => {
   it('anchors a heading that carries an id', async () => {
     const o = await readOutline(tmp('<h2 id="_options">OPTIONS</h2><p>x</p>'));
-    assert.deepStrictEqual(o, [{ title: 'OPTIONS', page: 1, anchor: '_options' }]);
+    assert.deepStrictEqual(o, [{ title: 'OPTIONS', position: 1, anchor: '_options' }]);
   });
 
   it('indexes a heading with no id, but without an anchor', async () => {
     const o = await readOutline(tmp('<h1>Manual Page</h1>'));
-    assert.deepStrictEqual(o, [{ title: 'Manual Page', page: 1, anchor: undefined }]);
+    assert.deepStrictEqual(o, [{ title: 'Manual Page', position: 1, anchor: undefined }]);
   });
 
   it('takes the anchor off a child <a>, as older generators emit it', async () => {
@@ -48,7 +48,7 @@ describe('html outline', () => {
 
   it('numbers sections in document order', async () => {
     const o = await readOutline(tmp('<h1>A</h1><h2 id="b">B</h2><h3 id="c">C</h3>'));
-    assert.deepStrictEqual(o.map((s) => s.page), [1, 2, 3]);
+    assert.deepStrictEqual(o.map((s) => s.position), [1, 2, 3]);
   });
 
   it('is empty for a file that is not there', async () => {
@@ -88,7 +88,7 @@ describe('html section text', () => {
   it('clamps a section past the end to the last one', async () => {
     const sec = await readSection(tmp('<h2 id="a">A</h2><h2 id="b">B</h2>'), 99);
     assert.strictEqual(sec.title, 'B');
-    assert.strictEqual(sec.page, 2);
+    assert.strictEqual(sec.position, 2);
   });
 
   it('falls back to the whole document when there are no headings at all', async () => {

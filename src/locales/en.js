@@ -58,6 +58,8 @@ module.exports = {
   'embed.fmt.file': 'Document (first page)',
   'embed.fmt.section': 'Section “{name}”',
   'embed.unsupported': 'Reference Linker: no inline preview for {path}',
+  'embed.needsTime': 'Reference Linker: {path} is a recording — position it with “time: 1:30” or “#t=1:30”, not a page',
+  'embed.needsPage': 'Reference Linker: {path} has pages, not a running time — position it with “page: 3” or “#page=3”',
   'preview.empty': 'Nothing to show here',
   'embed.menu.open': 'Open document',
   'embed.notFound': 'Reference Linker: no document matches “{query}”',
@@ -83,6 +85,7 @@ module.exports = {
   'set.extensions.desc': 'Which file types to index, space- or comma-separated (e.g. .pdf .pptx .png). Empty = nothing is indexed.',
   'set.extensions.known': 'Previews and section indexing: {exts}. Any other extension is indexed by file name only.',
   'set.extensions.addAll': 'Add every supported extension',
+  'set.extensions.off': 'Supported but not enabled here: {exts}',
   'set.skipFolders.desc': 'A bare name (node_modules) is skipped at any depth; a path with a slash (archive/raw) skips only that folder, relative to the reference root.',
   'set.autoRefresh.desc': 'Watch the scan folders and rebuild the index when documents change.',
   'set.info': 'Reference root: {root} · {entries} indexed',
@@ -99,6 +102,10 @@ module.exports = {
   'set.contextMenu.desc': 'Add “Find and convert to link” and “Find and open document” to the editor right-click menu — plus “Copy reference link” when you right-click a reference link.',
 
   // Settings — hover preview
+  'set.documentView.name': 'Document preview shape',
+  'set.documentView.desc': 'How a Word or OpenDocument preview is laid out. Either way the page size and margins come from the file itself.',
+  'set.documentView.column': 'Text column — height follows the content',
+  'set.documentView.page': 'Whole page — the sheet the document declares',
   'set.hoverPreview.name': 'Preview on hover',
   'set.hoverPreview.desc': 'Preview the referenced document when you hover a link. In live preview, hold Ctrl/Cmd; in reading view a plain hover is enough.',
 

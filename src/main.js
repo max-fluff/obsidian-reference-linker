@@ -71,7 +71,7 @@ function namesPath(p, full) {
   return i === 0 || a[i - 1] === '/';
 }
 
-// The hover entry: the document, the link's page, and the name of the section it lands in.
+// The hover entry: the document, where the link lands, and the name of the section there.
 //
 // A pinned link says which section in its own binding. An unpinned one doesn't, but the
 // outline still knows what begins on that page — so the header names the section either way
@@ -83,12 +83,12 @@ function namesPath(p, full) {
 // its top. The binding names the section and the index knows where that section sits.
 const previewEntry = (plugin, ref, title, url) => {
   const b = parseBinding(title);
-  const at = plugin.sectionAtLinkPage(url);
+  const at = plugin.sectionAtLink(url);
   if (b && b.sec) {
     const named = at && at.name === b.sec ? at : plugin.sectionNamed(ref.entry.path, b.sec);
-    return Object.assign({}, ref.entry, { page: (named && named.page) || ref.page, title: b.sec });
+    return Object.assign({}, ref.entry, { position: (named && named.position) || ref.position, title: b.sec });
   }
-  return Object.assign({}, ref.entry, { page: (at && at.page) || ref.page, title: at ? at.name : '' });
+  return Object.assign({}, ref.entry, { position: (at && at.position) || ref.position, title: at ? at.name : '' });
 };
 
 class ReferenceLinkerPlugin extends Plugin {
@@ -394,19 +394,19 @@ class ReferenceLinkerPlugin extends Plugin {
 
   // The position a link asks for — only ever read, never overridden. A #page fragment or a
   // {page} query both count, and #t= is the same question asked of a recording.
-  targetPage(dec) {
+  targetPosition(dec) {
     const m = /[#?&](?:page|t)=(\d+)/i.exec(dec);
     return m ? parseInt(m[1], 10) : 1;
   }
 
-  // The document a link points at, from its target alone: { entry, page }, or null for a
+  // The document a link points at, from its target alone: { entry, position }, or null for a
   // link into no indexed document. The label is never consulted.
   refForTarget(target) {
     if (!target) return null;
     const dec = this.decodeTarget(target);
     const cached = this.fileCache.get(this.targetIndexedFile(dec));
     const entry = cached && cached.entries[0];
-    return entry ? { entry, page: this.targetPage(dec) } : null;
+    return entry ? { entry, position: this.targetPosition(dec) } : null;
   }
 
   entriesIn(rel) {
@@ -426,7 +426,7 @@ class ReferenceLinkerPlugin extends Plugin {
   // reference root pointed at the wrong folder, or a document not scanned yet, would
   // otherwise turn every link red at once. An unknown document gets no verdict rather than
   // a guess. Code Linker already worked this way; this is the two brought into line.
-  urlBindState(url, b, storedPage) {
+  urlBindState(url, b, storedPosition) {
     if (!b.sec) return null;
     const rel = this.targetIndexedFile(this.decodeTarget(url));
     if (!rel) return null;
@@ -438,7 +438,7 @@ class ReferenceLinkerPlugin extends Plugin {
     // first as moved, because a link that stores no page reads as page 1.
     if (!kind) return null;
     if (kind === 'id') return this.idBindState(url, hits);
-    return bindStateFrom(hits.map((e) => e.page), storedPage);
+    return bindStateFrom(hits.map((e) => e.position), storedPosition);
   }
 
   // An id-anchored link drifts when its heading is still there under a different id, which
@@ -461,7 +461,7 @@ class ReferenceLinkerPlugin extends Plugin {
 
   // The outline section beginning on a link's page — what it can be pinned to. Null when the
   // page is mid-section or the document has no outline.
-  sectionAtLinkPage(url) {
+  sectionAtLink(url) {
     const rel = url && this.targetIndexedFile(this.decodeTarget(url));
     if (!rel) return null;
     const kind = formats.anchorKind(extOf(rel));
@@ -473,14 +473,14 @@ class ReferenceLinkerPlugin extends Plugin {
       const frag = this.targetAnchor(this.decodeTarget(url));
       return (frag && entries.find((e) => e.kind === 'section' && e.anchor === frag)) || null;
     }
-    const page = this.targetPage(url);
-    return entries.find((e) => e.kind === 'section' && e.page === page) || null;
+    const position = this.targetPosition(url);
+    return entries.find((e) => e.kind === 'section' && e.position === position) || null;
   }
 
   // The title pinning would produce and the section it pins to, or null when there's nothing
   // to pin or it would change nothing.
   linkPinOption(link) {
-    const sec = this.sectionAtLinkPage(link.target);
+    const sec = this.sectionAtLink(link.target);
     if (!sec) return null;
     const title = formatBinding({ sec: sec.name });
     return title === (link.title || '') ? null : { title, value: sec.name };
@@ -567,7 +567,7 @@ class ReferenceLinkerPlugin extends Plugin {
   // version (bumped when indexing logic changes, e.g. PDF sections were added). When it
   // changes, the per-file cache is stale even if mtimes haven't moved, so we drop it.
   indexSignature() {
-    return JSON.stringify({ v: 4, exts: [...parseExtensions(this.settings.extensions)].sort() });
+    return JSON.stringify({ v: 5, exts: [...parseExtensions(this.settings.extensions)].sort() });
   }
 
   async loadCache() {
@@ -794,11 +794,11 @@ class ReferenceLinkerPlugin extends Plugin {
     // The file-level entry, keyed by extension (no dot) as the "lang".
     const base = nodePath.basename(abs).replace(/\.[^.]+$/, '');
     const ext = nodePath.extname(abs).slice(1).toLowerCase();
-    const entries = [{ name: base, kind: 'file', lang: ext, path: rel, line: 1, page: 1 }];
+    const entries = [{ name: base, kind: 'file', lang: ext, path: rel, line: 1, position: 1 }];
     // A document's outline becomes section entries on their pages (the Phase 2
     // differentiator). Cached with the file, so it is only re-read when the mtime changes.
     for (const s of await formats.outline(ext, abs)) {
-      const entry = { name: s.title, kind: 'section', lang: ext, path: rel, line: s.page, page: s.page };
+      const entry = { name: s.title, kind: 'section', lang: ext, path: rel, line: s.position, position: s.position };
       if (s.anchor) entry.anchor = s.anchor;
       entries.push(entry);
     }
@@ -816,7 +816,7 @@ class ReferenceLinkerPlugin extends Plugin {
   buildUri(e, template) {
     const tpl = template || this.settings.uriTemplate;
     const absFwd = this.entryPath(e).split(nodePath.sep).join('/');
-    const page = String(e.page || 1);
+    const page = String(e.position || 1);
     // Encode segments so #, ?, & or spaces can't rewrite the URL ({abs} keeps the C: colon).
     const encPath = (p) => p.split('/').map(encodeURIComponent).join('/');
     let uri = tpl
@@ -854,8 +854,8 @@ class ReferenceLinkerPlugin extends Plugin {
   // (a #id for HTML, #page= for a PDF, the ordinal page otherwise), any document by its path.
   embedFormats(e) {
     const out = [];
-    if (e.kind === 'section' && e.page) {
-      const frag = formats.anchorFor(e) || ('page=' + e.page);
+    if (e.kind === 'section' && e.position) {
+      const frag = formats.anchorFor(e) || ('page=' + e.position);
       out.push({ label: t('embed.fmt.section', { name: e.name }), body: e.path + '#' + frag });
     }
     out.push({ label: t('embed.fmt.file'), body: e.path });

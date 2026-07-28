@@ -16,8 +16,8 @@ const OWNER = 'reference';
 // never style each other's dialog.
 const PREVIEW_CLASS = 'reference-linker-preview';
 
-// Where a page lives in a link — the same shapes targetPage reads, a hash OR a query, since a
-// custom viewer template can carry {page} in the query. Replacing only a #page= fragment left
+// Where a position lives in a link — the same shapes targetPosition reads, a hash OR a query,
+// since a custom viewer template can carry {page} in the query. Replacing only a #page= left
 // a query-page link with a dead #page= appended and its real ?page= untouched, so targetPage
 // kept reading the old number: the link stayed stale forever and every update rewrote the note.
 const POS_RE = /([#?&])(page|t)=\d+/i;
@@ -35,7 +35,7 @@ const withAnchor = (url, r) => {
 // all reads as a dash rather than an empty cell.
 const movedFrom = (plugin, url, r) => (r.anchor != null
   ? plugin.targetAnchor(url) || '—'
-  : String(plugin.targetPage(url)));
+  : String(plugin.targetPosition(url)));
 const movedTo = (r) => (r.anchor != null ? r.anchor : String(r.line));
 
 // One pass over a note's links. `selected` null is a dry run: apply every fix to build the
@@ -68,7 +68,7 @@ const rewriteUpdates = (plugin, text, selected) => {
 const pinLinksInText = (plugin, text) => rewriteLinks(text, (name, target) => {
   const { url, title } = splitTarget(target);
   if (title) return null;
-  const sec = plugin.sectionAtLinkPage(url);
+  const sec = plugin.sectionAtLink(url);
   return sec ? '[' + name + '](' + withTitle(url, formatBinding({ sec: sec.name })) + ')' : null;
 });
 
@@ -85,7 +85,7 @@ function bindStateOf(plugin, target) {
   const { url, title } = splitTarget(target);
   if (!url || !/^file:\/\//i.test(url)) return null;
   const b = ownsBinding(title, OWNER) ? parseBinding(title) : null;
-  return b ? plugin.urlBindState(url, b, plugin.targetPage(url)) : null;
+  return b ? plugin.urlBindState(url, b, plugin.targetPosition(url)) : null;
 }
 
 // Mixed into the plugin prototype; `this` is the plugin. `target` is the whole markdown

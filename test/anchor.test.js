@@ -17,7 +17,7 @@ const load = async () => {
   return plugin;
 };
 
-const section = (lang, file) => ({ name: 'Details', kind: 'section', lang, path: file, line: 3, page: 3 });
+const section = (lang, file) => ({ name: 'Details', kind: 'section', lang, path: file, line: 3, position: 3 });
 
 describe('section anchors', () => {
   it('gives a PDF section its page fragment', async () => {
@@ -37,7 +37,7 @@ describe('section anchors', () => {
 
   it('anchors a file-level entry in neither format', async () => {
     const plugin = await load();
-    const file = { name: 'Deck', kind: 'file', lang: 'pdf', path: 'Deck.pdf', line: 1, page: 1 };
+    const file = { name: 'Deck', kind: 'file', lang: 'pdf', path: 'Deck.pdf', line: 1, position: 1 };
     assert.strictEqual(plugin.buildUri(file), 'file:///{ref-root}/Deck.pdf');
   });
 });

@@ -44,7 +44,7 @@ async function pageOf(doc, dest) {
   }
 }
 
-// A PDF's outline flattened to [{ title, page }] (1-based, in reading order). Returns []
+// A PDF's outline flattened to [{ title, position }] (1-based, in reading order). Returns []
 // when there's no outline or the file can't be parsed — the caller then falls back to the
 // file-level entry.
 async function readOutline(absPath) {
@@ -58,7 +58,7 @@ async function readOutline(absPath) {
       for (const it of items) {
         const page = await pageOf(doc, it.dest);
         const title = it.title && it.title.trim();
-        if (title && page) out.push({ title, page });
+        if (title && page) out.push({ title, position: page });
         if (it.items && it.items.length) await walk(it.items);
       }
     };

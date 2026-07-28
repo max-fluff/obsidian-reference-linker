@@ -13,8 +13,6 @@ const AUDIO = { mp3: 'audio/mpeg', m4a: 'audio/mp4', wav: 'audio/wav', flac: 'au
 // first try, and only for files small enough to be worth it.
 const BLOB_LIMIT = 96 * 1024 * 1024;
 
-// encodeURI, not per-segment encodeURIComponent: the latter turns the "D:" drive letter into
-// "D%3A" and Windows then resolves nothing. buildUri encodes {abs} the same way.
 // encodeURI keeps the "D:" drive colon (per-segment encoding turns it into %3A and Windows
 // resolves nothing) but leaves # and ? — in a file name those would start a fragment/query
 // and point at the wrong file, so encode them too.
@@ -55,7 +53,7 @@ async function render(el, req) {
   media.style.width = req.width + 'px';
   media.style.maxWidth = '100%';
 
-  const at = Math.max(0, (req.page | 0) - (req.page > 1 ? 0 : 1)); // page 1 means "from the start"
+  const at = Math.max(0, (req.position | 0) - (req.position > 1 ? 0 : 1)); // 1 means "from the start"
   const seek = () => { try { if (at > 0) media.currentTime = at; } catch { /* not seekable */ } };
   media.addEventListener('loadedmetadata', seek, { once: true });
 
@@ -93,6 +91,7 @@ function positionLabel(n) {
 module.exports = {
   exts: [...Object.keys(VIDEO), ...Object.keys(AUDIO)],
   anchorKind: null, // no outline, so nothing writes an anchor; a hand-written #t= still previews
+  positionUnit: 'time',
   positionLabel,
   render,
 };

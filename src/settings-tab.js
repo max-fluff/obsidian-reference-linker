@@ -1,7 +1,7 @@
 'use strict';
 
 const { PluginSettingTab, Setting } = require('obsidian');
-const { PRESETS } = require('./constants');
+const { PRESETS, parseExtensions } = require('./constants');
 const { knownExtensions } = require('./formats');
 const { FolderSuggest, folderSuggestAvailable } = require('./shared/deeplink/folder-suggest');
 const { renderFolderList } = require('./shared/folder-list');
@@ -97,6 +97,13 @@ class ReferenceLinkerSettingTab extends PluginSettingTab {
           this.plugin.rebuildIndex(true);
         }));
     containerEl.createEl('div', { cls: 'reference-linker-note', text: t('set.extensions.known', { exts: knownExtensions().join(' ') }) });
+    // A list written before a format existed never picks it up, and nothing else would ever say
+    // so: the formats were there, indexed nothing, and read as unsupported.
+    const enabled = parseExtensions(s.extensions);
+    const off = knownExtensions().filter((e) => !enabled.has(e));
+    if (off.length && enabled.size) {
+      containerEl.createEl('div', { cls: 'reference-linker-note', text: t('set.extensions.off', { exts: off.join(' ') }) });
+    }
 
     folderList(t('set.skipFolders.name'), t('set.skipFolders.desc'), 'skipDirs');
 
@@ -184,6 +191,15 @@ class ReferenceLinkerSettingTab extends PluginSettingTab {
       .setName(t('set.hoverPreview.name'))
       .setDesc(t('set.hoverPreview.desc'))
       .addToggle((c) => c.setValue(s.hoverPreview).onChange(async (v) => { s.hoverPreview = v; await save(false); }));
+
+    new Setting(containerEl)
+      .setName(t('set.documentView.name'))
+      .setDesc(t('set.documentView.desc'))
+      .addDropdown((c) => c
+        .addOption('column', t('set.documentView.column'))
+        .addOption('page', t('set.documentView.page'))
+        .setValue(s.documentView === 'page' ? 'page' : 'column')
+        .onChange(async (v) => { s.documentView = v; await save(false); }));
 
     new Setting(containerEl).setName(t('set.heading.links')).setHeading();
 

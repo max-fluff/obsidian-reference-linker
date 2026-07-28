@@ -46,6 +46,22 @@ function elements(xml, tag) {
   return out;
 }
 
+// Elements of any of `tags`, in document order rather than grouped by tag. A row of an ODF
+// sheet holds table:table-cell and table:covered-table-cell interleaved, and read separately
+// they cannot be put back in the order that says which column each one is.
+function elementsOf(xml, tags) {
+  const out = [];
+  const open = new RegExp('<(' + tags.join('|') + ')(?=[\\s/>])', 'g');
+  let m;
+  while ((m = open.exec(xml))) {
+    const end = scanElement(xml, m.index, m[1]);
+    if (end < 0) break;
+    out.push({ tag: m[1], xml: xml.slice(m.index, end) });
+    open.lastIndex = end;
+  }
+  return out;
+}
+
 // Index just past the element opening at `start`, tracking nesting of the same tag.
 function scanElement(xml, start, tag) {
   const open = '<' + tag;
@@ -92,4 +108,4 @@ function textIn(source, tag) {
   return out;
 }
 
-module.exports = { decodeEntities, elements, attr, textIn };
+module.exports = { decodeEntities, elements, elementsOf, attr, textIn };

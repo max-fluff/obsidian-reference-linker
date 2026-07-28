@@ -11,8 +11,11 @@ const text = require('./text');
 const epub = require('./epub');
 const media = require('./media');
 const odf = require('./odf');
+const docx = require('./docx');
+const xlsx = require('./xlsx');
+const csv = require('./csv');
 
-const HANDLERS = [pdf, image, pptx, html, text, epub, media, odf];
+const HANDLERS = [pdf, image, pptx, html, text, epub, media, odf, docx, xlsx, csv];
 
 const byExt = new Map();
 for (const h of HANDLERS) for (const e of h.exts) byExt.set(e, h);
@@ -52,6 +55,14 @@ const anchorFor = (entry) => {
 // Whether a link into this format stores a position at all. False means the anchor is ours
 // alone: the preview honours it, an external open lands at the top of the file.
 const hasOsAnchor = (ext) => anchorKind(ext) !== null;
+
+// What a position in this format counts: 'time' for a recording, 'page' for everything with
+// pages, slides, chapters or headings. It decides which spelling an embed accepts, so the two
+// are never confused for one another.
+const positionUnit = (ext) => {
+  const h = handlerFor(ext);
+  return (h && h.positionUnit) || 'page';
+};
 
 // How a position reads in a header — "p.5" or "p.3–5" for a paged document, "2:05" for a
 // recording. Null when the number would not mean a position to a reader: the whole file, or
@@ -102,6 +113,7 @@ module.exports = {
   anchorKind,
   anchorFor,
   hasOsAnchor,
+  positionUnit,
   positionLabel,
   outline,
   render,

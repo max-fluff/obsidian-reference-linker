@@ -15,7 +15,7 @@ const tmp = (body, name = 'doc.md') => {
 describe('text outline', () => {
   it('puts an ATX heading on its line', async () => {
     const o = await readOutline(tmp('intro\n\n## Setup\ntext\n'));
-    assert.deepStrictEqual(o, [{ title: 'Setup', page: 3 }]);
+    assert.deepStrictEqual(o, [{ title: 'Setup', position: 3 }]);
   });
 
   it('reads every heading level', async () => {
@@ -30,7 +30,7 @@ describe('text outline', () => {
 
   it('takes a setext heading as the line above its underline', async () => {
     const o = await readOutline(tmp('Title\n=====\nbody\n'));
-    assert.deepStrictEqual(o, [{ title: 'Title', page: 1 }]);
+    assert.deepStrictEqual(o, [{ title: 'Title', position: 1 }]);
   });
 
   it('ignores a heading inside a fenced block', async () => {

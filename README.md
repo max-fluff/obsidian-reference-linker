@@ -82,8 +82,13 @@ What each format gives you:
 | HTML, XHTML | every heading that carries an `id` | the section's text | yes — `#id`, and the browser is the default app |
 | Markdown, txt, log | headings, on their line | the text itself | no — see below |
 | EPUB | table of contents (EPUB 2 and 3) | the chapter's text | no |
-| PPTX | one per slide | the slide's text | no |
-| ODT, ODP, ODS | headings / slides / sheets | the text | no |
+| DOCX | heading styles | rendered document (lists, tables, images) | no |
+| XLSX | sheets | rendered as a table grid | no |
+| PPTX | one per slide | the slide, drawn — its shapes, tables and pictures | no |
+| ODT | headings | rendered document (lists, tables, images) | no |
+| ODS | sheets | rendered as a table grid | no |
+| ODP, ODG | slides, drawing pages | the page, drawn | no |
+| CSV, TSV | — | rendered as a table grid | no |
 | Audio, video | — | the file, seeked to `#t=` seconds | no |
 | Images | — | the image | — |
 | Anything else | — | — | — |
@@ -93,10 +98,19 @@ javadoc) puts an `id` on nearly every heading, so a link lands on the exact sect
 browser. A heading with no `id` — usually just the page title — is still indexed by name, it
 simply opens the file at the top.
 
-Markdown, HTML and EPUB previews render as documents — headings, lists, code and the images
-they reference (read straight off disk or out of the book), not a page's stylesheet.
+Markdown, HTML, EPUB, Word and ODT previews render as documents — headings, lists, tables,
+code and the images they reference (read straight off disk or out of the file). An HTML page's
+own stylesheet is applied too, confined to the preview so it can't restyle Obsidian. A
+spreadsheet — `.xlsx` or `.ods` — renders as a real table, each cell shown under the number
+format the sheet gives it: a currency column reads as `$32,370.00` and a date as a date, rather
+than as the doubles and day counts they are stored as.
 
-A document with no outline — a PDF without bookmarks, a `.docx`, an `.epub` — is still indexed by file name, and its link still opens it. Only the section entries and the preview are missing.
+Word's sections come from its heading styles, and plenty of real documents have none; a `.docx`
+with no outline is normal rather than a failure, and its preview shows the document either way.
+
+A document with no outline — a PDF without bookmarks, a plain `.docx`, an `.epub` — is still indexed by file name, and its link still opens it. Only the section entries are missing.
+
+Each of those formats is also read under the extensions its own application saves it as: the macro-enabled `.docm .xlsm .pptm .dotm .xltm .potm`, the templates `.dotx .xltx .potx .ott .ots .otp`. They are the same package under another name. The flat single-file ODF (`.fodt .fods .fodp`) is not — it is one XML file rather than a zip, and it is not read.
 
 ### Portable `{ref-root}` links
 
@@ -135,9 +149,10 @@ papers/paper-with-outline.pdf#page=3
 - A path (`papers/report.pdf`) shows the first page; add `#page=N` (or `:N`) for a specific page.
 - An `#id` anchor works too (`guide.html#_options`) — the same fragment a copied HTML section link carries — resolved through the index to its section.
 - A name or section (`Introduction`) is resolved through the index to its file and page.
-- An image path shows the image; a `.pptx` path shows the slide's text.
+- An image path shows the image; a `.pptx` path shows the slide's text; a spreadsheet shows the sheet as a table.
 - A **range** stacks several pages or sections: `report.pdf#page=3-5`, or a `page: 3-5` line. Paged and sectioned formats range; images and media render once. Up to 20 at a time.
-- Optional `key: value` lines after the target tune it: `page: N` (or `N-M`), `width: N`, `title: …`.
+- A recording is positioned **in time, not in pages**: `time: 1:30` (or `1:02:05`, or plain seconds), or `clip.mp4#t=1:30` in the target — the same timecode the header shows. Each format takes only its own unit: `page:` on a recording, or `time:` on a paged document, is an error that names the right key rather than quietly starting from the top.
+- Optional `key: value` lines after the target tune it: `page: N` (or `N-M`) for paged formats, `time: mm:ss` for recordings, plus `width: N`, `title: …`.
 
 <p align="center">
   <img src="docs/images/embed.png" alt="Two rendered reference-link embeds: a PDF page with a title, and an image" width="640">
@@ -237,7 +252,7 @@ The in-memory index is exposed at `app.plugins.plugins['reference-linker'].api`:
 
 | Method | Returns |
 | --- | --- |
-| `getEntries()` | every entry: `{ name, kind, ext, path, page }` (`kind` is `file` or `section`) |
+| `getEntries()` | every entry: `{ name, kind, ext, path, position }` (`kind` is `file` or `section`; `position` is a page, slide, chapter, heading or second, per format) |
 | `getFiles()` | one row per file: `{ name, path, ext, entries }` |
 | `getStats()` | `{ files, entries, byExt, byKind }` |
 | `find(text)` | entries matching a name or path tail |

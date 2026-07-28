@@ -11,7 +11,7 @@ const { bindingOwner, ownsBinding } = require('./shared/binding');
 const OWNER = 'reference';
 
 // A plain copy of an index entry, so a consumer can't mutate our live index.
-const pick = (e) => ({ name: e.name, kind: e.kind, ext: e.lang, path: e.path, page: e.page || 1 });
+const pick = (e) => ({ name: e.name, kind: e.kind, ext: e.lang, path: e.path, position: e.position || 1 });
 
 module.exports = {
   buildApi() {
@@ -21,7 +21,7 @@ module.exports = {
       // The absolute reference root the scan paths resolve against.
       root: () => this.codeRoot(),
 
-      // Every indexed entry: { name, kind, ext, path, page } (kind is 'file' or 'section').
+      // Every indexed entry: { name, kind, ext, path, position } (kind is 'file' or 'section').
       getEntries: () => this.index.map(pick),
 
       // One row per indexed file: { name, path, ext, entries }.

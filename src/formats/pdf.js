@@ -28,7 +28,7 @@ async function render(el, req) {
   const doc = await getDoc(req.abs);
   if (!req.isCurrent() || !doc) return false;
   const canvas = el.createEl('canvas');
-  const ok = await renderPageToCanvas(doc, req.page, canvas, req.width);
+  const ok = await renderPageToCanvas(doc, req.position, canvas, req.width);
   if (!req.isCurrent() || !ok) return false;
   return null;
 }
@@ -36,7 +36,7 @@ async function render(el, req) {
 module.exports = {
   exts: ['pdf'],
   anchorKind: 'page',
-  anchorFor: (e) => (e.kind === 'section' && e.page ? 'page=' + e.page : null),
+  anchorFor: (e) => (e.kind === 'section' && e.position ? 'page=' + e.position : null),
   positionLabel: (n, to) => 'p.' + n + (to && to > n ? '–' + to : ''),
   outline: readOutline,
   render,

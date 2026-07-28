@@ -8,7 +8,7 @@ const fs = require('fs');
 const { isFenceLine } = require('../shared/markdown');
 const { renderLines, renderMarkdown } = require('./preview');
 const { assetLoader } = require('./html');
-const { clampPage } = require('./util');
+const { clampPosition } = require('./util');
 
 const ATX = /^(#{1,6})\s+(.+?)\s*#*\s*$/;
 const SETEXT = /^(=+|-{2,})\s*$/;
@@ -32,11 +32,11 @@ function headings(lines) {
     if (isFenceLine(line)) { fenced = !fenced; continue; }
     if (fenced) continue;
     const atx = ATX.exec(line);
-    if (atx) { out.push({ title: atx[2].trim(), page: i + 1 }); continue; }
+    if (atx) { out.push({ title: atx[2].trim(), position: i + 1 }); continue; }
     // Setext underlines the line above, so the heading is that line, not this one.
     if (SETEXT.test(line) && i > 0) {
       const above = lines[i - 1].trim();
-      if (above && !ATX.test(above) && !isFenceLine(above)) out.push({ title: above, page: i });
+      if (above && !ATX.test(above) && !isFenceLine(above)) out.push({ title: above, position: i });
     }
   }
   return out;
@@ -49,25 +49,25 @@ async function readOutline(absPath) {
 
 // One section: from its heading to the line before the next one. With no headings at all the
 // file previews from the top, which is what a loose .txt wants.
-async function readSection(absPath, page) {
+async function readSection(absPath, position) {
   const lines = readLines(absPath);
   if (!lines) return null;
   const hs = headings(lines);
   if (!hs.length) {
-    return { title: '', body: lines.map((l) => l.trimEnd()).filter(Boolean).slice(0, MAX_LINES), page: 1, total: 1 };
+    return { title: '', body: lines.map((l) => l.trimEnd()).filter(Boolean).slice(0, MAX_LINES), position: 1, total: 1 };
   }
-  const n = clampPage(page, lines.length);
-  let at = hs.findIndex((h) => h.page === n);
+  const n = clampPosition(position, lines.length);
+  let at = hs.findIndex((h) => h.position === n);
   if (at < 0) at = 0;
   const here = hs[at];
   const next = hs[at + 1];
-  const slice = lines.slice(here.page, next ? next.page - 1 : lines.length).map((l) => l.trimEnd());
+  const slice = lines.slice(here.position, next ? next.position - 1 : lines.length).map((l) => l.trimEnd());
   const body = slice.filter(Boolean);
   return {
     title: here.title,
     body: body.slice(0, MAX_LINES),
     raw: slice.slice(0, MAX_LINES).join('\n'),
-    page: here.page,
+    position: here.position,
     total: hs.length,
   };
 }
@@ -75,7 +75,7 @@ async function readSection(absPath, page) {
 const MARKDOWN = new Set(['md', 'markdown']);
 
 async function render(el, req) {
-  const sec = await readSection(req.abs, req.page);
+  const sec = await readSection(req.abs, req.position);
   if (!req.isCurrent() || !sec) return false;
   if (MARKDOWN.has(req.ext) && sec.raw !== undefined) {
     const md = (sec.title ? '## ' + sec.title + '\n\n' : '') + sec.raw;

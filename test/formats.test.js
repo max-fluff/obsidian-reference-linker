@@ -67,6 +67,34 @@ describe('zip reader', () => {
   });
 });
 
+describe('the containers a format comes in', () => {
+  const formats = require('../src/formats');
+
+  // A macro-enabled file and a template are the same package under another extension. Left out,
+  // a .docm falls through to "unreadable" for a document Word wrote from the .docx beside it.
+  const SAME = {
+    docx: ['docm', 'dotx', 'dotm'],
+    xlsx: ['xlsm', 'xltx', 'xltm'],
+    pptx: ['pptm', 'potx', 'potm'],
+    odt: ['ott'],
+    ods: ['ots'],
+    odp: ['otp', 'odg', 'otg'],
+  };
+
+  for (const [base, variants] of Object.entries(SAME)) {
+    it('reads a .' + base + ' variant with the .' + base + ' handler', () => {
+      for (const v of variants) {
+        assert.strictEqual(formats.handlerFor(v), formats.handlerFor(base), '.' + v + ' is routed elsewhere');
+        assert.ok(formats.knownExtensions().includes('.' + v), '.' + v + ' is not offered in the settings');
+      }
+    });
+  }
+
+  it('does not claim the flat single-file ODF, which is not a zip at all', () => {
+    for (const v of ['fodt', 'fods', 'fodp']) assert.strictEqual(formats.handlerFor(v), null);
+  });
+});
+
 describe('pptx outline', () => {
   it('numbers slides by presentation order, not by file name', async () => {
     const file = tmp('deck.pptx', buildPptx([
@@ -75,27 +103,27 @@ describe('pptx outline', () => {
       { title: 'Closing', part: 'slide4.xml' },
     ]));
     assert.deepStrictEqual(await readOutline(file), [
-      { title: 'Opening', page: 1 },
-      { title: 'Middle', page: 2 },
-      { title: 'Closing', page: 3 },
+      { title: 'Opening', position: 1 },
+      { title: 'Middle', position: 2 },
+      { title: 'Closing', position: 3 },
     ]);
   });
 
   it('takes the title placeholder over other text on the slide', async () => {
     const file = tmp('deck.pptx', buildPptx([{ title: 'Real title', body: ['Body first'] }]));
-    assert.deepStrictEqual(await readOutline(file), [{ title: 'Real title', page: 1 }]);
+    assert.deepStrictEqual(await readOutline(file), [{ title: 'Real title', position: 1 }]);
   });
 
   it('falls back to the first text when a slide has no title placeholder', async () => {
     const file = tmp('deck.pptx', buildPptx([{ body: ['Only body text'] }]));
-    assert.deepStrictEqual(await readOutline(file), [{ title: 'Only body text', page: 1 }]);
+    assert.deepStrictEqual(await readOutline(file), [{ title: 'Only body text', position: 1 }]);
   });
 
   it('skips a slide with no text rather than indexing an empty name', async () => {
     const file = tmp('deck.pptx', buildPptx([{ title: 'Has one' }, {}, { title: 'Has two' }]));
     assert.deepStrictEqual(await readOutline(file), [
-      { title: 'Has one', page: 1 },
-      { title: 'Has two', page: 3 },
+      { title: 'Has one', position: 1 },
+      { title: 'Has two', position: 3 },
     ]);
   });
 
@@ -123,6 +151,6 @@ describe('pptx slide read', () => {
     const file = tmp('deck.pptx', buildPptx([{ title: 'One' }, { title: 'Two' }]));
     const slide = await readSlide(file, 99);
     assert.strictEqual(slide.title, 'Two');
-    assert.strictEqual(slide.page, 2);
+    assert.strictEqual(slide.position, 2);
   });
 });

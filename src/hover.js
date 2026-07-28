@@ -12,7 +12,7 @@ const { Popover } = require('./shared/popover');
 
 const PREVIEW_WIDTH = 420; // CSS px the page/image is shown at
 
-const keyOf = (e) => e.path + ':' + (e.page || e.line || 1);
+const keyOf = (e) => e.path + ':' + (e.position || e.line || 1);
 
 class HoverPreview {
   constructor(plugin) {
@@ -54,9 +54,9 @@ class HoverPreview {
 
     // Label: the pinned section name when there is one, else the file. The position — a page
     // or a timecode, per format — is shown only when it isn't the top of the file.
-    const page = entry.page || 1;
+    const position = entry.position || 1;
     const label = entry.title || entry.name;
-    const pos = formats.positionLabel(ext, page);
+    const pos = formats.positionLabel(ext, position);
     el.createDiv({ cls: 'reference-linker-hover-header', text: pos ? label + '  ·  ' + pos : label });
     const body = el.createDiv({ cls: 'reference-linker-hover-body' });
 
@@ -64,8 +64,9 @@ class HoverPreview {
     const cleanup = await formats.render(body, {
       abs,
       ext,
-      page,
+      position,
       width: PREVIEW_WIDTH,
+      view: this.plugin.settings.documentView,
       app: this.plugin.app,
       component: this.plugin,
       isCurrent: () => ctx.isCurrent(),

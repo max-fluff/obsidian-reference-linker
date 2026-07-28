@@ -8,8 +8,8 @@
 const fs = require('fs');
 const nodePath = require('path');
 const { decodeEntities } = require('../xml');
-const { renderLines, renderHtml } = require('./preview');
-const { clampPage, assetSrc } = require('./util');
+const { renderLines, renderHtml, renderFrame } = require('./preview');
+const { clampPosition, assetSrc, sectionEnd } = require('./util');
 
 // Read an image a page links to, from the page's own folder. Only inside that folder: a src
 // like "../../etc/passwd" in a saved page must not become a file read.
@@ -69,7 +69,7 @@ function headings(html) {
   HEADING.lastIndex = 0;
   while ((m = HEADING.exec(html))) {
     const title = inlineText(m[3]);
-    if (title) out.push({ title, anchor: idOf(m[2], m[3]), from: m.index, to: HEADING.lastIndex });
+    if (title) out.push({ title, level: Number(m[1]), anchor: idOf(m[2], m[3]), from: m.index, to: HEADING.lastIndex });
   }
   return out;
 }
@@ -79,30 +79,50 @@ function headings(html) {
 async function readOutline(absPath) {
   const html = read(absPath);
   if (!html) return [];
-  return headings(html).map((h, i) => ({ title: h.title, page: i + 1, anchor: h.anchor || undefined }));
+  return headings(html).map((h, i) => ({ title: h.title, position: i + 1, anchor: h.anchor || undefined }));
 }
 
 // One section's text: everything between its heading and the next one.
-async function readSection(absPath, page) {
+async function readSection(absPath, position) {
   const html = read(absPath);
   if (!html) return null;
   const hs = headings(html);
-  if (!hs.length) return { title: '', body: blockLines(html).slice(0, MAX_LINES), page: 1, total: 1 };
-  const n = clampPage(page, hs.length);
+  if (!hs.length) return { title: '', body: blockLines(html).slice(0, MAX_LINES), position: 1, total: 1 };
+  const n = clampPosition(position, hs.length);
   const here = hs[n - 1];
-  const next = hs[n];
-  const end = next ? next.from : html.length;
+  const end = sectionEnd(hs, n, html.length);
   // `raw` keeps the heading so the rendered preview shows it; `body` is the text under it,
   // which the header line already names.
   const body = blockLines(html.slice(here.to, end));
-  return { title: here.title, body: body.slice(0, MAX_LINES), raw: html.slice(here.from, end), page: n, total: hs.length };
+  // The page's CSS lives in the head, outside the section slice, so it is carried alongside.
+  return { title: here.title, body: body.slice(0, MAX_LINES), raw: html.slice(here.from, end), css: styleText(html), position: n, total: hs.length };
 }
 
+// Every <style> block's contents, concatenated — the page's own stylesheet, to be scoped to
+// the preview. External <link rel=stylesheet> can't load under the CSP, so it is not chased.
+const styleText = (html) => {
+  const out = [];
+  const re = /<style\b[^>]*>([\s\S]*?)<\/style>/gi;
+  let m;
+  while ((m = re.exec(html))) out.push(m[1]);
+  return out.join('\n');
+};
+
 async function render(el, req) {
-  const sec = await readSection(req.abs, req.page);
+  const sec = await readSection(req.abs, req.position);
   if (!req.isCurrent() || !sec) return false;
   if (sec.raw) {
-    const done = renderHtml(el, { html: sec.raw.replace(DROP, ''), width: req.width, loadImage: assetLoader(req.abs) });
+    const body = sec.raw.replace(DROP, '');
+    const load = assetLoader(req.abs);
+    // A page that brought its own stylesheet is shown in an isolated frame, where it renders
+    // as designed. One that brought none is better off with Obsidian's own styling, so it
+    // reads like the rest of the vault rather than as bare unstyled markup.
+    const themed = () => renderHtml(el, { html: body, css: sec.css, width: req.width, loadImage: load });
+    if (sec.css) {
+      const framed = renderFrame(el, { html: body, css: sec.css, width: req.width, loadImage: load, onFail: themed });
+      if (framed !== false) return framed;
+    }
+    const done = themed();
     if (done !== false) return done;
   }
   return renderLines(el, { title: sec.title, body: sec.body, width: req.width });

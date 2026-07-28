@@ -26,13 +26,24 @@ function parseSpan(s) {
   return { from, to: Math.max(from, m[2] ? parseInt(m[2], 10) : from) };
 }
 
-// First non-empty line is the target; later "key: value" lines tune it.
+// A position in a recording, in seconds: "90", "1:30" or "1:02:05". The header shows a
+// timecode, so a timecode is what you can write.
+function parseTimecode(s) {
+  const t = String(s).trim();
+  if (/^\d+$/.test(t)) return parseInt(t, 10);
+  const m = /^(?:(\d+):)?(\d{1,2}):(\d{2})$/.exec(t);
+  if (!m) return null;
+  return (parseInt(m[1] || '0', 10) * 3600) + (parseInt(m[2], 10) * 60) + parseInt(m[3], 10);
+}
+
+// First non-empty line is the target; later "key: value" lines tune it. `time:` is `page:` for
+// a recording — the same position, written the way a recording's position reads.
 function parseSpec(source) {
-  const spec = { target: '', page: '', width: '', title: '' };
+  const spec = { target: '', page: '', time: '', width: '', title: '' };
   for (const raw of source.split('\n')) {
     const line = raw.trim();
     if (!line) continue;
-    const m = /^(page|width|title)\s*:\s*(.*)$/i.exec(line);
+    const m = /^(page|time|width|title)\s*:\s*(.*)$/i.exec(line);
     if (m) spec[m[1].toLowerCase()] = m[2].trim();
     else if (!spec.target) spec.target = line;
   }
@@ -40,32 +51,30 @@ function parseSpec(source) {
 }
 
 // Split a trailing position off a path target: the fragment after '#' (a "page=3", "page=3-5",
-// "t=90", or an id like "_options"), or a legacy ":3" / ":3-5" page suffix.
+// "t=90", or an id like "_options"), or a legacy ":3" / ":3-5" suffix. The legacy one names no
+// unit — spelled as a page here it would be rejected on a recording, which reads as seconds.
 function splitTarget(target) {
   const h = target.indexOf('#');
   if (h >= 0) return { path: target.slice(0, h), frag: target.slice(h + 1).trim() };
   const m = /^(.+?):(\d+(?:-\d+)?)\s*$/.exec(target);
-  if (m) return { path: m[1], frag: 'page=' + m[2] };
+  if (m) return { path: m[1], frag: 'at=' + m[2] };
   return { path: target, frag: '' };
 }
 
-// Resolve the spec to { absPath, relPath, ext, page, to, name, entry } or { error }. `to` is
-// the last page of a range (equal to `page` for a single one).
+// Resolve the spec to { absPath, relPath, ext, position, to, name, entry } or { error }. `to`
+// is the end of a range (equal to `position` for a single one).
 function resolve(plugin, spec) {
   const target = spec.target;
   if (!target) return { error: t('embed.empty') };
 
   const { path: rawPath, frag } = splitTarget(target);
-  let relPath, name = null, page = null, to = null, anchor = null;
+  let relPath, name = null, position = null, to = null, anchor = null;
   const byPath = looksLikePath(rawPath);
 
   if (byPath) {
     const norm = rawPath.split('\\').join('/').replace(/^\.?\//, '');
     const hit = plugin.lookup(norm)[0];
     relPath = hit ? hit.path : norm;
-    const pm = /^(?:page|t)=(\d+(?:[-–]\d+)?)$/i.exec(frag);
-    if (pm) { const sp = parseSpan(pm[1]); page = sp.from; to = sp.to; }
-    else if (frag) anchor = frag; // an id fragment, resolved through the index below
   } else {
     const f = plugin.parseQuery(target);
     const matches = plugin.entriesByName(f.name).filter((m) => plugin.entryPassesFilter(m, f));
@@ -73,40 +82,75 @@ function resolve(plugin, spec) {
     const paths = new Set(matches.map((m) => m.path));
     if (paths.size > 1) return { error: t('embed.ambiguous', { n: paths.size, query: target }) };
     const e = matches.find((m) => m.kind === 'section') || matches[0];
-    relPath = e.path; name = e.name; page = e.page;
+    relPath = e.path; name = e.name; position = e.position;
   }
 
   const ext = nodePath.extname(relPath).slice(1).toLowerCase();
+  // A recording is positioned in time, everything else in pages. Each format takes only its
+  // own spelling: the other one is a mistake worth naming, not something to quietly ignore.
+  const timed = formats.positionUnit(ext) === 'time';
+  const wrongUnit = () => ({ error: t(timed ? 'embed.needsTime' : 'embed.needsPage', { path: relPath }) });
+
+  // The fragment is read now that the format is known.
+  if (byPath && frag) {
+    const pm = /^page=(\d+(?:[-–]\d+)?)$/i.exec(frag);
+    const tm = /^t=(.+)$/i.exec(frag);
+    const legacy = /^at=(\d+(?:-\d+)?)$/i.exec(frag);
+    if (legacy) {
+      const sp = parseSpan(legacy[1]);
+      position = sp.from;
+      to = timed ? sp.from : sp.to;
+    } else if (pm) {
+      if (timed) return wrongUnit();
+      const sp = parseSpan(pm[1]); position = sp.from; to = sp.to;
+    } else if (tm) {
+      if (!timed) return wrongUnit();
+      const at = parseTimecode(tm[1]);
+      if (at == null) return wrongUnit();
+      position = at; to = at;
+    } else {
+      anchor = frag; // an id fragment, resolved through the index below
+    }
+  }
 
   // An id fragment (file.html#_options) names a section the way a copied link does — resolve
-  // it to that section's page through the index.
+  // it to that section's position through the index.
   if (anchor) {
     const sec = plugin.entriesIn(relPath).find((x) => x.kind === 'section' && x.anchor === anchor);
     if (!sec) return { error: t('embed.notFound', { query: target }) };
-    page = sec.page; name = sec.name;
+    position = sec.position; name = sec.name;
   }
 
-  // A page or range on its own line overrides the target.
-  const span = parseSpan(spec.page);
-  if (span) { page = span.from; to = span.to; }
+  // The position on its own line, in the format's own unit.
+  if (spec.page) {
+    if (timed) return wrongUnit();
+    const span = parseSpan(spec.page);
+    if (span) { position = span.from; to = span.to; }
+  }
+  if (spec.time) {
+    if (!timed) return wrongUnit();
+    const at = parseTimecode(spec.time);
+    if (at == null) return wrongUnit();
+    position = at; to = at;
+  }
 
-  page = page || 1;
-  to = to && to >= page ? to : page;
+  position = position || 1;
+  to = to && to >= position ? to : position;
   // Only paged/sectioned formats range; media and images render once.
-  if (!formats.canOutline(ext)) to = page;
-  to = Math.min(to, page + MAX_RANGE - 1);
+  if (!formats.canOutline(ext)) to = position;
+  to = Math.min(to, position + MAX_RANGE - 1);
 
-  // The header names what is actually shown: the section a single-page embed lands on, else
+  // The header names what is actually shown: the section a single-position embed lands on, else
   // the document. A path lookup's first hit was any entry of the file — often the wrong one.
   if (name === null) {
-    const sec = page === to && plugin.entriesIn(relPath).find((x) => x.kind === 'section' && x.page === page);
+    const sec = position === to && plugin.entriesIn(relPath).find((x) => x.kind === 'section' && x.position === position);
     name = sec ? sec.name : baseName(relPath);
   }
 
   const root = plugin.codeRoot();
   const absPath = root ? nodePath.join(root, relPath) : relPath;
-  const kind = page > 1 || to > page ? 'section' : 'file';
-  return { absPath, relPath, ext, page, to, name, entry: { name, kind, path: relPath, line: page, page } };
+  const kind = position > 1 || to > position ? 'section' : 'file';
+  return { absPath, relPath, ext, position, to, name, entry: { name, kind, path: relPath, line: position, position } };
 }
 
 class ReferenceEmbed extends MarkdownRenderChild {
@@ -130,7 +174,7 @@ class ReferenceEmbed extends MarkdownRenderChild {
     this.release();
   }
 
-  // Open the embedded document at its page — the same path the open/insert commands use.
+  // Open the embedded document where it points — the same path the open/insert commands use.
   open() {
     const e = this.res && this.res.entry;
     if (!e) return;
@@ -159,7 +203,7 @@ class ReferenceEmbed extends MarkdownRenderChild {
     // Skip the re-render when nothing this embed shows has changed.
     const cached = res.relPath && this.plugin.fileCache.get(res.relPath);
     const mtime = cached ? cached.mtimeMs : null;
-    const sig = res.error ? 'err:' + res.error : res.absPath + '|' + res.page + '-' + res.to + '|' + mtime + '|' + this.width();
+    const sig = res.error ? 'err:' + res.error : res.absPath + '|' + res.position + '-' + res.to + '|' + mtime + '|' + this.width();
     if (!force && sig === this.lastSig && (res.error || mtime != null)) return;
     this.lastSig = sig;
 
@@ -169,7 +213,7 @@ class ReferenceEmbed extends MarkdownRenderChild {
     el.empty();
     el.addClass('reference-linker-embed');
     const header = el.createDiv({ cls: 'reference-linker-embed-header mod-clickable' });
-    const pos = formats.positionLabel(res.ext, res.page, res.to);
+    const pos = formats.positionLabel(res.ext, res.position, res.to);
     header.createSpan({ text: this.spec.title || res.name + (pos ? '  ·  ' + pos : '') });
     header.addEventListener('click', () => this.open());
     const body = el.createDiv({ cls: 'reference-linker-embed-body' });
@@ -184,13 +228,14 @@ class ReferenceEmbed extends MarkdownRenderChild {
     this.release();
     const cleanups = [];
     let drew = false;
-    for (let p = res.page; p <= res.to; p++) {
-      const slot = res.to > res.page ? body.createDiv({ cls: 'reference-linker-embed-slot' }) : body;
+    for (let p = res.position; p <= res.to; p++) {
+      const slot = res.to > res.position ? body.createDiv({ cls: 'reference-linker-embed-slot' }) : body;
       const cleanup = await formats.render(slot, {
         abs: res.absPath,
         ext: res.ext,
-        page: p,
+        position: p,
         width: this.width(),
+        view: this.plugin.settings.documentView,
         app: this.plugin.app,
         component: this,
         isCurrent: () => token === this.renderId,
@@ -219,4 +264,4 @@ function registerEmbed(plugin) {
   });
 }
 
-module.exports = { registerEmbed, resolve, splitTarget, parseSpan, parseSpec };
+module.exports = { registerEmbed, resolve, splitTarget, parseSpan, parseSpec, parseTimecode };
