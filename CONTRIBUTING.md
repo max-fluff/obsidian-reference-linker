@@ -28,6 +28,9 @@ Format knowledge lives in `src/formats/` and nowhere else. A handler is a module
 caller — indexing, hover, embeds, the settings list — picks it up. Nothing outside that
 folder should branch on an extension.
 
+Two places outside the code count the formats by hand: the README's opening bullet
+(“11 formats, 53 extensions”) and its format table. Bump both with the handler.
+
 | Member | Meaning |
 |---|---|
 | `id` | Stable key for the format's row in the settings list. Its label is `set.format.<id>` in `src/locales/`, so a new handler needs that key in both locales or the row shows the key itself. |
