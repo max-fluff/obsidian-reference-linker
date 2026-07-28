@@ -76,6 +76,12 @@ module.exports = {
   'modal.searchPlaceholder': 'Search documents…',
   'modal.formatPlaceholder': 'Choose a viewer format for this link…',
 
+  // Drag & drop from the OS file manager
+  'drop.placeholder': 'Insert the dropped document as…',
+  'drop.asLink': 'A reference link',
+  'drop.asEmbed': 'An inline embed',
+  'notice.dropOutsideRoot': 'Reference Linker: {count} file(s) outside the reference root were skipped — no portable link',
+
   // Settings — headings
   'set.heading.index': 'Reference index',
 

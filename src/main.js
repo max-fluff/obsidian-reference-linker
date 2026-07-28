@@ -124,6 +124,7 @@ class ReferenceLinkerPlugin extends Plugin {
           mousedown: (evt, view) => this.onEditorLink(evt, view, false),
           click: (evt, view) => this.onEditorLink(evt, view, true),
           auxclick: (evt, view) => this.onEditorLink(evt, view, true),
+          drop: (evt, view) => this.onEditorDrop(evt, view),
         })
       )
     );
@@ -995,6 +996,58 @@ class ReferenceLinkerPlugin extends Plugin {
     new PresetPickerModal(this.app, formats, (f) => {
       editor.replaceSelection('```reference-link\n' + f.body + '\n```\n');
     }, t('modal.embedPlaceholder')).open();
+  }
+
+  // The index entry for a file dropped from outside the vault, or null when it sits outside
+  // the reference root — a link there couldn't carry the portable {ref-root} token. An
+  // indexed file reuses its own entry (its real name); an unindexed one gets a bare file entry.
+  entryForAbsPath(abs) {
+    const root = this.codeRoot();
+    if (!root) return null;
+    const rel = nodePath.relative(root, abs).split(nodePath.sep).join('/');
+    if (!rel || rel === '..' || rel.startsWith('../') || nodePath.isAbsolute(rel)) return null;
+    const cached = this.fileCache.get(rel);
+    if (cached && cached.entries && cached.entries[0]) return cached.entries[0];
+    return { name: nodePath.basename(rel).replace(/\.[^.]+$/, ''), kind: 'file', lang: extOf(rel), path: rel, line: 1, position: 1 };
+  }
+
+  // Drop of OS files into the editor: turn each into a portable reference link or embed,
+  // asked once for the whole drop. Only files under the reference root are ours; a drop with
+  // none is left to Obsidian (so an image still imports as usual).
+  onEditorDrop(evt, view) {
+    const files = (evt.dataTransfer && evt.dataTransfer.files) || [];
+    const entries = [];
+    let outside = 0;
+    for (const f of files) {
+      // Only an OS file carries a path; an internal drag (a note) does not, and stays Obsidian's.
+      if (!f || !f.path) continue;
+      const e = this.entryForAbsPath(f.path);
+      if (e) entries.push(e); else outside++;
+    }
+    if (!entries.length) return false;
+    evt.preventDefault();
+    if (outside) new Notice(t('notice.dropOutsideRoot', { count: outside }));
+    const at = typeof view.posAtCoords === 'function'
+      ? view.posAtCoords({ x: evt.clientX, y: evt.clientY })
+      : null;
+    const pos = at == null ? view.state.selection.main.head : at;
+    new PresetPickerModal(this.app, [
+      { key: 'link', label: t('drop.asLink') },
+      { key: 'embed', label: t('drop.asEmbed') },
+    ], (choice) => this.insertDropped(view, pos, entries, choice.key), t('drop.placeholder')).open();
+    return true;
+  }
+
+  insertDropped(view, pos, entries, kind) {
+    let text;
+    if (kind === 'embed') {
+      text = entries.map((e) => '```reference-link\n' + e.path + '\n```\n').join('');
+    } else {
+      const inTable = inTableCell(view.state.doc.toString(), pos);
+      text = entries.map((e) => this.buildLink(e, inTable, undefined)).join(inTable ? ' ' : '\n');
+    }
+    view.dispatch({ changes: { from: pos, insert: text }, selection: { anchor: pos + text.length } });
+    if (typeof view.focus === 'function') view.focus();
   }
 
   // The selectable viewer presets — the built-in file:// then the user's own. 'u:<i>' is a

@@ -7769,6 +7769,11 @@ var require_en = __commonJS({
       // Command-palette modal
       "modal.searchPlaceholder": "Search documents\u2026",
       "modal.formatPlaceholder": "Choose a viewer format for this link\u2026",
+      // Drag & drop from the OS file manager
+      "drop.placeholder": "Insert the dropped document as\u2026",
+      "drop.asLink": "A reference link",
+      "drop.asEmbed": "An inline embed",
+      "notice.dropOutsideRoot": "Reference Linker: {count} file(s) outside the reference root were skipped \u2014 no portable link",
       // Settings — headings
       "set.heading.index": "Reference index",
       // Settings — reference index
@@ -7894,6 +7899,11 @@ var require_ru = __commonJS({
       // Command-palette modal
       "modal.searchPlaceholder": "\u041F\u043E\u0438\u0441\u043A \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u043E\u0432\u2026",
       "modal.formatPlaceholder": "\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0444\u043E\u0440\u043C\u0430\u0442 \u043F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0449\u0438\u043A\u0430 \u0434\u043B\u044F \u044D\u0442\u043E\u0439 \u0441\u0441\u044B\u043B\u043A\u0438\u2026",
+      // Drag & drop из файлового менеджера ОС
+      "drop.placeholder": "\u0412\u0441\u0442\u0430\u0432\u0438\u0442\u044C \u043F\u0435\u0440\u0435\u0442\u0430\u0449\u0435\u043D\u043D\u044B\u0439 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442 \u043A\u0430\u043A\u2026",
+      "drop.asLink": "\u0421\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442",
+      "drop.asEmbed": "\u0412\u0441\u0442\u0440\u043E\u0435\u043D\u043D\u044B\u0439 embed",
+      "notice.dropOutsideRoot": "Reference Linker: \u043F\u0440\u043E\u043F\u0443\u0449\u0435\u043D\u043E \u0444\u0430\u0439\u043B\u043E\u0432 \u0432\u043D\u0435 \u043A\u043E\u0440\u043D\u044F \u0441\u0441\u044B\u043B\u043E\u043A \u2014 {count}; \u043F\u043E\u0440\u0442\u0438\u0440\u0443\u0435\u043C\u0443\u044E \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0435 \u0441\u0434\u0435\u043B\u0430\u0442\u044C",
       // Settings — headings
       "set.heading.index": "\u0418\u043D\u0434\u0435\u043A\u0441 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u043E\u0432",
       // Settings — reference index
@@ -8029,7 +8039,8 @@ var ReferenceLinkerPlugin = class extends Plugin {
         EditorView.domEventHandlers({
           mousedown: (evt, view) => this.onEditorLink(evt, view, false),
           click: (evt, view) => this.onEditorLink(evt, view, true),
-          auxclick: (evt, view) => this.onEditorLink(evt, view, true)
+          auxclick: (evt, view) => this.onEditorLink(evt, view, true),
+          drop: (evt, view) => this.onEditorDrop(evt, view)
         })
       )
     );
@@ -8860,6 +8871,62 @@ var ReferenceLinkerPlugin = class extends Plugin {
     new PresetPickerModal(this.app, formats2, (f) => {
       editor.replaceSelection("```reference-link\n" + f.body + "\n```\n");
     }, t("modal.embedPlaceholder")).open();
+  }
+  // The index entry for a file dropped from outside the vault, or null when it sits outside
+  // the reference root — a link there couldn't carry the portable {ref-root} token. An
+  // indexed file reuses its own entry (its real name); an unindexed one gets a bare file entry.
+  entryForAbsPath(abs) {
+    const root = this.codeRoot();
+    if (!root)
+      return null;
+    const rel = nodePath.relative(root, abs).split(nodePath.sep).join("/");
+    if (!rel || rel === ".." || rel.startsWith("../") || nodePath.isAbsolute(rel))
+      return null;
+    const cached = this.fileCache.get(rel);
+    if (cached && cached.entries && cached.entries[0])
+      return cached.entries[0];
+    return { name: nodePath.basename(rel).replace(/\.[^.]+$/, ""), kind: "file", lang: extOf(rel), path: rel, line: 1, position: 1 };
+  }
+  // Drop of OS files into the editor: turn each into a portable reference link or embed,
+  // asked once for the whole drop. Only files under the reference root are ours; a drop with
+  // none is left to Obsidian (so an image still imports as usual).
+  onEditorDrop(evt, view) {
+    const files = evt.dataTransfer && evt.dataTransfer.files || [];
+    const entries = [];
+    let outside = 0;
+    for (const f of files) {
+      if (!f || !f.path)
+        continue;
+      const e = this.entryForAbsPath(f.path);
+      if (e)
+        entries.push(e);
+      else
+        outside++;
+    }
+    if (!entries.length)
+      return false;
+    evt.preventDefault();
+    if (outside)
+      new Notice(t("notice.dropOutsideRoot", { count: outside }));
+    const at = typeof view.posAtCoords === "function" ? view.posAtCoords({ x: evt.clientX, y: evt.clientY }) : null;
+    const pos = at == null ? view.state.selection.main.head : at;
+    new PresetPickerModal(this.app, [
+      { key: "link", label: t("drop.asLink") },
+      { key: "embed", label: t("drop.asEmbed") }
+    ], (choice) => this.insertDropped(view, pos, entries, choice.key), t("drop.placeholder")).open();
+    return true;
+  }
+  insertDropped(view, pos, entries, kind) {
+    let text;
+    if (kind === "embed") {
+      text = entries.map((e) => "```reference-link\n" + e.path + "\n```\n").join("");
+    } else {
+      const inTable = inTableCell(view.state.doc.toString(), pos);
+      text = entries.map((e) => this.buildLink(e, inTable, void 0)).join(inTable ? " " : "\n");
+    }
+    view.dispatch({ changes: { from: pos, insert: text }, selection: { anchor: pos + text.length } });
+    if (typeof view.focus === "function")
+      view.focus();
   }
   // The selectable viewer presets — the built-in file:// then the user's own. 'u:<i>' is a
   // user viewer's key in the settings dropdown.

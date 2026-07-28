@@ -72,6 +72,12 @@ module.exports = {
   'modal.searchPlaceholder': 'Поиск документов…',
   'modal.formatPlaceholder': 'Выберите формат просмотрщика для этой ссылки…',
 
+  // Drag & drop из файлового менеджера ОС
+  'drop.placeholder': 'Вставить перетащенный документ как…',
+  'drop.asLink': 'Ссылку на документ',
+  'drop.asEmbed': 'Встроенный embed',
+  'notice.dropOutsideRoot': 'Reference Linker: пропущено файлов вне корня ссылок — {count}; портируемую ссылку не сделать',
+
   // Settings — headings
   'set.heading.index': 'Индекс документов',
 
