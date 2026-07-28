@@ -22,11 +22,9 @@ const PREVIEW_CLASS = 'reference-linker-preview';
 // kept reading the old number: the link stayed stale forever and every update rewrote the note.
 const POS_RE = /([#?&])(page|t)=\d+/i;
 
-// Repoint a link at where its document or its section moved to. `r` is a stale verdict:
-// `path` for a document the cite binding relocated, `anchor` for a named fragment, `line` for
-// a page (bindStateFrom's name for the moved-to position). A relocated document need not have
-// moved its section too, so a verdict carrying neither keeps the fragment it had. Null when
-// the path cannot be rewritten into this URL.
+// Repoint a link at where its document or its section moved to: `path`, `anchor` or `line` on
+// a stale verdict. A relocated document need not have moved its section, so a verdict carrying
+// neither keeps the fragment it had. Null when the path cannot be rewritten into this URL.
 const withFix = (plugin, url, r) => {
   const out = r.path ? plugin.retargetUrl(url, r.path) : url;
   if (out == null) return null;
@@ -37,8 +35,7 @@ const withFix = (plugin, url, r) => {
     : out + '#page=' + r.line;
 };
 
-// The file name a link points at, for the update preview — the document it moved from is no
-// longer in the index, so it can only be read back off the link itself.
+// The document it moved from is out of the index, so its name is read back off the link.
 const fileNameIn = (plugin, url) => plugin.decodeTarget(url).split(/[#?]/)[0].split('/').filter(Boolean).pop() || '—';
 
 // What the update preview shows as the change. An id-anchored link that had no fragment at
@@ -63,8 +60,7 @@ const rewriteUpdates = (plugin, text, selected) => {
     const r = bindStateOf(plugin, target);
     if (r && r.state === 'stale') {
       const { url, title } = splitTarget(target);
-      // Counted only once it is known to be fixable, so the keys line up between the dry run
-      // that builds the preview and the pass that applies the boxes ticked in it.
+      // Counted only once known fixable, so the dry run and the applying pass number alike.
       const fixed = withFix(plugin, url, r);
       if (fixed == null) {
         if (collect) broken.push(name);
@@ -81,9 +77,7 @@ const rewriteUpdates = (plugin, text, selected) => {
   return { newText: links.text, count: links.count, changes, broken };
 };
 
-// Pin every link that has something to pin — retrofits notes written before pinning, and
-// tops an already-pinned link up with the citation key its document is now filed under. A
-// title that is a reader's tooltip rather than a binding of ours is left alone.
+// Retrofits notes written before pinning, and tops an already-pinned link up with the key.
 const pinLinksInText = (plugin, text) => rewriteLinks(text, (name, target) => {
   const { url, title } = splitTarget(target);
   if (title && !ownsBinding(title, OWNER)) return null;

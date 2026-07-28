@@ -1,8 +1,7 @@
 'use strict';
 
-// The bibliography is someone else's file: written by Zotero, Better BibTeX, JabRef or by
-// hand, and never validated before we read it. These cases are the shapes those tools
-// actually emit, plus the malformed ones that must cost only their own entry.
+// The shapes Zotero, Better BibTeX and JabRef actually emit, plus the malformed ones: the
+// file is someone else's and is never validated before we read it.
 
 const { describe, it, assert } = require('../src/shared/testing/harness');
 const { parseBibtex, parseCsl, parseBibliography, attachmentPaths } = require('../src/bib');

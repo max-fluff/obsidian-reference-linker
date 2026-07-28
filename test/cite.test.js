@@ -1,9 +1,8 @@
 'use strict';
 
-// A cite binding answers a different question from a sec binding: not "did the section move
-// inside this document" but "is this still the document at all". What it repairs is therefore
-// the path in the URL, not the page — the case a sec binding cannot see, because a renamed
-// file drops out of the index and takes every link to it with it.
+// cite asks "is this still the document at all", where sec asks "did the section move inside
+// it". So it repairs the path, not the page — the case a renamed file makes, which sec cannot
+// see because the file drops out of the index and takes every link to it with it.
 
 const { describe, it, assert } = require('../src/shared/testing/harness');
 const path = require('path');
@@ -15,8 +14,7 @@ installStubs();
 
 const ROOT = '/lib';
 
-// The library after Zotero re-filed the paper: the document sits at papers/new.pdf, while
-// notes written earlier still link to papers/old.pdf.
+// The library after Zotero re-filed the paper: it sits at papers/new.pdf, older notes link old.
 const load = async (opts) => {
   const o = opts || {};
   const Plugin = require(path.join(__dirname, '..', 'src', 'main.js'));
@@ -88,16 +86,13 @@ describe('cite binding', () => {
     assert.strictEqual(plugin.linkState(link(OLD, 'cite:smith2020 sec:Methods')), 'broken');
   });
 
-  // The reference-root-misconfigured failure the sec anchor already refuses to make: with no
-  // bibliography read, every cite link in the vault would light up red at once.
   it('gives no verdict at all when no bibliography is loaded', async () => {
     const plugin = await load({ noBib: true });
     assert.strictEqual(plugin.linkState(link(OLD, 'cite:smith2020')), null);
   });
 
-  // The same false alarm from the other side: the bibliography reads perfectly, but the
-  // library it names is not indexed — a root pointed at the wrong folder, or a drive not
-  // mounted yet. The key is not missing, its document simply isn't known.
+  // A root pointed at the wrong folder, or a drive not mounted: the bibliography reads fine,
+  // so every cite link in the vault would redden at once.
   it('gives no verdict when the key is there but its document is not indexed', async () => {
     const plugin = await load({ entries: [{ key: 'smith2020', title: '', year: '', paths: ['/elsewhere/entirely/a.pdf'] }] });
     assert.strictEqual(plugin.citations.keys, 1);
@@ -143,8 +138,7 @@ describe('pinOptionFor', () => {
     assert.strictEqual(opt.kind, 'cite');
   });
 
-  // The retrofit that matters: a vault full of sec-pinned links gains the key without anyone
-  // re-inserting them.
+  // The retrofit: a vault of sec-pinned links gains the key without anyone re-inserting them.
   it('tops an already-pinned link up with the key', async () => {
     const plugin = await load();
     const opt = plugin.pinOptionFor(NEW + '#page=4', 'sec:Methods');
@@ -152,8 +146,7 @@ describe('pinOptionFor', () => {
     assert.strictEqual(opt.kind, 'cite');
   });
 
-  // Re-deriving the section from the page would silently repoint the link at Results, which
-  // is not the section its author pinned it to.
+  // Reading the page again would repoint this at Results, which its author never pinned it to.
   it('keeps the section a drifted link names rather than reading the page again', async () => {
     const plugin = await load({ methodsAt: 9 });
     const opt = plugin.pinOptionFor(NEW + '#page=4', 'sec:Methods');
@@ -176,12 +169,10 @@ describe('pinOptionFor', () => {
   });
 });
 
-// The update dialog ticks boxes by the order links appear in, and the pass that applies them
-// walks the note again. If the two passes disagree about which links count, a tick applies
-// somebody else's fix — so an unfixable link must drop out of both, not one.
+// The dialog ticks boxes by order of appearance and the applying pass walks the note again.
+// If the two disagree about which links count, a tick applies somebody else's fix.
 describe('rewriting a whole note', () => {
-  // "b" is the unfixable one: a file link written against neither the root token nor the
-  // reference root, so there is no path in it we could safely rewrite.
+  // "b" is unfixable: it holds neither the root token nor the reference root.
   const note = [
     '[a](file:///{ref-root}/papers/old.pdf "cite:smith2020")',
     '[b](file:///somewhere/else/old.pdf "cite:smith2020")',
@@ -223,6 +214,29 @@ describe('pinning a whole note', () => {
     assert.ok(out.includes('[a](file:///{ref-root}/papers/new.pdf#page=4 "cite:smith2020 sec:Methods")'), 'the sec-pinned link did not gain the key');
     assert.ok(out.includes('[b](file:///{ref-root}/papers/new.pdf "the methods paper")'), 'the tooltip was overwritten');
     assert.ok(out.includes('[c](file:///{ref-root}/papers/new.pdf "cite:smith2020")'), 'the unpinned link did not gain the key');
+  });
+});
+
+// A hand-typed folder reads as EISDIR inside loadCitations' catch, and existsSync alone would
+// call the row perfectly healthy.
+describe('bibStatus', () => {
+  const at = (plugin, name) => plugin.bibStatus().find((x) => x.abs.split(/[\\/]/).pop() === name);
+
+  it('tells a folder apart from a bibliography and from a missing path', async () => {
+    const plugin = await load();
+    plugin.settings.codeRoot = path.join(__dirname, '..');
+    plugin.settings.bibFiles = ['src', 'src/main.js', 'src/nothing-here.bib'].join('\n');
+    assert.deepStrictEqual(at(plugin, 'src'), { abs: at(plugin, 'src').abs, exists: true, isFile: false });
+    assert.strictEqual(at(plugin, 'main.js').isFile, true);
+    assert.strictEqual(at(plugin, 'nothing-here.bib').exists, false);
+  });
+
+  it('reads nothing out of a folder, and does not fall over on one', async () => {
+    const plugin = await load();
+    plugin.settings.codeRoot = path.join(__dirname, '..');
+    plugin.settings.bibFiles = 'src';
+    await plugin.loadCitations();
+    assert.strictEqual(plugin.citations.keys, 0);
   });
 });
 

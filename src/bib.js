@@ -1,14 +1,12 @@
 'use strict';
 
-// A bibliography read for its citation keys and the files they point at. Text only: no index
-// and no filesystem here. Formatting a citation is a bibliography manager's job, not ours.
+// A bibliography read for its citation keys and the files they point at. Text only.
+// Formatting a citation is a bibliography manager's job, not ours.
 
-// A value may be brace-delimited, quoted, or a bare number/macro, and `#` concatenates them.
-// Braces inside a value protect capitalisation ({DNA}) and carry no meaning once parsed.
+// Braces inside a value only protect capitalisation ({DNA}); they mean nothing once read.
 const stripBraces = (s) => s.replace(/[{}]/g, '');
 
-// Mendeley escapes the separators it writes into a `file` field; \\ has to go last or it
-// would consume the backslash of a pair it just produced.
+// Mendeley escapes the separators it writes. \\ goes last or it eats a pair it just made.
 const unescapeSpec = (s) => s.replace(/\\([:;\\])/g, '$1');
 
 function splitUnescaped(s, sep) {
@@ -24,8 +22,7 @@ function splitUnescaped(s, sep) {
   return out;
 }
 
-// A Windows drive letter splits on the same colon the spec uses as its separator, so put it
-// back together before anything counts the fields.
+// A drive letter splits on the same colon the spec separates by. Rejoin before counting fields.
 function rejoinDrives(parts) {
   const out = [];
   for (let i = 0; i < parts.length; i++) {
@@ -37,9 +34,8 @@ function rejoinDrives(parts) {
   return out;
 }
 
-// The attachment paths a `file` field names. Zotero, Better BibTeX and JabRef all write
-// "description:path:mimetype", several joined by ';'; a hand-written bibliography just writes
-// the path. The path is what is left after dropping those two, never simply the second field.
+// Zotero, Better BibTeX and JabRef all write "description:path:mimetype", joined by ';'. The
+// path is what is left after dropping those two, never simply the second field.
 function attachmentPaths(raw) {
   const out = [];
   for (const spec of splitUnescaped(String(raw || ''), ';')) {
@@ -56,8 +52,6 @@ class Scanner {
 
   skipSpace() { while (this.i < this.s.length && /\s/.test(this.s[this.i])) this.i++; }
 
-  // From an opening delimiter to its match, returning what sits between. Brace depth is
-  // tracked inside a quoted value too, since "a {b} c" is one value.
   balanced(open, close) {
     let depth = 0;
     const start = ++this.i;
@@ -109,8 +103,7 @@ class Scanner {
   }
 }
 
-// Fields up to the entry's closing brace. `stop` is the delimiter the entry opened with, so a
-// @entry(...) closes on its own paren.
+// `stop` is the delimiter the entry opened with, so @entry(...) closes on its own paren.
 function readFields(sc, macros, stop) {
   const fields = {};
   for (;;) {
@@ -129,9 +122,7 @@ function readFields(sc, macros, stop) {
   return fields;
 }
 
-// Every entry a BibTeX file declares: { key, type, fields }. @string macros are expanded as
-// they are met, @comment and @preamble skipped. A malformed entry costs only itself — a
-// bibliography is someone else's file and is never wholly trustworthy.
+// A malformed entry costs only itself: a bibliography is someone else's file.
 function parseBibtex(text) {
   const sc = new Scanner(String(text || ''));
   const macros = {};
@@ -176,8 +167,7 @@ const cslYear = (e) => {
 const cslAuthor = (e) => (Array.isArray(e.author) ? e.author : [])
   .map((a) => a.family || a.literal || '').filter(Boolean).join(' and ');
 
-// CSL-JSON carries no attachment paths — Zotero's CSL export drops them — so an entry read
-// from here matches a document by title or by file name, never by a path it named.
+// Zotero's CSL export drops attachments, so these entries match by title or file name only.
 function parseCsl(text) {
   let data;
   try { data = JSON.parse(text); } catch { return []; }
@@ -191,7 +181,6 @@ function parseCsl(text) {
 
 const looksLikeJson = (text) => /^\s*\[/.test(text);
 
-// Entries with their attachment paths resolved: { key, type, title, year, paths }.
 function parseBibliography(text) {
   const raw = looksLikeJson(text) ? parseCsl(text) : parseBibtex(text);
   return raw.map((e) => ({

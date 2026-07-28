@@ -1,9 +1,9 @@
 'use strict';
 
 const { PluginSettingTab, Setting } = require('obsidian');
-const { PRESETS, parseExtensions } = require('./constants');
+const { PRESETS, BIB_EXTS, parseExtensions } = require('./constants');
 const { formatGroups, knownExtensions } = require('./formats');
-const { FolderSuggest, folderSuggestAvailable } = require('./shared/deeplink/folder-suggest');
+const { DiskPathSuggest, suggestAvailable } = require('./shared/deeplink/disk-suggest');
 const { renderFolderList } = require('./shared/folder-list');
 const { t, plural } = require('./shared/i18n');
 const { renderPrecedenceSetting: precedenceSetting } = require('./shared/precedence');
@@ -41,37 +41,48 @@ class ReferenceLinkerSettingTab extends PluginSettingTab {
     if (opt) opt.text = name || `Viewer ${i + 1}`;
   }
 
-  // Files, not folders, so this is a plain textarea rather than the folder list: the folder
-  // autocomplete next to it would offer exactly the wrong thing.
   renderBibliographies(containerEl, save) {
     const s = this.plugin.settings;
-    new Setting(containerEl)
-      .setName(t('set.bibFiles.name'))
-      .setDesc(t('set.bibFiles.desc'))
-      .addTextArea((c) => {
-        const was = s.bibFiles;
-        c.inputEl.addClass('reference-linker-input');
-        c.inputEl.rows = 3;
-        c.setValue(s.bibFiles).onChange(async (v) => { s.bibFiles = v; await save(false); });
-        // On blur, not on every keystroke: re-reading a megabyte of BibTeX per character
-        // typed would stall the pane.
-        c.inputEl.addEventListener('blur', async () => {
-          if (s.bibFiles === was) return;
-          await this.plugin.loadCitations();
-          this.plugin.startWatchers();
-          this.display();
-        });
-      });
-
-    const missing = this.plugin.bibStatus().filter((x) => !x.exists).map((x) => x.abs);
-    if (missing.length) {
-      containerEl.createEl('div', { cls: 'reference-linker-note is-error', text: t('set.bibFiles.notFound', { files: missing.join(', ') }) });
-    }
-    const { keys, matched } = this.plugin.citations;
-    containerEl.createEl('div', {
-      cls: 'reference-linker-note',
-      text: keys ? t('set.bibFiles.stats', { keys, matched }) : t('set.bibFiles.none'),
+    renderFolderList(containerEl, {
+      cls: 'reference-linker',
+      name: t('set.bibFiles.name'),
+      desc: t('set.bibFiles.desc'),
+      get: () => s.bibFiles,
+      set: async (v) => {
+        s.bibFiles = v;
+        await save(false);
+        await this.plugin.loadCitations();
+        this.plugin.startWatchers(); // the watch follows the folders the list now names
+        drawStatus();
+      },
+      normalize: normFolder,
+      // Root-relative, like every other path this plugin stores: an absolute one would break
+      // the moment the vault moved to another machine.
+      attachSuggest: suggestAvailable()
+        ? (inputEl, onPick) => new DiskPathSuggest(this.app, inputEl, { getRoot: () => this.plugin.codeRoot(), onSelect: onPick, exts: BIB_EXTS })
+        : null,
+      placeholder: t('set.bibFiles.add'),
+      removeLabel: t('set.folderList.remove'),
+      addLabel: t('set.folderList.addAria'),
     });
+
+    const statusEl = containerEl.createDiv();
+    // Named by the `set` closure above, which only ever runs after this is assigned.
+    const drawStatus = () => {
+      statusEl.empty();
+      const status = this.plugin.bibStatus();
+      const note = (key, rows) => {
+        if (rows.length) statusEl.createEl('div', { cls: 'reference-linker-note is-error', text: t(key, { files: rows.join(', ') }) });
+      };
+      note('set.bibFiles.notFound', status.filter((x) => !x.exists).map((x) => x.abs));
+      note('set.bibFiles.notAFile', status.filter((x) => x.exists && !x.isFile).map((x) => x.abs));
+      const { keys, matched } = this.plugin.citations;
+      statusEl.createEl('div', {
+        cls: 'reference-linker-note',
+        text: keys ? t('set.bibFiles.stats', { keys, matched }) : t('set.bibFiles.none'),
+      });
+    };
+    drawStatus();
   }
 
   // The setting stays one string — parseExtensions reads it unchanged, the list only
@@ -94,10 +105,7 @@ class ReferenceLinkerSettingTab extends PluginSettingTab {
       .setDesc(on.size
         ? t('set.extensions.count', { n: current.filter((e) => known.has(e)).length, total: known.size })
         : t('set.extensions.none'))
-      .addExtraButton((c) => c
-        .setIcon('list-plus')
-        .setTooltip(t('set.extensions.addAll'))
-        .onClick(() => commit([...current, ...known])));
+      .setHeading();
     this.foldButton(heading, this.showExtensions, () => { this.showExtensions = !this.showExtensions; this.display(); });
     if (!this.showExtensions) return;
 
@@ -160,7 +168,7 @@ class ReferenceLinkerSettingTab extends PluginSettingTab {
       .setDesc(t('set.codeRoot.desc'))
       .addText((c) => {
         wide(c).setPlaceholder(this.plugin.codeRoot()).setValue(s.codeRoot).onChange(async (v) => { s.codeRoot = v.trim(); await save(false); });
-        if (folderSuggestAvailable()) new FolderSuggest(this.app, c.inputEl, () => '', null, () => this.plugin.codeRoot());
+        if (suggestAvailable()) new DiskPathSuggest(this.app, c.inputEl, { getSeed: () => this.plugin.codeRoot() });
       });
 
     const folderList = (name, desc, key) => renderFolderList(containerEl, {
@@ -170,8 +178,8 @@ class ReferenceLinkerSettingTab extends PluginSettingTab {
       get: () => s[key],
       set: async (v) => { s[key] = v; await save(false); },
       normalize: normFolder,
-      attachSuggest: folderSuggestAvailable()
-        ? (inputEl, onPick) => new FolderSuggest(this.app, inputEl, () => this.plugin.codeRoot(), onPick)
+      attachSuggest: suggestAvailable()
+        ? (inputEl, onPick) => new DiskPathSuggest(this.app, inputEl, { getRoot: () => this.plugin.codeRoot(), onSelect: onPick })
         : null,
       placeholder: t('set.folderList.add'),
       removeLabel: t('set.folderList.remove'),
@@ -183,8 +191,6 @@ class ReferenceLinkerSettingTab extends PluginSettingTab {
     if (missing.length) {
       containerEl.createEl('div', { cls: 'reference-linker-note is-error', text: t('set.scanFolders.notFound', { folders: missing.join(', ') }) });
     }
-
-    this.renderExtensions(containerEl, save);
 
     folderList(t('set.skipFolders.name'), t('set.skipFolders.desc'), 'skipDirs');
 
@@ -202,6 +208,9 @@ class ReferenceLinkerSettingTab extends PluginSettingTab {
 
     const root = this.plugin.codeRoot() || t('set.info.unknownRoot');
     containerEl.createEl('div', { cls: 'reference-linker-note', text: t('set.info', { root, entries: plural('entry', this.plugin.index.length) }) });
+
+    // --- File extensions ----------------------------------------------------
+    this.renderExtensions(containerEl, save);
 
     // --- Suggestions & links ------------------------------------------------
     new Setting(containerEl).setName(t('set.heading.suggestions')).setHeading();

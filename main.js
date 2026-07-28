@@ -160,6 +160,7 @@ var require_constants = __commonJS({
       // code linker too.
       file: "file:///{ref-root}/{path}"
     };
+    var BIB_EXTS = [".bib", ".json"];
     var DEFAULT_SETTINGS2 = {
       // @@ is Code Linker's default; @! avoids a clash when both are installed.
       trigger: "@!",
@@ -173,7 +174,7 @@ var require_constants = __commonJS({
       skipDirs: ".git\nnode_modules\n.obsidian",
       // one folder name per line
       bibFiles: "",
-      // .bib / CSL-JSON bibliographies, one path per line, absolute or under the root
+      // bibliographies: a file or a folder of them, one path per line
       editors: [],
       // user-defined viewer presets, each { name, template }
       askOnInsert: true,
@@ -236,7 +237,7 @@ var require_constants = __commonJS({
       }
       return false;
     }
-    module2.exports = { PRESETS: PRESETS2, DEFAULT_SETTINGS: DEFAULT_SETTINGS2, parseExtensions: parseExtensions2, parseSkip: parseSkip2, underSkip: underSkip2 };
+    module2.exports = { PRESETS: PRESETS2, DEFAULT_SETTINGS: DEFAULT_SETTINGS2, BIB_EXTS, parseExtensions: parseExtensions2, parseSkip: parseSkip2, underSkip: underSkip2 };
   }
 });
 
@@ -6666,33 +6667,106 @@ var require_modal = __commonJS({
   }
 });
 
-// src/shared/deeplink/folder-suggest.js
-var require_folder_suggest = __commonJS({
-  "src/shared/deeplink/folder-suggest.js"(exports2, module2) {
+// src/shared/suggest-base.js
+var require_suggest_base = __commonJS({
+  "src/shared/suggest-base.js"(exports2, module2) {
     "use strict";
-    var obsidian = require("obsidian");
+    var { AbstractInputSuggest } = require("obsidian");
+    var PathSuggestBase = class extends AbstractInputSuggest {
+      constructor(app, inputEl, onSelect) {
+        super(app, inputEl);
+        this.app = app;
+        this.inputEl = inputEl;
+        this.onSelect = onSelect;
+      }
+      // A vault completer deals in TFile/TFolder, a disk one in plain paths.
+      pathOf(item) {
+        return typeof item === "string" ? item : item.path;
+      }
+      match(items, query, limit) {
+        const q = String(query == null ? "" : query).replace(/\\/g, "/").toLowerCase();
+        const hit = items.filter((i) => this.pathOf(i).toLowerCase().includes(q));
+        return limit ? hit.slice(0, limit) : hit;
+      }
+      renderSuggestion(item, el) {
+        el.setText(this.pathOf(item) || "/");
+      }
+      // onSelect clears the box instead of keeping the pick: the folder-list editor adds it as a
+      // row rather than binding the input to one value.
+      selectSuggestion(item) {
+        const path = this.pathOf(item);
+        if (this.onSelect) {
+          this.onSelect(path);
+          this.setValue("");
+          this.close();
+          return;
+        }
+        this.setValue(path);
+        this.inputEl.trigger("input");
+        this.close();
+      }
+    };
+    var suggestAvailable = () => typeof AbstractInputSuggest === "function";
+    var SUGGEST_LIMIT = 50;
+    module2.exports = { PathSuggestBase, suggestAvailable, SUGGEST_LIMIT };
+  }
+});
+
+// src/shared/deeplink/disk-suggest.js
+var require_disk_suggest = __commonJS({
+  "src/shared/deeplink/disk-suggest.js"(exports2, module2) {
+    "use strict";
     var fs2 = require("fs");
     var nodePath2 = require("path");
-    var { AbstractInputSuggest } = obsidian;
-    var FolderSuggest = class extends AbstractInputSuggest {
-      constructor(app, inputEl, getRoot, onSelect, getSeed) {
-        super(app, inputEl);
-        this.inputEl = inputEl;
-        this.getRoot = getRoot;
-        this.onSelect = onSelect;
-        this.getSeed = getSeed;
+    var { PathSuggestBase, suggestAvailable, SUGGEST_LIMIT } = require_suggest_base();
+    var DiskPathSuggest = class extends PathSuggestBase {
+      constructor(app, inputEl, opts) {
+        const o = opts || {};
+        super(app, inputEl, o.onSelect);
+        this.getRoot = o.getRoot;
+        this.getSeed = o.getSeed;
+        this.exts = o.exts && o.exts.length ? new Set(o.exts.map((e) => e.toLowerCase())) : null;
       }
-      // Immediate subdirectory names of an absolute dir, or [] if it can't be read.
-      subdirs(dir) {
+      entries(dir) {
         try {
           return fs2.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name);
         } catch (e) {
           return [];
         }
       }
+      // Every wanted file under `base`, root-relative. Walked once per completer and kept: the
+      // filtering runs per keystroke, and a document library is too big to re-read that often.
+      files(base) {
+        if (this.cache && this.cacheBase === base)
+          return this.cache;
+        const out = [];
+        const walk = (dir, rel) => {
+          let items = [];
+          try {
+            items = fs2.readdirSync(dir, { withFileTypes: true });
+          } catch (e) {
+            return;
+          }
+          for (const e of items) {
+            if (e.name[0] === ".")
+              continue;
+            const r = rel ? rel + "/" + e.name : e.name;
+            if (e.isDirectory())
+              walk(nodePath2.join(dir, e.name), r);
+            else if (this.exts.has(nodePath2.extname(e.name).toLowerCase()))
+              out.push(r);
+          }
+        };
+        walk(base, "");
+        this.cacheBase = base;
+        this.cache = out.sort();
+        return this.cache;
+      }
       getSuggestions(query) {
         const base = this.getRoot ? this.getRoot() : "";
-        const q = query.replace(/\\/g, "/");
+        if (this.exts)
+          return this.match(this.files(base), query, SUGGEST_LIMIT);
+        const q = String(query == null ? "" : query).replace(/\\/g, "/");
         const slash = q.lastIndexOf("/");
         const partial = (slash === -1 ? q : q.slice(slash + 1)).toLowerCase();
         const head = slash === -1 ? "" : q.slice(0, slash);
@@ -6710,25 +6784,10 @@ var require_folder_suggest = __commonJS({
         if (!scanDir)
           return [];
         const stem = prefix.replace(/\/+$/, "");
-        return this.subdirs(scanDir).filter((name) => name.toLowerCase().includes(partial)).map((name) => stem ? stem + "/" + name : name).sort().slice(0, 50);
-      }
-      renderSuggestion(path, el) {
-        el.setText(path);
-      }
-      selectSuggestion(path) {
-        if (this.onSelect) {
-          this.onSelect(path);
-          this.setValue("");
-          this.close();
-          return;
-        }
-        this.setValue(path);
-        this.inputEl.trigger("input");
-        this.close();
+        return this.entries(scanDir).filter((name) => name.toLowerCase().includes(partial)).map((name) => stem ? stem + "/" + name : name).sort().slice(0, SUGGEST_LIMIT);
       }
     };
-    var folderSuggestAvailable = () => typeof AbstractInputSuggest === "function";
-    module2.exports = { FolderSuggest, folderSuggestAvailable };
+    module2.exports = { DiskPathSuggest, suggestAvailable };
   }
 });
 
@@ -6910,9 +6969,9 @@ var require_settings_tab = __commonJS({
   "src/settings-tab.js"(exports2, module2) {
     "use strict";
     var { PluginSettingTab, Setting } = require("obsidian");
-    var { PRESETS: PRESETS2, parseExtensions: parseExtensions2 } = require_constants();
+    var { PRESETS: PRESETS2, BIB_EXTS, parseExtensions: parseExtensions2 } = require_constants();
     var { formatGroups, knownExtensions } = require_formats();
-    var { FolderSuggest, folderSuggestAvailable } = require_folder_suggest();
+    var { DiskPathSuggest, suggestAvailable } = require_disk_suggest();
     var { renderFolderList } = require_folder_list();
     var { t: t2, plural: plural2 } = require_i18n();
     var { renderPrecedenceSetting: precedenceSetting } = require_precedence();
@@ -6947,35 +7006,45 @@ var require_settings_tab = __commonJS({
         if (opt)
           opt.text = name || `Viewer ${i + 1}`;
       }
-      // Files, not folders, so this is a plain textarea rather than the folder list: the folder
-      // autocomplete next to it would offer exactly the wrong thing.
       renderBibliographies(containerEl, save) {
         const s = this.plugin.settings;
-        new Setting(containerEl).setName(t2("set.bibFiles.name")).setDesc(t2("set.bibFiles.desc")).addTextArea((c) => {
-          const was = s.bibFiles;
-          c.inputEl.addClass("reference-linker-input");
-          c.inputEl.rows = 3;
-          c.setValue(s.bibFiles).onChange(async (v) => {
+        renderFolderList(containerEl, {
+          cls: "reference-linker",
+          name: t2("set.bibFiles.name"),
+          desc: t2("set.bibFiles.desc"),
+          get: () => s.bibFiles,
+          set: async (v) => {
             s.bibFiles = v;
             await save(false);
-          });
-          c.inputEl.addEventListener("blur", async () => {
-            if (s.bibFiles === was)
-              return;
             await this.plugin.loadCitations();
             this.plugin.startWatchers();
-            this.display();
+            drawStatus();
+          },
+          normalize: normFolder,
+          // Root-relative, like every other path this plugin stores: an absolute one would break
+          // the moment the vault moved to another machine.
+          attachSuggest: suggestAvailable() ? (inputEl, onPick) => new DiskPathSuggest(this.app, inputEl, { getRoot: () => this.plugin.codeRoot(), onSelect: onPick, exts: BIB_EXTS }) : null,
+          placeholder: t2("set.bibFiles.add"),
+          removeLabel: t2("set.folderList.remove"),
+          addLabel: t2("set.folderList.addAria")
+        });
+        const statusEl = containerEl.createDiv();
+        const drawStatus = () => {
+          statusEl.empty();
+          const status = this.plugin.bibStatus();
+          const note = (key, rows) => {
+            if (rows.length)
+              statusEl.createEl("div", { cls: "reference-linker-note is-error", text: t2(key, { files: rows.join(", ") }) });
+          };
+          note("set.bibFiles.notFound", status.filter((x) => !x.exists).map((x) => x.abs));
+          note("set.bibFiles.notAFile", status.filter((x) => x.exists && !x.isFile).map((x) => x.abs));
+          const { keys, matched } = this.plugin.citations;
+          statusEl.createEl("div", {
+            cls: "reference-linker-note",
+            text: keys ? t2("set.bibFiles.stats", { keys, matched }) : t2("set.bibFiles.none")
           });
-        });
-        const missing = this.plugin.bibStatus().filter((x) => !x.exists).map((x) => x.abs);
-        if (missing.length) {
-          containerEl.createEl("div", { cls: "reference-linker-note is-error", text: t2("set.bibFiles.notFound", { files: missing.join(", ") }) });
-        }
-        const { keys, matched } = this.plugin.citations;
-        containerEl.createEl("div", {
-          cls: "reference-linker-note",
-          text: keys ? t2("set.bibFiles.stats", { keys, matched }) : t2("set.bibFiles.none")
-        });
+        };
+        drawStatus();
       }
       // The setting stays one string — parseExtensions reads it unchanged, the list only
       // writes it, so there is nothing to migrate.
@@ -6991,7 +7060,7 @@ var require_settings_tab = __commonJS({
         };
         if (this.showExtensions === void 0)
           this.showExtensions = !on.size;
-        const heading = new Setting(containerEl).setName(t2("set.extensions.name")).setDesc(on.size ? t2("set.extensions.count", { n: current.filter((e) => known.has(e)).length, total: known.size }) : t2("set.extensions.none")).addExtraButton((c) => c.setIcon("list-plus").setTooltip(t2("set.extensions.addAll")).onClick(() => commit([...current, ...known])));
+        const heading = new Setting(containerEl).setName(t2("set.extensions.name")).setDesc(on.size ? t2("set.extensions.count", { n: current.filter((e) => known.has(e)).length, total: known.size }) : t2("set.extensions.none")).setHeading();
         this.foldButton(heading, this.showExtensions, () => {
           this.showExtensions = !this.showExtensions;
           this.display();
@@ -7051,8 +7120,8 @@ var require_settings_tab = __commonJS({
             s.codeRoot = v.trim();
             await save(false);
           });
-          if (folderSuggestAvailable())
-            new FolderSuggest(this.app, c.inputEl, () => "", null, () => this.plugin.codeRoot());
+          if (suggestAvailable())
+            new DiskPathSuggest(this.app, c.inputEl, { getSeed: () => this.plugin.codeRoot() });
         });
         const folderList = (name, desc, key) => renderFolderList(containerEl, {
           cls: "reference-linker",
@@ -7064,7 +7133,7 @@ var require_settings_tab = __commonJS({
             await save(false);
           },
           normalize: normFolder,
-          attachSuggest: folderSuggestAvailable() ? (inputEl, onPick) => new FolderSuggest(this.app, inputEl, () => this.plugin.codeRoot(), onPick) : null,
+          attachSuggest: suggestAvailable() ? (inputEl, onPick) => new DiskPathSuggest(this.app, inputEl, { getRoot: () => this.plugin.codeRoot(), onSelect: onPick }) : null,
           placeholder: t2("set.folderList.add"),
           removeLabel: t2("set.folderList.remove"),
           addLabel: t2("set.folderList.addAria")
@@ -7074,7 +7143,6 @@ var require_settings_tab = __commonJS({
         if (missing.length) {
           containerEl.createEl("div", { cls: "reference-linker-note is-error", text: t2("set.scanFolders.notFound", { folders: missing.join(", ") }) });
         }
-        this.renderExtensions(containerEl, save);
         folderList(t2("set.skipFolders.name"), t2("set.skipFolders.desc"), "skipDirs");
         new Setting(containerEl).setName(t2("set.autoRefresh.name")).setDesc(t2("set.autoRefresh.desc")).addToggle((c) => c.setValue(s.autoRefresh).onChange(async (v) => {
           s.autoRefresh = v;
@@ -7091,6 +7159,7 @@ var require_settings_tab = __commonJS({
         this.renderBibliographies(containerEl, save);
         const root = this.plugin.codeRoot() || t2("set.info.unknownRoot");
         containerEl.createEl("div", { cls: "reference-linker-note", text: t2("set.info", { root, entries: plural2("entry", this.plugin.index.length) }) });
+        this.renderExtensions(containerEl, save);
         new Setting(containerEl).setName(t2("set.heading.suggestions")).setHeading();
         new Setting(containerEl).setName(t2("set.trigger.name")).setDesc(t2("set.trigger.desc")).addText((c) => c.setValue(s.trigger).onChange(async (v) => {
           s.trigger = v || "@!";
@@ -7264,8 +7333,6 @@ var require_bib = __commonJS({
         while (this.i < this.s.length && /\s/.test(this.s[this.i]))
           this.i++;
       }
-      // From an opening delimiter to its match, returning what sits between. Brace depth is
-      // tracked inside a quoted value too, since "a {b} c" is one value.
       balanced(open, close) {
         let depth = 0;
         const start = ++this.i;
@@ -7709,9 +7776,8 @@ var require_en = __commonJS({
       "set.scanFolders.desc": "Folders scanned for documents, relative to the reference root. Leave empty to scan the whole root.",
       "set.scanFolders.notFound": "\u26A0 Not found under the reference root \u2014 {folders}",
       "set.extensions.name": "File extensions",
-      "set.extensions.count": "{n} of {total} supported extensions on",
-      "set.extensions.none": "Nothing is indexed until at least one is on.",
-      "set.extensions.addAll": "Turn on every supported extension",
+      "set.extensions.count": "Which formats are indexed \u2014 {n} of {total} extensions on.",
+      "set.extensions.none": "Which formats are indexed. Nothing at all until one is on.",
       "set.extensions.meta": "{n} of {total} on: {exts}",
       "set.extensions.other.name": "Other extensions",
       "set.extensions.other.desc": "Anything else to index. Found by file name only \u2014 no preview, no sections.",
@@ -7730,10 +7796,12 @@ var require_en = __commonJS({
       "set.skipFolders.desc": "A bare name (node_modules) is skipped at any depth; a path with a slash (archive/raw) skips only that folder, relative to the reference root.",
       "set.autoRefresh.desc": "Watch the scan folders and rebuild the index when documents change.",
       "set.bibFiles.name": "Bibliographies",
-      "set.bibFiles.desc": "BibTeX (.bib) or CSL-JSON files to read citation keys from, one path per line \u2014 absolute, or relative to the reference root. A link inserted to a document with a key is pinned to it, so it survives the document being renamed or re-filed.",
+      "set.bibFiles.desc": "BibTeX (.bib) or CSL-JSON files to read citation keys from. A link inserted to a document that has a key is pinned to it, so it survives the document being renamed or re-filed.",
+      "set.bibFiles.add": "Add bibliography\u2026",
       "set.bibFiles.stats": "{matched} of {keys} key(s) matched to an indexed document",
       "set.bibFiles.none": "No bibliography loaded \u2014 links are pinned to sections only.",
       "set.bibFiles.notFound": "\u26A0 Not found \u2014 {files}",
+      "set.bibFiles.notAFile": "\u26A0 A folder, not a bibliography file \u2014 {files}",
       "set.info": "Reference root: {root} \xB7 {entries} indexed",
       "set.rebuild.name": "Rebuild reference index",
       "set.rebuild.desc": "Re-scan the document folders now.",
@@ -7833,9 +7901,8 @@ var require_ru = __commonJS({
       "set.scanFolders.desc": "\u041F\u0430\u043F\u043A\u0438, \u0441\u043A\u0430\u043D\u0438\u0440\u0443\u0435\u043C\u044B\u0435 \u043D\u0430 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u044B, \u043E\u0442\u043D\u043E\u0441\u0438\u0442\u0435\u043B\u044C\u043D\u043E \u043A\u043E\u0440\u043D\u044F. \u041E\u0441\u0442\u0430\u0432\u044C\u0442\u0435 \u043F\u0443\u0441\u0442\u044B\u043C, \u0447\u0442\u043E\u0431\u044B \u0441\u043A\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0432\u0435\u0441\u044C \u043A\u043E\u0440\u0435\u043D\u044C.",
       "set.scanFolders.notFound": "\u26A0 \u041D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u043E \u0432 \u043A\u043E\u0440\u043D\u0435 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u043E\u0432 \u2014 {folders}",
       "set.extensions.name": "\u0420\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u044F \u0444\u0430\u0439\u043B\u043E\u0432",
-      "set.extensions.count": "\u0412\u043A\u043B\u044E\u0447\u0435\u043D\u043E {n} \u0438\u0437 {total} \u043F\u043E\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0435\u043C\u044B\u0445 \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u0439",
-      "set.extensions.none": "\u041F\u043E\u043A\u0430 \u043D\u0438\u0447\u0435\u0433\u043E \u043D\u0435 \u0432\u043A\u043B\u044E\u0447\u0435\u043D\u043E \u2014 \u0438\u043D\u0434\u0435\u043A\u0441 \u043F\u0443\u0441\u0442.",
-      "set.extensions.addAll": "\u0412\u043A\u043B\u044E\u0447\u0438\u0442\u044C \u0432\u0441\u0435 \u043F\u043E\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0435\u043C\u044B\u0435 \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u044F",
+      "set.extensions.count": "\u041A\u0430\u043A\u0438\u0435 \u0444\u043E\u0440\u043C\u0430\u0442\u044B \u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u0443\u044E\u0442\u0441\u044F \u2014 \u0432\u043A\u043B\u044E\u0447\u0435\u043D\u043E \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u0439: {n} \u0438\u0437 {total}.",
+      "set.extensions.none": "\u041A\u0430\u043A\u0438\u0435 \u0444\u043E\u0440\u043C\u0430\u0442\u044B \u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u0443\u044E\u0442\u0441\u044F. \u041F\u043E\u043A\u0430 \u043D\u0435 \u0432\u043A\u043B\u044E\u0447\u0435\u043D\u043E \u043D\u0438 \u043E\u0434\u043D\u043E\u0433\u043E \u2014 \u0438\u043D\u0434\u0435\u043A\u0441 \u043F\u0443\u0441\u0442.",
       "set.extensions.meta": "\u0412\u043A\u043B\u044E\u0447\u0435\u043D\u043E {n} \u0438\u0437 {total}: {exts}",
       "set.extensions.other.name": "\u0414\u0440\u0443\u0433\u0438\u0435 \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u044F",
       "set.extensions.other.desc": "\u0412\u0441\u0451 \u043E\u0441\u0442\u0430\u043B\u044C\u043D\u043E\u0435, \u0447\u0442\u043E \u043D\u0443\u0436\u043D\u043E \u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u0442\u044C. \u0418\u0449\u0435\u0442\u0441\u044F \u0442\u043E\u043B\u044C\u043A\u043E \u043F\u043E \u0438\u043C\u0435\u043D\u0438 \u0444\u0430\u0439\u043B\u0430 \u2014 \u0431\u0435\u0437 \u043F\u0440\u0435\u0432\u044C\u044E \u0438 \u0440\u0430\u0437\u0434\u0435\u043B\u043E\u0432.",
@@ -7854,10 +7921,12 @@ var require_ru = __commonJS({
       "set.skipFolders.desc": "\u041F\u0440\u043E\u0441\u0442\u043E \u0438\u043C\u044F (node_modules) \u043F\u0440\u043E\u043F\u0443\u0441\u043A\u0430\u0435\u0442\u0441\u044F \u043D\u0430 \u043B\u044E\u0431\u043E\u0439 \u0433\u043B\u0443\u0431\u0438\u043D\u0435; \u043F\u0443\u0442\u044C \u0441\u043E \u0441\u043B\u044D\u0448\u0435\u043C (archive/raw) \u043F\u0440\u043E\u043F\u0443\u0441\u043A\u0430\u0435\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u044D\u0442\u0443 \u043F\u0430\u043F\u043A\u0443 \u043E\u0442\u043D\u043E\u0441\u0438\u0442\u0435\u043B\u044C\u043D\u043E \u043A\u043E\u0440\u043D\u044F.",
       "set.autoRefresh.desc": "\u0421\u043B\u0435\u0434\u0438\u0442\u044C \u0437\u0430 \u043F\u0430\u043F\u043A\u0430\u043C\u0438 \u0441\u043A\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F \u0438 \u043F\u0435\u0440\u0435\u0441\u0442\u0440\u0430\u0438\u0432\u0430\u0442\u044C \u0438\u043D\u0434\u0435\u043A\u0441 \u043F\u0440\u0438 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0438 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u043E\u0432.",
       "set.bibFiles.name": "\u0411\u0438\u0431\u043B\u0438\u043E\u0433\u0440\u0430\u0444\u0438\u0438",
-      "set.bibFiles.desc": "\u0424\u0430\u0439\u043B\u044B BibTeX (.bib) \u0438\u043B\u0438 CSL-JSON, \u043E\u0442\u043A\u0443\u0434\u0430 \u0447\u0438\u0442\u0430\u044E\u0442\u0441\u044F \u043A\u043B\u044E\u0447\u0438 \u0446\u0438\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F, \u043F\u043E \u043E\u0434\u043D\u043E\u043C\u0443 \u043F\u0443\u0442\u0438 \u0432 \u0441\u0442\u0440\u043E\u043A\u0435 \u2014 \u0430\u0431\u0441\u043E\u043B\u044E\u0442\u043D\u043E\u043C\u0443 \u0438\u043B\u0438 \u043E\u0442\u043D\u043E\u0441\u0438\u0442\u0435\u043B\u044C\u043D\u043E \u043A\u043E\u0440\u043D\u044F \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u043E\u0432. \u0421\u0441\u044B\u043B\u043A\u0430 \u043D\u0430 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442 \u0441 \u043A\u043B\u044E\u0447\u043E\u043C \u0437\u0430\u043A\u0440\u0435\u043F\u043B\u044F\u0435\u0442\u0441\u044F \u0437\u0430 \u043D\u0438\u043C \u0438 \u043F\u0435\u0440\u0435\u0436\u0438\u0432\u0430\u0435\u0442 \u043F\u0435\u0440\u0435\u0438\u043C\u0435\u043D\u043E\u0432\u0430\u043D\u0438\u0435 \u0438 \u043F\u0435\u0440\u0435\u043A\u043B\u0430\u0434\u044B\u0432\u0430\u043D\u0438\u0435 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430.",
+      "set.bibFiles.desc": "\u0424\u0430\u0439\u043B\u044B BibTeX (.bib) \u0438\u043B\u0438 CSL-JSON, \u043E\u0442\u043A\u0443\u0434\u0430 \u0447\u0438\u0442\u0430\u044E\u0442\u0441\u044F \u043A\u043B\u044E\u0447\u0438 \u0446\u0438\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F. \u0421\u0441\u044B\u043B\u043A\u0430 \u043D\u0430 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442, \u0443 \u043A\u043E\u0442\u043E\u0440\u043E\u0433\u043E \u0435\u0441\u0442\u044C \u043A\u043B\u044E\u0447, \u0437\u0430\u043A\u0440\u0435\u043F\u043B\u044F\u0435\u0442\u0441\u044F \u0437\u0430 \u043D\u0438\u043C \u0438 \u043F\u0435\u0440\u0435\u0436\u0438\u0432\u0430\u0435\u0442 \u043F\u0435\u0440\u0435\u0438\u043C\u0435\u043D\u043E\u0432\u0430\u043D\u0438\u0435 \u0438 \u043F\u0435\u0440\u0435\u043A\u043B\u0430\u0434\u044B\u0432\u0430\u043D\u0438\u0435 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430.",
+      "set.bibFiles.add": "\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u0431\u0438\u0431\u043B\u0438\u043E\u0433\u0440\u0430\u0444\u0438\u044E\u2026",
       "set.bibFiles.stats": "\u0441\u043E\u043F\u043E\u0441\u0442\u0430\u0432\u043B\u0435\u043D\u043E \u0441 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430\u043C\u0438 \u043A\u043B\u044E\u0447\u0435\u0439: {matched} \u0438\u0437 {keys}",
       "set.bibFiles.none": "\u0411\u0438\u0431\u043B\u0438\u043E\u0433\u0440\u0430\u0444\u0438\u044F \u043D\u0435 \u0437\u0430\u0433\u0440\u0443\u0436\u0435\u043D\u0430 \u2014 \u0441\u0441\u044B\u043B\u043A\u0438 \u0437\u0430\u043A\u0440\u0435\u043F\u043B\u044F\u044E\u0442\u0441\u044F \u0442\u043E\u043B\u044C\u043A\u043E \u0437\u0430 \u0440\u0430\u0437\u0434\u0435\u043B\u0430\u043C\u0438.",
       "set.bibFiles.notFound": "\u26A0 \u041D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u043E \u2014 {files}",
+      "set.bibFiles.notAFile": "\u26A0 \u042D\u0442\u043E \u043F\u0430\u043F\u043A\u0430, \u0430 \u043D\u0435 \u0444\u0430\u0439\u043B \u0431\u0438\u0431\u043B\u0438\u043E\u0433\u0440\u0430\u0444\u0438\u0438 \u2014 {files}",
       "set.info": "\u041A\u043E\u0440\u0435\u043D\u044C \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u043E\u0432: {root} \xB7 \u043F\u0440\u043E\u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043E {entries}",
       "set.rebuild.name": "\u041F\u0435\u0440\u0435\u0441\u0442\u0440\u043E\u0438\u0442\u044C \u0438\u043D\u0434\u0435\u043A\u0441 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u043E\u0432",
       "set.rebuild.desc": "\u041F\u0435\u0440\u0435\u0441\u043A\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u043F\u0430\u043F\u043A\u0438 \u0441 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430\u043C\u0438 \u0441\u0435\u0439\u0447\u0430\u0441.",
@@ -8260,13 +8329,9 @@ var ReferenceLinkerPlugin = class extends Plugin {
       r.line = sec.line;
     return r;
   }
-  // Where a cite binding says its document now lives, when that is not where the link points:
-  // a path when it moved, 'broken' for a key the bibliography no longer has, null otherwise.
-  //
-  // A key the bibliography still has but whose document is not in the index is the
-  // unknown-document case, not a break: a reference root pointed at the wrong folder, or a
-  // library drive not mounted yet, would otherwise turn every cite link in the vault red at
-  // once while the bibliography itself reads perfectly well.
+  // A path when the document moved, 'broken' for a key the bibliography lost, else null. A key
+  // it still has but cannot place is the unknown-document case sec refuses to judge — a
+  // misconfigured root would otherwise redden every cite link at once.
   citeMovedTo(b, here) {
     if (!b.cite)
       return null;
@@ -8288,9 +8353,8 @@ var ReferenceLinkerPlugin = class extends Plugin {
       return this.idBindState(url, hits);
     return bindStateFrom(hits.map((e) => e.position), storedPosition);
   }
-  // The same link pointed at another file: scheme, template and fragment left as they were.
-  // Null when the URL holds neither our root token nor the reference root — rewriting a path
-  // we cannot locate inside the URL would corrupt the link rather than fix it.
+  // The same link pointed at another file. Null when the URL holds neither our root token nor
+  // the reference root: a path we cannot locate in it cannot be rewritten, only corrupted.
   retargetUrl(url, rel) {
     const enc = rel.split("/").map(encodeURIComponent).join("/");
     const token = /(\{(?:ref-)?root\}\/)[^#?]*/;
@@ -8347,13 +8411,8 @@ var ReferenceLinkerPlugin = class extends Plugin {
   linkPinOption(link) {
     return this.pinOptionFor(link.target, link.title);
   }
-  // The title pinning would produce and what it names, or null when there is nothing to pin
-  // or it would change nothing.
-  //
-  // A binding already there is kept exactly as it stands and only topped up with the key:
-  // re-deriving its section from the page the link sits on would silently repoint a link that
-  // has drifted, which is the one thing pinning must never do. A tooltip is prose, not a
-  // binding, and is never overwritten.
+  // A binding already there is topped up with the key, never re-derived: reading its section
+  // off the page again would repoint a link that has drifted. A tooltip is prose, left alone.
   pinOptionFor(url, title) {
     const existing = ownsBinding(title, OWNER) ? parseBinding(title) : null;
     if (!existing && title)
@@ -8495,15 +8554,12 @@ var ReferenceLinkerPlugin = class extends Plugin {
     out.sort((a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path));
     return out;
   }
-  // The bibliographies to read, absolute. A path is taken as written when absolute, and
-  // resolved against the reference root otherwise.
   bibPaths() {
     const root = this.codeRoot();
     return splitLines(this.settings.bibFiles).map((line) => line.split("\\").join("/").trim()).filter(Boolean).map((p) => nodePath.isAbsolute(p) ? p : root ? nodePath.join(root, p) : p);
   }
-  // Re-read the bibliographies and match their keys against the index. Deliberately apart
-  // from the file scan, which caches per file by mtime: a re-export moves a key onto another
-  // document without that document changing, so a key cached with the file would never move.
+  // Apart from the file scan, which caches per file by mtime: a re-export moves a key onto
+  // another document without that document changing.
   async loadCitations() {
     const entries = [];
     for (const abs of this.bibPaths()) {
@@ -8514,13 +8570,10 @@ var ReferenceLinkerPlugin = class extends Plugin {
     }
     this.citations = buildCitations(entries, [...this.fileCache.keys()], this.codeRoot());
   }
-  // The key a document is filed under.
   citeOf(rel) {
     return rel && this.citations.byPath.get(rel) || null;
   }
-  // Whether a verdict about a key is worth anything. With no bibliography loaded every cite
-  // binding in the vault would read as broken at once — the same false alarm a misconfigured
-  // reference root would raise, which is why sec refuses to judge an unindexed document.
+  // With no bibliography read, no cite binding is judged at all.
   hasCitations() {
     return this.citations.keys > 0;
   }
@@ -8636,9 +8689,8 @@ var ReferenceLinkerPlugin = class extends Plugin {
     clearTimeout(this.watchTimer);
     this.watchTimer = setTimeout(() => this.rebuildIndex(false), 1500);
   }
-  // A re-exported bibliography moves keys between documents without any document changing,
-  // so only the citation maps are rebuilt — a full rescan would re-read every outline for
-  // nothing, and re-exporting from Zotero is the common case this whole anchor exists for.
+  // Only the citation maps: no document changed, so a rescan would re-read every outline for
+  // nothing.
   onBibChange() {
     clearTimeout(this.bibTimer);
     this.bibTimer = setTimeout(async () => {
@@ -8776,8 +8828,6 @@ var ReferenceLinkerPlugin = class extends Plugin {
     const link = `[${e.name}](${title ? withTitle(url, title) : url})`;
     return inTable ? link.replace(/\|/g, "\\|") : link;
   }
-  // What a new link is pinned to: the section it points at, and the key its document is filed
-  // under. The key is what survives the document being re-filed, which no path can.
   bindingFor(e) {
     const b = {};
     const cite = this.citeOf(e.path);
@@ -8995,11 +9045,19 @@ var ReferenceLinkerPlugin = class extends Plugin {
       exists: !!root && fs.existsSync(nodePath.join(root, rel))
     }));
   }
+  // isFile, not just exists: reading a folder throws EISDIR into loadCitations' catch, and
+  // the row would sit there looking healthy.
   bibStatus() {
-    return this.bibPaths().map((abs) => ({ abs, exists: fs.existsSync(abs) }));
+    return this.bibPaths().map((abs) => {
+      let stat = null;
+      try {
+        stat = fs.statSync(abs);
+      } catch (e) {
+      }
+      return { abs, exists: !!stat, isFile: !!stat && stat.isFile() };
+    });
   }
-  // The bibliographies grouped by the folder holding them, as folder -> lowercased file
-  // names, so several bibliographies side by side cost one watcher rather than one each.
+  // Folder -> the file names that count in it, so bibliographies side by side cost one watcher.
   bibFolders() {
     const dirs = /* @__PURE__ */ new Map();
     for (const abs of this.bibPaths()) {

@@ -435,8 +435,7 @@ class ReferenceLinkerPlugin extends Plugin {
     const here = this.targetIndexedFile(this.decodeTarget(url));
     const moved = this.citeMovedTo(b, here);
     if (moved === 'broken') return { state: 'broken' };
-    // A moved document is judged by the outline of where it moved to, not of where the link
-    // still points: the page the section wants is the page it sits on in the new file.
+    // Judged by the outline of where it moved to, not of where the link still points.
     const rel = moved || here;
     if (!rel) return null;
     const sec = b.sec ? this.secBindState(url, rel, b.sec, storedPosition) : null;
@@ -448,13 +447,9 @@ class ReferenceLinkerPlugin extends Plugin {
     return r;
   }
 
-  // Where a cite binding says its document now lives, when that is not where the link points:
-  // a path when it moved, 'broken' for a key the bibliography no longer has, null otherwise.
-  //
-  // A key the bibliography still has but whose document is not in the index is the
-  // unknown-document case, not a break: a reference root pointed at the wrong folder, or a
-  // library drive not mounted yet, would otherwise turn every cite link in the vault red at
-  // once while the bibliography itself reads perfectly well.
+  // A path when the document moved, 'broken' for a key the bibliography lost, else null. A key
+  // it still has but cannot place is the unknown-document case sec refuses to judge — a
+  // misconfigured root would otherwise redden every cite link at once.
   citeMovedTo(b, here) {
     if (!b.cite) return null;
     const known = this.citations.byKey.get(String(b.cite).toLowerCase());
@@ -475,9 +470,8 @@ class ReferenceLinkerPlugin extends Plugin {
     return bindStateFrom(hits.map((e) => e.position), storedPosition);
   }
 
-  // The same link pointed at another file: scheme, template and fragment left as they were.
-  // Null when the URL holds neither our root token nor the reference root — rewriting a path
-  // we cannot locate inside the URL would corrupt the link rather than fix it.
+  // The same link pointed at another file. Null when the URL holds neither our root token nor
+  // the reference root: a path we cannot locate in it cannot be rewritten, only corrupted.
   retargetUrl(url, rel) {
     const enc = rel.split('/').map(encodeURIComponent).join('/');
     const token = /(\{(?:ref-)?root\}\/)[^#?]*/;
@@ -535,13 +529,8 @@ class ReferenceLinkerPlugin extends Plugin {
     return this.pinOptionFor(link.target, link.title);
   }
 
-  // The title pinning would produce and what it names, or null when there is nothing to pin
-  // or it would change nothing.
-  //
-  // A binding already there is kept exactly as it stands and only topped up with the key:
-  // re-deriving its section from the page the link sits on would silently repoint a link that
-  // has drifted, which is the one thing pinning must never do. A tooltip is prose, not a
-  // binding, and is never overwritten.
+  // A binding already there is topped up with the key, never re-derived: reading its section
+  // off the page again would repoint a link that has drifted. A tooltip is prose, left alone.
   pinOptionFor(url, title) {
     const existing = ownsBinding(title, OWNER) ? parseBinding(title) : null;
     if (!existing && title) return null;
@@ -677,8 +666,6 @@ class ReferenceLinkerPlugin extends Plugin {
     return out;
   }
 
-  // The bibliographies to read, absolute. A path is taken as written when absolute, and
-  // resolved against the reference root otherwise.
   bibPaths() {
     const root = this.codeRoot();
     return splitLines(this.settings.bibFiles)
@@ -687,9 +674,8 @@ class ReferenceLinkerPlugin extends Plugin {
       .map((p) => (nodePath.isAbsolute(p) ? p : root ? nodePath.join(root, p) : p));
   }
 
-  // Re-read the bibliographies and match their keys against the index. Deliberately apart
-  // from the file scan, which caches per file by mtime: a re-export moves a key onto another
-  // document without that document changing, so a key cached with the file would never move.
+  // Apart from the file scan, which caches per file by mtime: a re-export moves a key onto
+  // another document without that document changing.
   async loadCitations() {
     const entries = [];
     for (const abs of this.bibPaths()) {
@@ -702,14 +688,11 @@ class ReferenceLinkerPlugin extends Plugin {
     this.citations = buildCitations(entries, [...this.fileCache.keys()], this.codeRoot());
   }
 
-  // The key a document is filed under.
   citeOf(rel) {
     return (rel && this.citations.byPath.get(rel)) || null;
   }
 
-  // Whether a verdict about a key is worth anything. With no bibliography loaded every cite
-  // binding in the vault would read as broken at once — the same false alarm a misconfigured
-  // reference root would raise, which is why sec refuses to judge an unindexed document.
+  // With no bibliography read, no cite binding is judged at all.
   hasCitations() {
     return this.citations.keys > 0;
   }
@@ -770,10 +753,8 @@ class ReferenceLinkerPlugin extends Plugin {
     this.stopWatchers();
     this.watchUnsupported = false;
     if (!this.settings.autoRefresh) return;
-    // The folder, not the file: an exporter that writes a temporary file and renames it over
-    // the target — which is how Zotero re-exports — replaces the inode and leaves a watch on
-    // the file itself bound to something unlinked, silently deaf from the first export on.
-    // Watching the folder also notices a bibliography that isn't there yet.
+    // The folder, not the file: Zotero re-exports by renaming a temp file over the target, and
+    // a watch on the file itself is left bound to an unlinked inode, deaf from then on.
     for (const [dir, names] of this.bibFolders()) {
       try {
         if (!fs.existsSync(dir)) continue;
@@ -830,9 +811,8 @@ class ReferenceLinkerPlugin extends Plugin {
     this.watchTimer = setTimeout(() => this.rebuildIndex(false), 1500);
   }
 
-  // A re-exported bibliography moves keys between documents without any document changing,
-  // so only the citation maps are rebuilt — a full rescan would re-read every outline for
-  // nothing, and re-exporting from Zotero is the common case this whole anchor exists for.
+  // Only the citation maps: no document changed, so a rescan would re-read every outline for
+  // nothing.
   onBibChange() {
     clearTimeout(this.bibTimer);
     this.bibTimer = setTimeout(async () => {
@@ -981,8 +961,6 @@ class ReferenceLinkerPlugin extends Plugin {
     return inTable ? link.replace(/\|/g, '\\|') : link;
   }
 
-  // What a new link is pinned to: the section it points at, and the key its document is filed
-  // under. The key is what survives the document being re-filed, which no path can.
   bindingFor(e) {
     const b = {};
     const cite = this.citeOf(e.path);
@@ -1202,12 +1180,17 @@ class ReferenceLinkerPlugin extends Plugin {
     }));
   }
 
+  // isFile, not just exists: reading a folder throws EISDIR into loadCitations' catch, and
+  // the row would sit there looking healthy.
   bibStatus() {
-    return this.bibPaths().map((abs) => ({ abs, exists: fs.existsSync(abs) }));
+    return this.bibPaths().map((abs) => {
+      let stat = null;
+      try { stat = fs.statSync(abs); } catch { /* not there */ }
+      return { abs, exists: !!stat, isFile: !!stat && stat.isFile() };
+    });
   }
 
-  // The bibliographies grouped by the folder holding them, as folder -> lowercased file
-  // names, so several bibliographies side by side cost one watcher rather than one each.
+  // Folder -> the file names that count in it, so bibliographies side by side cost one watcher.
   bibFolders() {
     const dirs = new Map();
     for (const abs of this.bibPaths()) {

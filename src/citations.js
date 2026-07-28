@@ -1,18 +1,15 @@
 'use strict';
 
-// Which indexed document each citation key names. `bib.js` reads the bibliography as text;
-// everything here is the matching, kept off the filesystem so it can be tested on plain data.
+// Which indexed document each citation key names. Plain data in, no filesystem.
 
-// file:///home/u/a.pdf is an absolute path and must keep its leading slash; file:///C:/a.pdf
-// is the same URL around a drive letter and must lose it. Stripping the third slash blindly
-// made every POSIX file:// path in a bibliography unmatchable.
+// file:///home/x keeps its leading slash, file:///C:/x loses it. Stripping the third slash
+// blindly made every POSIX file:// path in a bibliography unmatchable.
 const normalize = (p) => String(p || '').split('\\').join('/')
   .replace(/^file:\/\//i, '').replace(/^\/([A-Za-z]:)/, '$1').replace(/\/+$/, '');
 const baseOf = (p) => { const n = normalize(p); const i = n.lastIndexOf('/'); return i < 0 ? n : n.slice(i + 1); };
 const stemOf = (p) => baseOf(p).replace(/\.[^.]+$/, '');
 
-// Titles and file names disagree about punctuation and case far more often than about words,
-// so both sides are reduced to their letters and digits before being compared.
+// Titles and file names disagree about punctuation far more often than about words.
 const foldTitle = (s) => String(s || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 
 const push = (map, key, value) => {
@@ -20,8 +17,8 @@ const push = (map, key, value) => {
   if (a) a.push(value); else map.set(key, [value]);
 };
 
-// One match or none. Two documents answering to the same name is not a match: binding a key
-// to the wrong one would write a wrong `cite:` into the note, which is worse than no key.
+// Two documents answering to one name is not a match: a wrong `cite:` in a note outlives the
+// mistake, and no key is better than the wrong one.
 const only = (a) => (a && a.length === 1 ? a[0] : null);
 
 function indexPaths(relPaths, root) {
@@ -40,17 +37,14 @@ function indexPaths(relPaths, root) {
   return { byAbs, byTail, byBase, byTitle };
 }
 
-// The document an entry names, and how it was found. A path the bibliography states is
-// trusted over any name: the same paper is often filed under a name that another paper in the
-// library also carries.
+// A stated path outranks any name: libraries repeat file names far more than they repeat paths.
 function matchEntry(entry, idx) {
   for (const p of entry.paths || []) {
     const n = normalize(p).toLowerCase();
     const abs = idx.byAbs.get(n);
     if (abs) return { rel: abs, how: 'path' };
   }
-  // The bibliography was written against another machine's library root, so only the tail of
-  // what it states can be trusted. Longest suffix first: the most specific one that resolves.
+  // Written against another machine's root: only the tail holds. Longest suffix first.
   for (const p of entry.paths || []) {
     const segs = normalize(p).toLowerCase().split('/');
     for (let i = 0; i < segs.length - 1; i++) {
@@ -70,11 +64,8 @@ function matchEntry(entry, idx) {
   return null;
 }
 
-// The maps the plugin resolves a binding through. An unmatched key is kept: it is still a key
-// the reader may type, and it is what the settings pane counts as needing attention.
-//
-// A duplicated key keeps its first entry — BibTeX itself resolves duplicates that way, and a
-// key bound to whichever export happened to be read last would drift for no visible reason.
+// An unmatched key is kept: it still tells a missing key from an unindexed document.
+// A duplicated key keeps its first entry, the way BibTeX itself resolves duplicates.
 function buildCitations(entries, relPaths, root) {
   const idx = indexPaths(relPaths, root);
   const byKey = new Map();

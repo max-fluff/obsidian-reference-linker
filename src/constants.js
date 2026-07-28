@@ -10,6 +10,9 @@ const PRESETS = {
   file: 'file:///{ref-root}/{path}',
 };
 
+// What the bibliography picker offers. CSL-JSON has no extension of its own.
+const BIB_EXTS = ['.bib', '.json'];
+
 const DEFAULT_SETTINGS = {
   // @@ is Code Linker's default; @! avoids a clash when both are installed.
   trigger: '@!',
@@ -18,7 +21,7 @@ const DEFAULT_SETTINGS = {
   scanRoots: '', // one path per line, relative to codeRoot
   extensions: '', // e.g. ".pdf .docx .png"; empty => nothing indexed
   skipDirs: '.git\nnode_modules\n.obsidian', // one folder name per line
-  bibFiles: '', // .bib / CSL-JSON bibliographies, one path per line, absolute or under the root
+  bibFiles: '', // bibliographies: a file or a folder of them, one path per line
   editors: [], // user-defined viewer presets, each { name, template }
   askOnInsert: true, // ask which viewer format to use on every insert (vs. the default)
   autoRefresh: true, // watch scan folders and rebuild the index when files change
@@ -74,4 +77,4 @@ function underSkip(rel, skip) {
   return false;
 }
 
-module.exports = { PRESETS, DEFAULT_SETTINGS, parseExtensions, parseSkip, underSkip };
+module.exports = { PRESETS, DEFAULT_SETTINGS, BIB_EXTS, parseExtensions, parseSkip, underSkip };
