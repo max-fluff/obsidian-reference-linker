@@ -34,6 +34,7 @@ The plugin ships as `main.js`, `manifest.json` and `styles.css`. It scans the fo
 
 - [What it does](#what-it-does)
   - [Autocomplete as you type](#autocomplete-as-you-type)
+  - [Drag & drop from your file manager](#drag--drop-from-your-file-manager)
   - [Document sections](#document-sections)
   - [Portable `{ref-root}` links](#portable-ref-root-links)
   - [Opening at a page](#opening-at-a-page)
@@ -67,6 +68,10 @@ The inserted link looks like:
 ```
 
 Filter a common name by an inline prefix: an extension (`pdf:`, `pptx:`, `png:`), `sec:` for sections only, or `file:` for whole files only. They stack, so `@!pdf:sec:intro` is the *Introduction* of a PDF and nothing else, and a prefix with no name yet (`@!pdf:`) simply lists what passes it. The same prefixes resolve an embed's target.
+
+### Drag & drop from your file manager
+
+Drop a document straight from your OS file manager into a note and pick whether it lands as a reference link or an inline embed — no need to type its name. A file already in the index keeps its indexed name; one that isn't gets a link by its file name. Only files under your **Reference root** can carry the portable `{ref-root}` token, so a file dropped from elsewhere is skipped with a notice rather than baked in as an absolute path. A drop with no in-root files is left to Obsidian, so dropping an image to import it into the vault still works as usual.
 
 ### Document sections
 
