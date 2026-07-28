@@ -18,6 +18,7 @@ const DEFAULT_SETTINGS = {
   scanRoots: '', // one path per line, relative to codeRoot
   extensions: '', // e.g. ".pdf .docx .png"; empty => nothing indexed
   skipDirs: '.git\nnode_modules\n.obsidian', // one folder name per line
+  bibFiles: '', // .bib / CSL-JSON bibliographies, one path per line, absolute or under the root
   editors: [], // user-defined viewer presets, each { name, template }
   askOnInsert: true, // ask which viewer format to use on every insert (vs. the default)
   autoRefresh: true, // watch scan folders and rebuild the index when files change

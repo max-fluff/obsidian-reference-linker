@@ -41,6 +41,39 @@ class ReferenceLinkerSettingTab extends PluginSettingTab {
     if (opt) opt.text = name || `Viewer ${i + 1}`;
   }
 
+  // Files, not folders, so this is a plain textarea rather than the folder list: the folder
+  // autocomplete next to it would offer exactly the wrong thing.
+  renderBibliographies(containerEl, save) {
+    const s = this.plugin.settings;
+    new Setting(containerEl)
+      .setName(t('set.bibFiles.name'))
+      .setDesc(t('set.bibFiles.desc'))
+      .addTextArea((c) => {
+        const was = s.bibFiles;
+        c.inputEl.addClass('reference-linker-input');
+        c.inputEl.rows = 3;
+        c.setValue(s.bibFiles).onChange(async (v) => { s.bibFiles = v; await save(false); });
+        // On blur, not on every keystroke: re-reading a megabyte of BibTeX per character
+        // typed would stall the pane.
+        c.inputEl.addEventListener('blur', async () => {
+          if (s.bibFiles === was) return;
+          await this.plugin.loadCitations();
+          this.plugin.startWatchers();
+          this.display();
+        });
+      });
+
+    const missing = this.plugin.bibStatus().filter((x) => !x.exists).map((x) => x.abs);
+    if (missing.length) {
+      containerEl.createEl('div', { cls: 'reference-linker-note is-error', text: t('set.bibFiles.notFound', { files: missing.join(', ') }) });
+    }
+    const { keys, matched } = this.plugin.citations;
+    containerEl.createEl('div', {
+      cls: 'reference-linker-note',
+      text: keys ? t('set.bibFiles.stats', { keys, matched }) : t('set.bibFiles.none'),
+    });
+  }
+
   // The setting stays one string — parseExtensions reads it unchanged, the list only
   // writes it, so there is nothing to migrate.
   renderExtensions(containerEl, save) {
@@ -164,6 +197,8 @@ class ReferenceLinkerSettingTab extends PluginSettingTab {
       const warn = new Setting(containerEl).setDesc(t('set.autoRefresh.unsupported'));
       warn.settingEl.addClass('mod-warning');
     }
+
+    this.renderBibliographies(containerEl, save);
 
     const root = this.plugin.codeRoot() || t('set.info.unknownRoot');
     containerEl.createEl('div', { cls: 'reference-linker-note', text: t('set.info', { root, entries: plural('entry', this.plugin.index.length) }) });

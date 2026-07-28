@@ -172,6 +172,8 @@ var require_constants = __commonJS({
       // e.g. ".pdf .docx .png"; empty => nothing indexed
       skipDirs: ".git\nnode_modules\n.obsidian",
       // one folder name per line
+      bibFiles: "",
+      // .bib / CSL-JSON bibliographies, one path per line, absolute or under the root
       editors: [],
       // user-defined viewer presets, each { name, template }
       askOnInsert: true,
@@ -242,9 +244,9 @@ var require_constants = __commonJS({
 var require_binding = __commonJS({
   "src/shared/binding.js"(exports2, module2) {
     "use strict";
-    var ANCHORS = { sym: "sym", kind: "kind", sec: "sec", line: "hash" };
-    var TOKEN = /^(sym|kind|sec|line):(.+)$/;
-    var OWNERS = { code: ["sym", "kind", "hash"], reference: ["sec"] };
+    var ANCHORS = { sym: "sym", kind: "kind", sec: "sec", cite: "cite", line: "hash" };
+    var TOKEN = /^(sym|kind|sec|cite|line):(.+)$/;
+    var OWNERS = { code: ["sym", "kind", "hash"], reference: ["sec", "cite"] };
     function ownerOf(binding) {
       if (!binding)
         return null;
@@ -270,14 +272,14 @@ var require_binding = __commonJS({
       const s = String(title || "").trim();
       if (!s)
         return null;
-      const b = { sym: "", kind: "", sec: "", hash: "" };
+      const b = { sym: "", kind: "", sec: "", cite: "", hash: "" };
       for (const word of s.split(/\s+/)) {
         const m = TOKEN.exec(word);
         if (!m)
           return null;
         b[ANCHORS[m[1]]] = decodeValue(m[2]);
       }
-      return b.sym || b.kind || b.sec || b.hash ? b : null;
+      return b.sym || b.kind || b.sec || b.cite || b.hash ? b : null;
     }
     function formatBinding2(b) {
       const parts = [];
@@ -285,6 +287,8 @@ var require_binding = __commonJS({
         parts.push("sym:" + encodeValue(b.sym));
       if (b.kind)
         parts.push("kind:" + encodeValue(b.kind));
+      if (b.cite)
+        parts.push("cite:" + encodeValue(b.cite));
       if (b.sec)
         parts.push("sec:" + encodeValue(b.sec));
       if (b.hash)
@@ -6499,19 +6503,29 @@ var require_actualize2 = __commonJS({
   "src/actualize.js"(exports2, module2) {
     "use strict";
     var { splitTarget: splitTarget2, withTitle: withTitle2, rewriteLinks } = require_markdown();
-    var { parseBinding: parseBinding2, formatBinding: formatBinding2, ownsBinding: ownsBinding2 } = require_binding();
+    var { parseBinding: parseBinding2, ownsBinding: ownsBinding2 } = require_binding();
     var shared = require_actualize();
     var preview = require_update_preview();
     var OWNER2 = "reference";
     var PREVIEW_CLASS = "reference-linker-preview";
     var POS_RE = /([#?&])(page|t)=\d+/i;
-    var withAnchor = (url, r) => {
+    var withFix = (plugin, url, r) => {
+      const out = r.path ? plugin.retargetUrl(url, r.path) : url;
+      if (out == null)
+        return null;
       if (r.anchor != null)
-        return url.replace(/#.*$/, "") + "#" + r.anchor;
-      return POS_RE.test(url) ? url.replace(POS_RE, (_, sep, key) => sep + key + "=" + r.line) : url + "#page=" + r.line;
+        return out.replace(/#.*$/, "") + "#" + r.anchor;
+      if (r.line == null)
+        return out;
+      return POS_RE.test(out) ? out.replace(POS_RE, (_, sep, key) => sep + key + "=" + r.line) : out + "#page=" + r.line;
     };
-    var movedFrom = (plugin, url, r) => r.anchor != null ? plugin.targetAnchor(url) || "\u2014" : String(plugin.targetPosition(url));
-    var movedTo = (r) => r.anchor != null ? r.anchor : String(r.line);
+    var fileNameIn = (plugin, url) => plugin.decodeTarget(url).split(/[#?]/)[0].split("/").filter(Boolean).pop() || "\u2014";
+    var movedFrom = (plugin, url, r) => {
+      if (r.path)
+        return fileNameIn(plugin, url);
+      return r.anchor != null ? plugin.targetAnchor(url) || "\u2014" : String(plugin.targetPosition(url));
+    };
+    var movedTo = (r) => r.path ? r.path : r.anchor != null ? r.anchor : String(r.line);
     var rewriteUpdates = (plugin, text, selected) => {
       const collect = selected == null;
       const changes = [];
@@ -6520,13 +6534,19 @@ var require_actualize2 = __commonJS({
       const links = rewriteLinks(text, (name, target) => {
         const r = bindStateOf(plugin, target);
         if (r && r.state === "stale") {
-          const k = key++;
           const { url, title } = splitTarget2(target);
+          const fixed = withFix(plugin, url, r);
+          if (fixed == null) {
+            if (collect)
+              broken.push(name);
+            return null;
+          }
+          const k = key++;
           if (collect)
             changes.push({ key: k, label: name, from: movedFrom(plugin, url, r), to: movedTo(r) });
           if (!collect && !selected.has(k))
             return null;
-          return "[" + name + "](" + withTitle2(withAnchor(url, r), title) + ")";
+          return "[" + name + "](" + withTitle2(fixed, title) + ")";
         }
         if (collect && r && r.state === "broken")
           broken.push(name);
@@ -6536,10 +6556,10 @@ var require_actualize2 = __commonJS({
     };
     var pinLinksInText = (plugin, text) => rewriteLinks(text, (name, target) => {
       const { url, title } = splitTarget2(target);
-      if (title)
+      if (title && !ownsBinding2(title, OWNER2))
         return null;
-      const sec = plugin.sectionAtLink(url);
-      return sec ? "[" + name + "](" + withTitle2(url, formatBinding2({ sec: sec.name })) + ")" : null;
+      const opt = plugin.pinOptionFor(url, title);
+      return opt ? "[" + name + "](" + withTitle2(url, opt.title) + ")" : null;
     });
     var { refreshStaleLinks } = shared;
     var staleLinksExtension = (plugin) => shared.staleLinksExtension(plugin, { stale: "reference-linker-stale", broken: "reference-linker-broken" });
@@ -6565,7 +6585,8 @@ var require_actualize2 = __commonJS({
         if (!r || r.state !== "stale")
           return null;
         const { url, title } = splitTarget2(target);
-        return withTitle2(withAnchor(url, r), title);
+        const fixed = withFix(this, url, r);
+        return fixed == null ? null : withTitle2(fixed, title);
       },
       rewriteActiveNote(transform, noticeKey) {
         return shared.rewriteActiveNote(this, transform, noticeKey);
@@ -6586,7 +6607,7 @@ var require_actualize2 = __commonJS({
         return this.rewriteVault(pinLinksInText, "notice.linksPinnedVault");
       }
     };
-    module2.exports = { methods, staleLinksExtension, refreshStaleLinks };
+    module2.exports = { methods, staleLinksExtension, refreshStaleLinks, rewriteUpdates, pinLinksInText };
   }
 });
 
@@ -6926,6 +6947,36 @@ var require_settings_tab = __commonJS({
         if (opt)
           opt.text = name || `Viewer ${i + 1}`;
       }
+      // Files, not folders, so this is a plain textarea rather than the folder list: the folder
+      // autocomplete next to it would offer exactly the wrong thing.
+      renderBibliographies(containerEl, save) {
+        const s = this.plugin.settings;
+        new Setting(containerEl).setName(t2("set.bibFiles.name")).setDesc(t2("set.bibFiles.desc")).addTextArea((c) => {
+          const was = s.bibFiles;
+          c.inputEl.addClass("reference-linker-input");
+          c.inputEl.rows = 3;
+          c.setValue(s.bibFiles).onChange(async (v) => {
+            s.bibFiles = v;
+            await save(false);
+          });
+          c.inputEl.addEventListener("blur", async () => {
+            if (s.bibFiles === was)
+              return;
+            await this.plugin.loadCitations();
+            this.plugin.startWatchers();
+            this.display();
+          });
+        });
+        const missing = this.plugin.bibStatus().filter((x) => !x.exists).map((x) => x.abs);
+        if (missing.length) {
+          containerEl.createEl("div", { cls: "reference-linker-note is-error", text: t2("set.bibFiles.notFound", { files: missing.join(", ") }) });
+        }
+        const { keys, matched } = this.plugin.citations;
+        containerEl.createEl("div", {
+          cls: "reference-linker-note",
+          text: keys ? t2("set.bibFiles.stats", { keys, matched }) : t2("set.bibFiles.none")
+        });
+      }
       // The setting stays one string — parseExtensions reads it unchanged, the list only
       // writes it, so there is nothing to migrate.
       renderExtensions(containerEl, save) {
@@ -7037,6 +7088,7 @@ var require_settings_tab = __commonJS({
           const warn = new Setting(containerEl).setDesc(t2("set.autoRefresh.unsupported"));
           warn.settingEl.addClass("mod-warning");
         }
+        this.renderBibliographies(containerEl, save);
         const root = this.plugin.codeRoot() || t2("set.info.unknownRoot");
         containerEl.createEl("div", { cls: "reference-linker-note", text: t2("set.info", { root, entries: plural2("entry", this.plugin.index.length) }) });
         new Setting(containerEl).setName(t2("set.heading.suggestions")).setHeading();
@@ -7152,6 +7204,325 @@ var require_settings_tab = __commonJS({
       }
     };
     module2.exports = { ReferenceLinkerSettingTab: ReferenceLinkerSettingTab2 };
+  }
+});
+
+// src/bib.js
+var require_bib = __commonJS({
+  "src/bib.js"(exports2, module2) {
+    "use strict";
+    var stripBraces = (s) => s.replace(/[{}]/g, "");
+    var unescapeSpec = (s) => s.replace(/\\([:;\\])/g, "$1");
+    function splitUnescaped(s, sep) {
+      const out = [];
+      let cur = "";
+      for (let i = 0; i < s.length; i++) {
+        const c = s[i];
+        if (c === "\\" && i + 1 < s.length) {
+          cur += c + s[++i];
+          continue;
+        }
+        if (c === sep) {
+          out.push(cur);
+          cur = "";
+          continue;
+        }
+        cur += c;
+      }
+      out.push(cur);
+      return out;
+    }
+    function rejoinDrives(parts) {
+      const out = [];
+      for (let i = 0; i < parts.length; i++) {
+        if (/^[A-Za-z]$/.test(parts[i]) && i + 1 < parts.length && /^[\\/]/.test(parts[i + 1])) {
+          out.push(parts[i] + ":" + parts[i + 1]);
+          i++;
+        } else
+          out.push(parts[i]);
+      }
+      return out;
+    }
+    function attachmentPaths(raw) {
+      const out = [];
+      for (const spec of splitUnescaped(String(raw || ""), ";")) {
+        if (!spec.trim())
+          continue;
+        const parts = rejoinDrives(splitUnescaped(spec, ":")).map((p) => unescapeSpec(p).trim());
+        const path = parts.length >= 3 ? parts.slice(1, -1).join(":") : parts[parts.length - 1];
+        if (path)
+          out.push(path);
+      }
+      return out;
+    }
+    var Scanner = class {
+      constructor(text) {
+        this.s = text;
+        this.i = 0;
+      }
+      skipSpace() {
+        while (this.i < this.s.length && /\s/.test(this.s[this.i]))
+          this.i++;
+      }
+      // From an opening delimiter to its match, returning what sits between. Brace depth is
+      // tracked inside a quoted value too, since "a {b} c" is one value.
+      balanced(open, close) {
+        let depth = 0;
+        const start = ++this.i;
+        for (; this.i < this.s.length; this.i++) {
+          const c = this.s[this.i];
+          if (c === "\\") {
+            this.i++;
+            continue;
+          }
+          if (c === open)
+            depth++;
+          else if (c === close) {
+            if (!depth)
+              return this.s.slice(start, this.i++);
+            depth--;
+          }
+        }
+        return this.s.slice(start);
+      }
+      quoted() {
+        let depth = 0;
+        const start = ++this.i;
+        for (; this.i < this.s.length; this.i++) {
+          const c = this.s[this.i];
+          if (c === "\\") {
+            this.i++;
+            continue;
+          }
+          if (c === "{")
+            depth++;
+          else if (c === "}")
+            depth--;
+          else if (c === '"' && !depth)
+            return this.s.slice(start, this.i++);
+        }
+        return this.s.slice(start);
+      }
+      bare() {
+        const start = this.i;
+        while (this.i < this.s.length && !/[,}\s#)]/.test(this.s[this.i]))
+          this.i++;
+        return this.s.slice(start, this.i);
+      }
+      value(macros) {
+        let out = "";
+        for (; ; ) {
+          this.skipSpace();
+          const c = this.s[this.i];
+          if (c === "{")
+            out += stripBraces(this.balanced("{", "}"));
+          else if (c === '"')
+            out += stripBraces(this.quoted());
+          else {
+            const word = this.bare();
+            if (!word)
+              break;
+            out += Object.prototype.hasOwnProperty.call(macros, word.toLowerCase()) ? macros[word.toLowerCase()] : word;
+          }
+          this.skipSpace();
+          if (this.s[this.i] !== "#")
+            break;
+          this.i++;
+        }
+        return out.trim();
+      }
+    };
+    function readFields(sc, macros, stop) {
+      const fields = {};
+      for (; ; ) {
+        sc.skipSpace();
+        if (sc.i >= sc.s.length || sc.s[sc.i] === stop) {
+          sc.i++;
+          break;
+        }
+        if (sc.s[sc.i] === ",") {
+          sc.i++;
+          continue;
+        }
+        const start = sc.i;
+        while (sc.i < sc.s.length && !/[=,}\s)]/.test(sc.s[sc.i]))
+          sc.i++;
+        const name = sc.s.slice(start, sc.i).trim().toLowerCase();
+        sc.skipSpace();
+        if (sc.s[sc.i] !== "=") {
+          if (!name)
+            sc.i++;
+          continue;
+        }
+        sc.i++;
+        const v = sc.value(macros);
+        if (name)
+          fields[name] = v;
+      }
+      return fields;
+    }
+    function parseBibtex(text) {
+      const sc = new Scanner(String(text || ""));
+      const macros = {};
+      const out = [];
+      while (sc.i < sc.s.length) {
+        if (sc.s[sc.i++] !== "@")
+          continue;
+        sc.skipSpace();
+        const start = sc.i;
+        while (sc.i < sc.s.length && /[A-Za-z]/.test(sc.s[sc.i]))
+          sc.i++;
+        const type = sc.s.slice(start, sc.i).toLowerCase();
+        sc.skipSpace();
+        const open = sc.s[sc.i];
+        if (open !== "{" && open !== "(")
+          continue;
+        const close = open === "{" ? "}" : ")";
+        if (type === "comment" || type === "preamble") {
+          sc.balanced(open, close);
+          continue;
+        }
+        if (type === "string") {
+          const body = sc.balanced(open, close);
+          const eq = body.indexOf("=");
+          if (eq > 0) {
+            const name = body.slice(0, eq).trim().toLowerCase();
+            macros[name] = new Scanner(body.slice(eq + 1)).value(macros);
+          }
+          continue;
+        }
+        sc.i++;
+        sc.skipSpace();
+        const keyStart = sc.i;
+        while (sc.i < sc.s.length && !/[,}\s)]/.test(sc.s[sc.i]))
+          sc.i++;
+        const key = sc.s.slice(keyStart, sc.i).trim();
+        const fields = readFields(sc, macros, close);
+        if (key)
+          out.push({ key, type, fields });
+      }
+      return out;
+    }
+    var cslYear = (e) => {
+      const parts = e.issued && e.issued["date-parts"];
+      const y = Array.isArray(parts) && Array.isArray(parts[0]) ? parts[0][0] : null;
+      return y == null ? "" : String(y);
+    };
+    var cslAuthor = (e) => (Array.isArray(e.author) ? e.author : []).map((a) => a.family || a.literal || "").filter(Boolean).join(" and ");
+    function parseCsl(text) {
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (e) {
+        return [];
+      }
+      if (!Array.isArray(data))
+        return [];
+      return data.filter((e) => e && e.id != null).map((e) => ({
+        key: String(e.id),
+        type: String(e.type || "document"),
+        fields: { title: String(e.title || ""), author: cslAuthor(e), year: cslYear(e) }
+      }));
+    }
+    var looksLikeJson = (text) => /^\s*\[/.test(text);
+    function parseBibliography2(text) {
+      const raw = looksLikeJson(text) ? parseCsl(text) : parseBibtex(text);
+      return raw.map((e) => ({
+        key: e.key,
+        type: e.type,
+        title: e.fields.title || "",
+        year: e.fields.year || e.fields.date || "",
+        paths: attachmentPaths(e.fields.file)
+      }));
+    }
+    module2.exports = { parseBibtex, parseCsl, parseBibliography: parseBibliography2, attachmentPaths };
+  }
+});
+
+// src/citations.js
+var require_citations = __commonJS({
+  "src/citations.js"(exports2, module2) {
+    "use strict";
+    var normalize = (p) => String(p || "").split("\\").join("/").replace(/^file:\/\//i, "").replace(/^\/([A-Za-z]:)/, "$1").replace(/\/+$/, "");
+    var baseOf = (p) => {
+      const n = normalize(p);
+      const i = n.lastIndexOf("/");
+      return i < 0 ? n : n.slice(i + 1);
+    };
+    var stemOf = (p) => baseOf(p).replace(/\.[^.]+$/, "");
+    var foldTitle = (s) => String(s || "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+    var push = (map, key, value) => {
+      const a = map.get(key);
+      if (a)
+        a.push(value);
+      else
+        map.set(key, [value]);
+    };
+    var only = (a) => a && a.length === 1 ? a[0] : null;
+    function indexPaths(relPaths, root) {
+      const nroot = normalize(root).toLowerCase();
+      const byAbs = /* @__PURE__ */ new Map();
+      const byTail = /* @__PURE__ */ new Map();
+      const byBase = /* @__PURE__ */ new Map();
+      const byTitle = /* @__PURE__ */ new Map();
+      for (const rel of relPaths) {
+        const n = normalize(rel).toLowerCase();
+        byAbs.set(nroot ? nroot + "/" + n : n, rel);
+        push(byTail, n, rel);
+        push(byBase, baseOf(n), rel);
+        push(byTitle, foldTitle(stemOf(n)), rel);
+      }
+      return { byAbs, byTail, byBase, byTitle };
+    }
+    function matchEntry(entry, idx) {
+      for (const p of entry.paths || []) {
+        const n = normalize(p).toLowerCase();
+        const abs = idx.byAbs.get(n);
+        if (abs)
+          return { rel: abs, how: "path" };
+      }
+      for (const p of entry.paths || []) {
+        const segs = normalize(p).toLowerCase().split("/");
+        for (let i = 0; i < segs.length - 1; i++) {
+          const r = only(idx.byTail.get(segs.slice(i).join("/")));
+          if (r)
+            return { rel: r, how: "path" };
+        }
+      }
+      for (const p of entry.paths || []) {
+        const r = only(idx.byBase.get(baseOf(p).toLowerCase()));
+        if (r)
+          return { rel: r, how: "name" };
+      }
+      const title = foldTitle(entry.title);
+      if (title) {
+        const r = only(idx.byTitle.get(title));
+        if (r)
+          return { rel: r, how: "title" };
+      }
+      return null;
+    }
+    function buildCitations2(entries, relPaths, root) {
+      const idx = indexPaths(relPaths, root);
+      const byKey = /* @__PURE__ */ new Map();
+      const byPath = /* @__PURE__ */ new Map();
+      let matched = 0;
+      for (const e of entries) {
+        const lc = String(e.key).toLowerCase();
+        if (byKey.has(lc))
+          continue;
+        const hit = matchEntry(e, idx);
+        byKey.set(lc, { key: e.key, rel: hit ? hit.rel : null, how: hit ? hit.how : null, title: e.title || "", year: e.year || "" });
+        if (hit) {
+          matched++;
+          if (!byPath.has(hit.rel))
+            byPath.set(hit.rel, e.key);
+        }
+      }
+      return { byKey, byPath, keys: byKey.size, matched };
+    }
+    var emptyCitations2 = () => ({ byKey: /* @__PURE__ */ new Map(), byPath: /* @__PURE__ */ new Map(), keys: 0, matched: 0 });
+    module2.exports = { buildCitations: buildCitations2, emptyCitations: emptyCitations2, matchEntry, indexPaths, foldTitle, normalize };
   }
 });
 
@@ -7289,6 +7660,7 @@ var require_en = __commonJS({
       "menu.copyLink": "Copy reference link",
       "menu.fixLink": "Update this reference link",
       "menu.pin": "Pin to section \u201C{sec}\u201D",
+      "menu.pinCite": "Pin to citation key \u201C{cite}\u201D",
       "menu.unpin": "Unpin this reference link",
       // Notices
       "notice.noCodeRoot": "Reference Linker: could not determine the reference root",
@@ -7309,8 +7681,9 @@ var require_en = __commonJS({
       "notice.linksPinned": "Reference Linker: {n} link(s) pinned",
       "notice.linksPinnedVault": "Reference Linker: {n} link(s) pinned across {files} note(s)",
       "notice.pinned": "Reference Linker: link pinned to section \u201C{sec}\u201D",
+      "notice.pinnedCite": "Reference Linker: link pinned to citation key \u201C{cite}\u201D",
       "notice.unpinned": "Reference Linker: link unpinned \u2014 it is no longer tracked",
-      "notice.cantPin": "Reference Linker: can't pin \u2014 no section begins on that page",
+      "notice.cantPin": "Reference Linker: can't pin \u2014 no section begins on that page, and the document has no citation key",
       // Inline embeds
       "embed.empty": "Reference Linker: empty embed \u2014 give a document path",
       "embed.fmt.file": "Document (first page)",
@@ -7356,6 +7729,11 @@ var require_en = __commonJS({
       "set.format.csv": "CSV and TSV tables",
       "set.skipFolders.desc": "A bare name (node_modules) is skipped at any depth; a path with a slash (archive/raw) skips only that folder, relative to the reference root.",
       "set.autoRefresh.desc": "Watch the scan folders and rebuild the index when documents change.",
+      "set.bibFiles.name": "Bibliographies",
+      "set.bibFiles.desc": "BibTeX (.bib) or CSL-JSON files to read citation keys from, one path per line \u2014 absolute, or relative to the reference root. A link inserted to a document with a key is pinned to it, so it survives the document being renamed or re-filed.",
+      "set.bibFiles.stats": "{matched} of {keys} key(s) matched to an indexed document",
+      "set.bibFiles.none": "No bibliography loaded \u2014 links are pinned to sections only.",
+      "set.bibFiles.notFound": "\u26A0 Not found \u2014 {files}",
       "set.info": "Reference root: {root} \xB7 {entries} indexed",
       "set.rebuild.name": "Rebuild reference index",
       "set.rebuild.desc": "Re-scan the document folders now.",
@@ -7406,6 +7784,7 @@ var require_ru = __commonJS({
       "menu.copyLink": "\u0421\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442",
       "menu.fixLink": "\u0410\u043A\u0442\u0443\u0430\u043B\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u044D\u0442\u0443 \u0441\u0441\u044B\u043B\u043A\u0443",
       "menu.pin": "\u0417\u0430\u043A\u0440\u0435\u043F\u0438\u0442\u044C \u0437\u0430 \u0440\u0430\u0437\u0434\u0435\u043B\u043E\u043C \xAB{sec}\xBB",
+      "menu.pinCite": "\u0417\u0430\u043A\u0440\u0435\u043F\u0438\u0442\u044C \u0437\u0430 \u043A\u043B\u044E\u0447\u043E\u043C \u0446\u0438\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F \xAB{cite}\xBB",
       "menu.unpin": "\u041E\u0442\u043A\u0440\u0435\u043F\u0438\u0442\u044C \u044D\u0442\u0443 \u0441\u0441\u044B\u043B\u043A\u0443",
       // Notices
       "notice.noCodeRoot": "Reference Linker: \u043D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043E\u043F\u0440\u0435\u0434\u0435\u043B\u0438\u0442\u044C \u043A\u043E\u0440\u0435\u043D\u044C \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u043E\u0432",
@@ -7426,8 +7805,9 @@ var require_ru = __commonJS({
       "notice.linksPinned": "Reference Linker: \u0437\u0430\u043A\u0440\u0435\u043F\u043B\u0435\u043D\u043E \u0441\u0441\u044B\u043B\u043E\u043A \u2014 {n}",
       "notice.linksPinnedVault": "Reference Linker: \u0437\u0430\u043A\u0440\u0435\u043F\u043B\u0435\u043D\u043E \u0441\u0441\u044B\u043B\u043E\u043A \u2014 {n} \u0432 \u0437\u0430\u043C\u0435\u0442\u043A\u0430\u0445: {files}",
       "notice.pinned": "Reference Linker: \u0441\u0441\u044B\u043B\u043A\u0430 \u0437\u0430\u043A\u0440\u0435\u043F\u043B\u0435\u043D\u0430 \u0437\u0430 \u0440\u0430\u0437\u0434\u0435\u043B\u043E\u043C \xAB{sec}\xBB",
+      "notice.pinnedCite": "Reference Linker: \u0441\u0441\u044B\u043B\u043A\u0430 \u0437\u0430\u043A\u0440\u0435\u043F\u043B\u0435\u043D\u0430 \u0437\u0430 \u043A\u043B\u044E\u0447\u043E\u043C \u0446\u0438\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F \xAB{cite}\xBB",
       "notice.unpinned": "Reference Linker: \u0441\u0441\u044B\u043B\u043A\u0430 \u043E\u0442\u043A\u0440\u0435\u043F\u043B\u0435\u043D\u0430 \u2014 \u0431\u043E\u043B\u044C\u0448\u0435 \u043D\u0435 \u043E\u0442\u0441\u043B\u0435\u0436\u0438\u0432\u0430\u0435\u0442\u0441\u044F",
-      "notice.cantPin": "Reference Linker: \u043D\u0435 \u0437\u0430 \u0447\u0442\u043E \u0437\u0430\u043A\u0440\u0435\u043F\u0438\u0442\u044C \u2014 \u043D\u0430 \u044D\u0442\u043E\u0439 \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0435 \u043D\u0435 \u043D\u0430\u0447\u0438\u043D\u0430\u0435\u0442\u0441\u044F \u0440\u0430\u0437\u0434\u0435\u043B",
+      "notice.cantPin": "Reference Linker: \u043D\u0435 \u0437\u0430 \u0447\u0442\u043E \u0437\u0430\u043A\u0440\u0435\u043F\u0438\u0442\u044C \u2014 \u043D\u0430 \u044D\u0442\u043E\u0439 \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0435 \u043D\u0435 \u043D\u0430\u0447\u0438\u043D\u0430\u0435\u0442\u0441\u044F \u0440\u0430\u0437\u0434\u0435\u043B, \u0430 \u043A\u043B\u044E\u0447\u0430 \u0446\u0438\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F \u0443 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430 \u043D\u0435\u0442",
       // Inline embeds
       "embed.empty": "Reference Linker: \u043F\u0443\u0441\u0442\u043E\u0439 embed \u2014 \u0443\u043A\u0430\u0436\u0438\u0442\u0435 \u043F\u0443\u0442\u044C \u043A \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0443",
       "embed.fmt.file": "\u0414\u043E\u043A\u0443\u043C\u0435\u043D\u0442 (\u043F\u0435\u0440\u0432\u0430\u044F \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0430)",
@@ -7473,6 +7853,11 @@ var require_ru = __commonJS({
       "set.format.csv": "\u0422\u0430\u0431\u043B\u0438\u0446\u044B CSV \u0438 TSV",
       "set.skipFolders.desc": "\u041F\u0440\u043E\u0441\u0442\u043E \u0438\u043C\u044F (node_modules) \u043F\u0440\u043E\u043F\u0443\u0441\u043A\u0430\u0435\u0442\u0441\u044F \u043D\u0430 \u043B\u044E\u0431\u043E\u0439 \u0433\u043B\u0443\u0431\u0438\u043D\u0435; \u043F\u0443\u0442\u044C \u0441\u043E \u0441\u043B\u044D\u0448\u0435\u043C (archive/raw) \u043F\u0440\u043E\u043F\u0443\u0441\u043A\u0430\u0435\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u044D\u0442\u0443 \u043F\u0430\u043F\u043A\u0443 \u043E\u0442\u043D\u043E\u0441\u0438\u0442\u0435\u043B\u044C\u043D\u043E \u043A\u043E\u0440\u043D\u044F.",
       "set.autoRefresh.desc": "\u0421\u043B\u0435\u0434\u0438\u0442\u044C \u0437\u0430 \u043F\u0430\u043F\u043A\u0430\u043C\u0438 \u0441\u043A\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F \u0438 \u043F\u0435\u0440\u0435\u0441\u0442\u0440\u0430\u0438\u0432\u0430\u0442\u044C \u0438\u043D\u0434\u0435\u043A\u0441 \u043F\u0440\u0438 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0438 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u043E\u0432.",
+      "set.bibFiles.name": "\u0411\u0438\u0431\u043B\u0438\u043E\u0433\u0440\u0430\u0444\u0438\u0438",
+      "set.bibFiles.desc": "\u0424\u0430\u0439\u043B\u044B BibTeX (.bib) \u0438\u043B\u0438 CSL-JSON, \u043E\u0442\u043A\u0443\u0434\u0430 \u0447\u0438\u0442\u0430\u044E\u0442\u0441\u044F \u043A\u043B\u044E\u0447\u0438 \u0446\u0438\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F, \u043F\u043E \u043E\u0434\u043D\u043E\u043C\u0443 \u043F\u0443\u0442\u0438 \u0432 \u0441\u0442\u0440\u043E\u043A\u0435 \u2014 \u0430\u0431\u0441\u043E\u043B\u044E\u0442\u043D\u043E\u043C\u0443 \u0438\u043B\u0438 \u043E\u0442\u043D\u043E\u0441\u0438\u0442\u0435\u043B\u044C\u043D\u043E \u043A\u043E\u0440\u043D\u044F \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u043E\u0432. \u0421\u0441\u044B\u043B\u043A\u0430 \u043D\u0430 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442 \u0441 \u043A\u043B\u044E\u0447\u043E\u043C \u0437\u0430\u043A\u0440\u0435\u043F\u043B\u044F\u0435\u0442\u0441\u044F \u0437\u0430 \u043D\u0438\u043C \u0438 \u043F\u0435\u0440\u0435\u0436\u0438\u0432\u0430\u0435\u0442 \u043F\u0435\u0440\u0435\u0438\u043C\u0435\u043D\u043E\u0432\u0430\u043D\u0438\u0435 \u0438 \u043F\u0435\u0440\u0435\u043A\u043B\u0430\u0434\u044B\u0432\u0430\u043D\u0438\u0435 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430.",
+      "set.bibFiles.stats": "\u0441\u043E\u043F\u043E\u0441\u0442\u0430\u0432\u043B\u0435\u043D\u043E \u0441 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430\u043C\u0438 \u043A\u043B\u044E\u0447\u0435\u0439: {matched} \u0438\u0437 {keys}",
+      "set.bibFiles.none": "\u0411\u0438\u0431\u043B\u0438\u043E\u0433\u0440\u0430\u0444\u0438\u044F \u043D\u0435 \u0437\u0430\u0433\u0440\u0443\u0436\u0435\u043D\u0430 \u2014 \u0441\u0441\u044B\u043B\u043A\u0438 \u0437\u0430\u043A\u0440\u0435\u043F\u043B\u044F\u044E\u0442\u0441\u044F \u0442\u043E\u043B\u044C\u043A\u043E \u0437\u0430 \u0440\u0430\u0437\u0434\u0435\u043B\u0430\u043C\u0438.",
+      "set.bibFiles.notFound": "\u26A0 \u041D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u043E \u2014 {files}",
       "set.info": "\u041A\u043E\u0440\u0435\u043D\u044C \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u043E\u0432: {root} \xB7 \u043F\u0440\u043E\u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043E {entries}",
       "set.rebuild.name": "\u041F\u0435\u0440\u0435\u0441\u0442\u0440\u043E\u0438\u0442\u044C \u0438\u043D\u0434\u0435\u043A\u0441 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u043E\u0432",
       "set.rebuild.desc": "\u041F\u0435\u0440\u0435\u0441\u043A\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u043F\u0430\u043F\u043A\u0438 \u0441 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430\u043C\u0438 \u0441\u0435\u0439\u0447\u0430\u0441.",
@@ -7518,6 +7903,8 @@ var actualize = require_actualize2();
 var { ReferenceLinkModal, PresetPickerModal } = require_modal();
 var { ReferenceLinkerSettingTab } = require_settings_tab();
 var formats = require_formats();
+var { parseBibliography } = require_bib();
+var { buildCitations, emptyCitations } = require_citations();
 var { initI18n, withFamily, t, plural } = require_i18n();
 var api = require_api();
 var indexEvents = require_index_events();
@@ -7561,6 +7948,7 @@ var ReferenceLinkerPlugin = class extends Plugin {
     this.watchers = [];
     this.fileCache = /* @__PURE__ */ new Map();
     this.cacheSignature = "";
+    this.citations = emptyCitations();
     this._indexListeners = /* @__PURE__ */ new Set();
     this.migrateSettings();
     await this.loadCache();
@@ -7627,12 +8015,13 @@ var ReferenceLinkerPlugin = class extends Plugin {
           if (this.isLinkStale(withTitle(link.target, link.title))) {
             menu.addItem((item) => item.setTitle(t("menu.fixLink")).setIcon("wrench").onClick(() => this.fixLinkAtCursor(editor, link)));
           }
-          const bound = !!parseBinding(link.title);
-          const pin = bound ? null : this.linkPinOption(link);
-          if (bound) {
+          const pin = this.linkPinOption(link);
+          if (pin) {
+            const label = pin.kind === "cite" ? t("menu.pinCite", { cite: pin.value }) : t("menu.pin", { sec: pin.value });
+            menu.addItem((item) => item.setTitle(label).setIcon("pin").onClick(() => this.pinLinkAtCursor(editor, link)));
+          }
+          if (parseBinding(link.title)) {
             menu.addItem((item) => item.setTitle(t("menu.unpin")).setIcon("pin-off").onClick(() => this.unpinLinkAtCursor(editor, link)));
-          } else if (pin) {
-            menu.addItem((item) => item.setTitle(t("menu.pin", { sec: pin.value })).setIcon("pin").onClick(() => this.pinLinkAtCursor(editor, link)));
           }
         }
       }))
@@ -7643,6 +8032,7 @@ var ReferenceLinkerPlugin = class extends Plugin {
   onunload() {
     this.stopWatchers();
     clearTimeout(this.watchTimer);
+    clearTimeout(this.bibTimer);
     if (this.hover)
       this.hover.destroy();
     formats.dispose();
@@ -7851,12 +8241,44 @@ var ReferenceLinkerPlugin = class extends Plugin {
   // otherwise turn every link red at once. An unknown document gets no verdict rather than
   // a guess. Code Linker already worked this way; this is the two brought into line.
   urlBindState(url, b, storedPosition) {
-    if (!b.sec)
-      return null;
-    const rel = this.targetIndexedFile(this.decodeTarget(url));
+    const here = this.targetIndexedFile(this.decodeTarget(url));
+    const moved = this.citeMovedTo(b, here);
+    if (moved === "broken")
+      return { state: "broken" };
+    const rel = moved || here;
     if (!rel)
       return null;
-    const hits = this.entriesIn(rel).filter((e) => e.kind === "section" && e.name === b.sec);
+    const sec = b.sec ? this.secBindState(url, rel, b.sec, storedPosition) : null;
+    if (sec && sec.state === "broken")
+      return { state: "broken" };
+    if (!moved)
+      return sec;
+    const r = { state: "stale", path: moved };
+    if (sec && sec.anchor != null)
+      r.anchor = sec.anchor;
+    else if (sec && sec.line != null)
+      r.line = sec.line;
+    return r;
+  }
+  // Where a cite binding says its document now lives, when that is not where the link points:
+  // a path when it moved, 'broken' for a key the bibliography no longer has, null otherwise.
+  //
+  // A key the bibliography still has but whose document is not in the index is the
+  // unknown-document case, not a break: a reference root pointed at the wrong folder, or a
+  // library drive not mounted yet, would otherwise turn every cite link in the vault red at
+  // once while the bibliography itself reads perfectly well.
+  citeMovedTo(b, here) {
+    if (!b.cite)
+      return null;
+    const known = this.citations.byKey.get(String(b.cite).toLowerCase());
+    if (!known)
+      return this.hasCitations() ? "broken" : null;
+    if (!known.rel)
+      return null;
+    return known.rel === here ? null : known.rel;
+  }
+  secBindState(url, rel, sec, storedPosition) {
+    const hits = this.entriesIn(rel).filter((e) => e.kind === "section" && e.name === sec);
     if (!hits.length)
       return { state: "broken" };
     const kind = formats.anchorKind(extOf(rel));
@@ -7865,6 +8287,28 @@ var ReferenceLinkerPlugin = class extends Plugin {
     if (kind === "id")
       return this.idBindState(url, hits);
     return bindStateFrom(hits.map((e) => e.position), storedPosition);
+  }
+  // The same link pointed at another file: scheme, template and fragment left as they were.
+  // Null when the URL holds neither our root token nor the reference root — rewriting a path
+  // we cannot locate inside the URL would corrupt the link rather than fix it.
+  retargetUrl(url, rel) {
+    const enc = rel.split("/").map(encodeURIComponent).join("/");
+    const token = /(\{(?:ref-)?root\}\/)[^#?]*/;
+    if (token.test(url))
+      return url.replace(token, (_, head) => head + enc);
+    const root = this.codeRoot().split(nodePath.sep).join("/").replace(/\/+$/, "");
+    if (!root)
+      return null;
+    for (const base of [root, encodeURI(root)]) {
+      const i = url.indexOf(base + "/");
+      if (i < 0)
+        continue;
+      const head = url.slice(0, i + base.length + 1);
+      const tail = url.slice(head.length);
+      const cut = tail.search(/[#?]/);
+      return head + enc + (cut < 0 ? "" : tail.slice(cut));
+    }
+    return null;
   }
   // An id-anchored link drifts when its heading is still there under a different id, which
   // is what regenerating a doc site does. A heading with no id anchors as the empty fragment,
@@ -7900,14 +8344,36 @@ var ReferenceLinkerPlugin = class extends Plugin {
     const position = this.targetPosition(url);
     return entries.find((e) => e.kind === "section" && e.position === position) || null;
   }
-  // The title pinning would produce and the section it pins to, or null when there's nothing
-  // to pin or it would change nothing.
   linkPinOption(link) {
-    const sec = this.sectionAtLink(link.target);
-    if (!sec)
+    return this.pinOptionFor(link.target, link.title);
+  }
+  // The title pinning would produce and what it names, or null when there is nothing to pin
+  // or it would change nothing.
+  //
+  // A binding already there is kept exactly as it stands and only topped up with the key:
+  // re-deriving its section from the page the link sits on would silently repoint a link that
+  // has drifted, which is the one thing pinning must never do. A tooltip is prose, not a
+  // binding, and is never overwritten.
+  pinOptionFor(url, title) {
+    const existing = ownsBinding(title, OWNER) ? parseBinding(title) : null;
+    if (!existing && title)
       return null;
-    const title = formatBinding({ sec: sec.name });
-    return title === (link.title || "") ? null : { title, value: sec.name };
+    const b = existing ? { sec: existing.sec, cite: existing.cite } : {};
+    if (!existing) {
+      const sec = this.sectionAtLink(url);
+      if (sec)
+        b.sec = sec.name;
+    }
+    if (!b.cite) {
+      const cite = this.citeOf(this.targetIndexedFile(this.decodeTarget(url)));
+      if (cite)
+        b.cite = cite;
+    }
+    const next = formatBinding(b);
+    if (!next || next === (title || ""))
+      return null;
+    const addedSec = b.sec && b.sec !== (existing ? existing.sec : "");
+    return { title: next, value: addedSec ? b.sec : b.cite, kind: addedSec ? "sec" : "cite" };
   }
   // CM6 link handler for Live Preview. Suppresses Obsidian's open of the literal
   // {root} URL; opens the resolved one on click/auxclick. Returns true when handled.
@@ -8007,6 +8473,7 @@ var ReferenceLinkerPlugin = class extends Plugin {
       this.cacheSignature = data.signature || "";
       this.fileCache = new Map(Object.entries(data.files));
       this.setIndex(this.flattenCache());
+      await this.loadCitations();
     } catch (e) {
     }
   }
@@ -8027,6 +8494,35 @@ var ReferenceLinkerPlugin = class extends Plugin {
         out.push(e);
     out.sort((a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path));
     return out;
+  }
+  // The bibliographies to read, absolute. A path is taken as written when absolute, and
+  // resolved against the reference root otherwise.
+  bibPaths() {
+    const root = this.codeRoot();
+    return splitLines(this.settings.bibFiles).map((line) => line.split("\\").join("/").trim()).filter(Boolean).map((p) => nodePath.isAbsolute(p) ? p : root ? nodePath.join(root, p) : p);
+  }
+  // Re-read the bibliographies and match their keys against the index. Deliberately apart
+  // from the file scan, which caches per file by mtime: a re-export moves a key onto another
+  // document without that document changing, so a key cached with the file would never move.
+  async loadCitations() {
+    const entries = [];
+    for (const abs of this.bibPaths()) {
+      try {
+        entries.push(...parseBibliography(await fsp.readFile(abs, "utf8")));
+      } catch (e) {
+      }
+    }
+    this.citations = buildCitations(entries, [...this.fileCache.keys()], this.codeRoot());
+  }
+  // The key a document is filed under.
+  citeOf(rel) {
+    return rel && this.citations.byPath.get(rel) || null;
+  }
+  // Whether a verdict about a key is worth anything. With no bibliography loaded every cite
+  // binding in the vault would read as broken at once — the same false alarm a misconfigured
+  // reference root would raise, which is why sec refuses to judge an unindexed document.
+  hasCitations() {
+    return this.citations.keys > 0;
   }
   // Set the index and its name lookup together. byName groups entries by lowercased
   // name so resolving a link/symbol scans only the same-named entries, not the whole
@@ -8084,6 +8580,17 @@ var ReferenceLinkerPlugin = class extends Plugin {
     this.watchUnsupported = false;
     if (!this.settings.autoRefresh)
       return;
+    for (const [dir, names] of this.bibFolders()) {
+      try {
+        if (!fs.existsSync(dir))
+          continue;
+        this.watchers.push(fs.watch(dir, (_evt, filename) => {
+          if (!filename || names.has(nodePath.basename(String(filename)).toLowerCase()))
+            this.onBibChange();
+        }));
+      } catch (e) {
+      }
+    }
     const root = this.codeRoot();
     if (!root)
       return;
@@ -8129,10 +8636,21 @@ var ReferenceLinkerPlugin = class extends Plugin {
     clearTimeout(this.watchTimer);
     this.watchTimer = setTimeout(() => this.rebuildIndex(false), 1500);
   }
+  // A re-exported bibliography moves keys between documents without any document changing,
+  // so only the citation maps are rebuilt — a full rescan would re-read every outline for
+  // nothing, and re-exporting from Zotero is the common case this whole anchor exists for.
+  onBibChange() {
+    clearTimeout(this.bibTimer);
+    this.bibTimer = setTimeout(async () => {
+      await this.loadCitations();
+      this.notifyIndexChange();
+    }, 1500);
+  }
   // Empty the index (nothing to scan) and persist, telling whoever's listening.
   async resetIndex(noticeKey, notify) {
     this.setIndex([]);
     this.fileCache = /* @__PURE__ */ new Map();
+    this.citations = emptyCitations();
     await this.saveCache();
     this.notifyIndexChange();
     if (notify)
@@ -8174,6 +8692,7 @@ var ReferenceLinkerPlugin = class extends Plugin {
     this.fileCache = scan.next;
     this.cacheSignature = signature;
     this.setIndex(this.flattenCache());
+    await this.loadCitations();
     await this.saveCache();
     this.notifyIndexChange();
     this.startWatchers();
@@ -8253,8 +8772,20 @@ var ReferenceLinkerPlugin = class extends Plugin {
   // table row.
   buildLink(e, inTable, template) {
     const url = this.buildUri(e, template);
-    const link = `[${e.name}](${e.kind === "section" ? withTitle(url, formatBinding({ sec: e.name })) : url})`;
+    const title = formatBinding(this.bindingFor(e));
+    const link = `[${e.name}](${title ? withTitle(url, title) : url})`;
     return inTable ? link.replace(/\|/g, "\\|") : link;
+  }
+  // What a new link is pinned to: the section it points at, and the key its document is filed
+  // under. The key is what survives the document being re-filed, which no path can.
+  bindingFor(e) {
+    const b = {};
+    const cite = this.citeOf(e.path);
+    if (cite)
+      b.cite = cite;
+    if (e.kind === "section")
+      b.sec = e.name;
+    return b;
   }
   pickEntry(onChoose, query) {
     new ReferenceLinkModal(this.app, this, { onChoose, query }).open();
@@ -8388,7 +8919,7 @@ var ReferenceLinkerPlugin = class extends Plugin {
     }
     const pinned = withTitle(link.target, opt.title);
     editor.replaceRange("[" + link.name + "](" + pinned + ")", { line: link.line, ch: link.from }, { line: link.line, ch: link.to });
-    new Notice(t("notice.pinned", { sec: opt.value }));
+    new Notice(opt.kind === "cite" ? t("notice.pinnedCite", { cite: opt.value }) : t("notice.pinned", { sec: opt.value }));
   }
   unpinLinkAtCursor(editor, link) {
     if (!parseBinding(link.title))
@@ -8463,6 +8994,21 @@ var ReferenceLinkerPlugin = class extends Plugin {
       rel,
       exists: !!root && fs.existsSync(nodePath.join(root, rel))
     }));
+  }
+  bibStatus() {
+    return this.bibPaths().map((abs) => ({ abs, exists: fs.existsSync(abs) }));
+  }
+  // The bibliographies grouped by the folder holding them, as folder -> lowercased file
+  // names, so several bibliographies side by side cost one watcher rather than one each.
+  bibFolders() {
+    const dirs = /* @__PURE__ */ new Map();
+    for (const abs of this.bibPaths()) {
+      const dir = nodePath.dirname(abs);
+      if (!dirs.has(dir))
+        dirs.set(dir, /* @__PURE__ */ new Set());
+      dirs.get(dir).add(nodePath.basename(abs).toLowerCase());
+    }
+    return dirs;
   }
   async saveSettings() {
     await this.saveData(this.settings);

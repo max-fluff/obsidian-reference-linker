@@ -28,6 +28,8 @@ const actualize = require('./actualize');
 const { ReferenceLinkModal, PresetPickerModal } = require('./modal');
 const { ReferenceLinkerSettingTab } = require('./settings-tab');
 const formats = require('./formats');
+const { parseBibliography } = require('./bib');
+const { buildCitations, emptyCitations } = require('./citations');
 const { initI18n, withFamily, t, plural } = require('./shared/i18n');
 const api = require('./api');
 const indexEvents = require('./shared/index-events');
@@ -99,6 +101,7 @@ class ReferenceLinkerPlugin extends Plugin {
     this.watchers = [];
     this.fileCache = new Map();
     this.cacheSignature = '';
+    this.citations = emptyCitations();
     this._indexListeners = new Set(); // API onChange subscribers; needed before the first rebuild
     this.migrateSettings();
     await this.loadCache();
@@ -187,12 +190,13 @@ class ReferenceLinkerPlugin extends Plugin {
           if (this.isLinkStale(withTitle(link.target, link.title))) {
             menu.addItem((item) => item.setTitle(t('menu.fixLink')).setIcon('wrench').onClick(() => this.fixLinkAtCursor(editor, link)));
           }
-          const bound = !!parseBinding(link.title);
-          const pin = bound ? null : this.linkPinOption(link);
-          if (bound) {
+          const pin = this.linkPinOption(link);
+          if (pin) {
+            const label = pin.kind === 'cite' ? t('menu.pinCite', { cite: pin.value }) : t('menu.pin', { sec: pin.value });
+            menu.addItem((item) => item.setTitle(label).setIcon('pin').onClick(() => this.pinLinkAtCursor(editor, link)));
+          }
+          if (parseBinding(link.title)) {
             menu.addItem((item) => item.setTitle(t('menu.unpin')).setIcon('pin-off').onClick(() => this.unpinLinkAtCursor(editor, link)));
-          } else if (pin) {
-            menu.addItem((item) => item.setTitle(t('menu.pin', { sec: pin.value })).setIcon('pin').onClick(() => this.pinLinkAtCursor(editor, link)));
           }
         }
       }))
@@ -212,6 +216,7 @@ class ReferenceLinkerPlugin extends Plugin {
   onunload() {
     this.stopWatchers();
     clearTimeout(this.watchTimer);
+    clearTimeout(this.bibTimer);
     if (this.hover) this.hover.destroy();
     formats.dispose();
   }
@@ -427,10 +432,39 @@ class ReferenceLinkerPlugin extends Plugin {
   // otherwise turn every link red at once. An unknown document gets no verdict rather than
   // a guess. Code Linker already worked this way; this is the two brought into line.
   urlBindState(url, b, storedPosition) {
-    if (!b.sec) return null;
-    const rel = this.targetIndexedFile(this.decodeTarget(url));
+    const here = this.targetIndexedFile(this.decodeTarget(url));
+    const moved = this.citeMovedTo(b, here);
+    if (moved === 'broken') return { state: 'broken' };
+    // A moved document is judged by the outline of where it moved to, not of where the link
+    // still points: the page the section wants is the page it sits on in the new file.
+    const rel = moved || here;
     if (!rel) return null;
-    const hits = this.entriesIn(rel).filter((e) => e.kind === 'section' && e.name === b.sec);
+    const sec = b.sec ? this.secBindState(url, rel, b.sec, storedPosition) : null;
+    if (sec && sec.state === 'broken') return { state: 'broken' };
+    if (!moved) return sec;
+    const r = { state: 'stale', path: moved };
+    if (sec && sec.anchor != null) r.anchor = sec.anchor;
+    else if (sec && sec.line != null) r.line = sec.line;
+    return r;
+  }
+
+  // Where a cite binding says its document now lives, when that is not where the link points:
+  // a path when it moved, 'broken' for a key the bibliography no longer has, null otherwise.
+  //
+  // A key the bibliography still has but whose document is not in the index is the
+  // unknown-document case, not a break: a reference root pointed at the wrong folder, or a
+  // library drive not mounted yet, would otherwise turn every cite link in the vault red at
+  // once while the bibliography itself reads perfectly well.
+  citeMovedTo(b, here) {
+    if (!b.cite) return null;
+    const known = this.citations.byKey.get(String(b.cite).toLowerCase());
+    if (!known) return this.hasCitations() ? 'broken' : null;
+    if (!known.rel) return null;
+    return known.rel === here ? null : known.rel;
+  }
+
+  secBindState(url, rel, sec, storedPosition) {
+    const hits = this.entriesIn(rel).filter((e) => e.kind === 'section' && e.name === sec);
     if (!hits.length) return { state: 'broken' };
     const kind = formats.anchorKind(extOf(rel));
     // Nothing stored to compare against: the binding alone says which section, so only its
@@ -439,6 +473,26 @@ class ReferenceLinkerPlugin extends Plugin {
     if (!kind) return null;
     if (kind === 'id') return this.idBindState(url, hits);
     return bindStateFrom(hits.map((e) => e.position), storedPosition);
+  }
+
+  // The same link pointed at another file: scheme, template and fragment left as they were.
+  // Null when the URL holds neither our root token nor the reference root — rewriting a path
+  // we cannot locate inside the URL would corrupt the link rather than fix it.
+  retargetUrl(url, rel) {
+    const enc = rel.split('/').map(encodeURIComponent).join('/');
+    const token = /(\{(?:ref-)?root\}\/)[^#?]*/;
+    if (token.test(url)) return url.replace(token, (_, head) => head + enc);
+    const root = this.codeRoot().split(nodePath.sep).join('/').replace(/\/+$/, '');
+    if (!root) return null;
+    for (const base of [root, encodeURI(root)]) {
+      const i = url.indexOf(base + '/');
+      if (i < 0) continue;
+      const head = url.slice(0, i + base.length + 1);
+      const tail = url.slice(head.length);
+      const cut = tail.search(/[#?]/);
+      return head + enc + (cut < 0 ? '' : tail.slice(cut));
+    }
+    return null;
   }
 
   // An id-anchored link drifts when its heading is still there under a different id, which
@@ -477,13 +531,33 @@ class ReferenceLinkerPlugin extends Plugin {
     return entries.find((e) => e.kind === 'section' && e.position === position) || null;
   }
 
-  // The title pinning would produce and the section it pins to, or null when there's nothing
-  // to pin or it would change nothing.
   linkPinOption(link) {
-    const sec = this.sectionAtLink(link.target);
-    if (!sec) return null;
-    const title = formatBinding({ sec: sec.name });
-    return title === (link.title || '') ? null : { title, value: sec.name };
+    return this.pinOptionFor(link.target, link.title);
+  }
+
+  // The title pinning would produce and what it names, or null when there is nothing to pin
+  // or it would change nothing.
+  //
+  // A binding already there is kept exactly as it stands and only topped up with the key:
+  // re-deriving its section from the page the link sits on would silently repoint a link that
+  // has drifted, which is the one thing pinning must never do. A tooltip is prose, not a
+  // binding, and is never overwritten.
+  pinOptionFor(url, title) {
+    const existing = ownsBinding(title, OWNER) ? parseBinding(title) : null;
+    if (!existing && title) return null;
+    const b = existing ? { sec: existing.sec, cite: existing.cite } : {};
+    if (!existing) {
+      const sec = this.sectionAtLink(url);
+      if (sec) b.sec = sec.name;
+    }
+    if (!b.cite) {
+      const cite = this.citeOf(this.targetIndexedFile(this.decodeTarget(url)));
+      if (cite) b.cite = cite;
+    }
+    const next = formatBinding(b);
+    if (!next || next === (title || '')) return null;
+    const addedSec = b.sec && b.sec !== (existing ? existing.sec : '');
+    return { title: next, value: addedSec ? b.sec : b.cite, kind: addedSec ? 'sec' : 'cite' };
   }
 
   // CM6 link handler for Live Preview. Suppresses Obsidian's open of the literal
@@ -579,6 +653,7 @@ class ReferenceLinkerPlugin extends Plugin {
       this.cacheSignature = data.signature || '';
       this.fileCache = new Map(Object.entries(data.files));
       this.setIndex(this.flattenCache());
+      await this.loadCitations();
     } catch {
       /* corrupt cache: ignore, the rebuild will repopulate it */
     }
@@ -600,6 +675,43 @@ class ReferenceLinkerPlugin extends Plugin {
     for (const v of this.fileCache.values()) for (const e of v.entries) out.push(e);
     out.sort((a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path));
     return out;
+  }
+
+  // The bibliographies to read, absolute. A path is taken as written when absolute, and
+  // resolved against the reference root otherwise.
+  bibPaths() {
+    const root = this.codeRoot();
+    return splitLines(this.settings.bibFiles)
+      .map((line) => line.split('\\').join('/').trim())
+      .filter(Boolean)
+      .map((p) => (nodePath.isAbsolute(p) ? p : root ? nodePath.join(root, p) : p));
+  }
+
+  // Re-read the bibliographies and match their keys against the index. Deliberately apart
+  // from the file scan, which caches per file by mtime: a re-export moves a key onto another
+  // document without that document changing, so a key cached with the file would never move.
+  async loadCitations() {
+    const entries = [];
+    for (const abs of this.bibPaths()) {
+      try {
+        entries.push(...parseBibliography(await fsp.readFile(abs, 'utf8')));
+      } catch {
+        /* unreadable or not there yet: the remaining bibliographies still count */
+      }
+    }
+    this.citations = buildCitations(entries, [...this.fileCache.keys()], this.codeRoot());
+  }
+
+  // The key a document is filed under.
+  citeOf(rel) {
+    return (rel && this.citations.byPath.get(rel)) || null;
+  }
+
+  // Whether a verdict about a key is worth anything. With no bibliography loaded every cite
+  // binding in the vault would read as broken at once — the same false alarm a misconfigured
+  // reference root would raise, which is why sec refuses to judge an unindexed document.
+  hasCitations() {
+    return this.citations.keys > 0;
   }
 
   // Set the index and its name lookup together. byName groups entries by lowercased
@@ -658,6 +770,20 @@ class ReferenceLinkerPlugin extends Plugin {
     this.stopWatchers();
     this.watchUnsupported = false;
     if (!this.settings.autoRefresh) return;
+    // The folder, not the file: an exporter that writes a temporary file and renames it over
+    // the target — which is how Zotero re-exports — replaces the inode and leaves a watch on
+    // the file itself bound to something unlinked, silently deaf from the first export on.
+    // Watching the folder also notices a bibliography that isn't there yet.
+    for (const [dir, names] of this.bibFolders()) {
+      try {
+        if (!fs.existsSync(dir)) continue;
+        this.watchers.push(fs.watch(dir, (_evt, filename) => {
+          if (!filename || names.has(nodePath.basename(String(filename)).toLowerCase())) this.onBibChange();
+        }));
+      } catch {
+        /* transient FS issue; a manual rebuild re-arms the watchers */
+      }
+    }
     const root = this.codeRoot();
     if (!root) return;
     for (const r of this.scanFolders()) {
@@ -704,10 +830,22 @@ class ReferenceLinkerPlugin extends Plugin {
     this.watchTimer = setTimeout(() => this.rebuildIndex(false), 1500);
   }
 
+  // A re-exported bibliography moves keys between documents without any document changing,
+  // so only the citation maps are rebuilt — a full rescan would re-read every outline for
+  // nothing, and re-exporting from Zotero is the common case this whole anchor exists for.
+  onBibChange() {
+    clearTimeout(this.bibTimer);
+    this.bibTimer = setTimeout(async () => {
+      await this.loadCitations();
+      this.notifyIndexChange();
+    }, 1500);
+  }
+
   // Empty the index (nothing to scan) and persist, telling whoever's listening.
   async resetIndex(noticeKey, notify) {
     this.setIndex([]);
     this.fileCache = new Map();
+    this.citations = emptyCitations();
     await this.saveCache();
     this.notifyIndexChange();
     if (notify) new Notice(t(noticeKey));
@@ -749,6 +887,7 @@ class ReferenceLinkerPlugin extends Plugin {
     this.fileCache = scan.next;
     this.cacheSignature = signature;
     this.setIndex(this.flattenCache());
+    await this.loadCitations();
     await this.saveCache();
     this.notifyIndexChange();
     this.startWatchers();
@@ -837,8 +976,19 @@ class ReferenceLinkerPlugin extends Plugin {
   // table row.
   buildLink(e, inTable, template) {
     const url = this.buildUri(e, template);
-    const link = `[${e.name}](${e.kind === 'section' ? withTitle(url, formatBinding({ sec: e.name })) : url})`;
+    const title = formatBinding(this.bindingFor(e));
+    const link = `[${e.name}](${title ? withTitle(url, title) : url})`;
     return inTable ? link.replace(/\|/g, '\\|') : link;
+  }
+
+  // What a new link is pinned to: the section it points at, and the key its document is filed
+  // under. The key is what survives the document being re-filed, which no path can.
+  bindingFor(e) {
+    const b = {};
+    const cite = this.citeOf(e.path);
+    if (cite) b.cite = cite;
+    if (e.kind === 'section') b.sec = e.name;
+    return b;
   }
 
   pickEntry(onChoose, query) {
@@ -973,7 +1123,7 @@ class ReferenceLinkerPlugin extends Plugin {
     if (!opt) { new Notice(t('notice.cantPin')); return; }
     const pinned = withTitle(link.target, opt.title);
     editor.replaceRange('[' + link.name + '](' + pinned + ')', { line: link.line, ch: link.from }, { line: link.line, ch: link.to });
-    new Notice(t('notice.pinned', { sec: opt.value }));
+    new Notice(opt.kind === 'cite' ? t('notice.pinnedCite', { cite: opt.value }) : t('notice.pinned', { sec: opt.value }));
   }
 
   unpinLinkAtCursor(editor, link) {
@@ -1050,6 +1200,22 @@ class ReferenceLinkerPlugin extends Plugin {
       rel,
       exists: !!root && fs.existsSync(nodePath.join(root, rel)),
     }));
+  }
+
+  bibStatus() {
+    return this.bibPaths().map((abs) => ({ abs, exists: fs.existsSync(abs) }));
+  }
+
+  // The bibliographies grouped by the folder holding them, as folder -> lowercased file
+  // names, so several bibliographies side by side cost one watcher rather than one each.
+  bibFolders() {
+    const dirs = new Map();
+    for (const abs of this.bibPaths()) {
+      const dir = nodePath.dirname(abs);
+      if (!dirs.has(dir)) dirs.set(dir, new Set());
+      dirs.get(dir).add(nodePath.basename(abs).toLowerCase());
+    }
+    return dirs;
   }
 
   async saveSettings() {

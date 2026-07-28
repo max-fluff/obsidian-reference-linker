@@ -29,6 +29,7 @@ module.exports = {
   'menu.copyLink': 'Copy reference link',
   'menu.fixLink': 'Update this reference link',
   'menu.pin': 'Pin to section “{sec}”',
+  'menu.pinCite': 'Pin to citation key “{cite}”',
   'menu.unpin': 'Unpin this reference link',
 
   // Notices
@@ -50,8 +51,9 @@ module.exports = {
   'notice.linksPinned': 'Reference Linker: {n} link(s) pinned',
   'notice.linksPinnedVault': 'Reference Linker: {n} link(s) pinned across {files} note(s)',
   'notice.pinned': 'Reference Linker: link pinned to section “{sec}”',
+  'notice.pinnedCite': 'Reference Linker: link pinned to citation key “{cite}”',
   'notice.unpinned': 'Reference Linker: link unpinned — it is no longer tracked',
-  'notice.cantPin': "Reference Linker: can't pin — no section begins on that page",
+  'notice.cantPin': "Reference Linker: can't pin — no section begins on that page, and the document has no citation key",
 
   // Inline embeds
   'embed.empty': 'Reference Linker: empty embed — give a document path',
@@ -102,6 +104,11 @@ module.exports = {
   'set.format.csv': 'CSV and TSV tables',
   'set.skipFolders.desc': 'A bare name (node_modules) is skipped at any depth; a path with a slash (archive/raw) skips only that folder, relative to the reference root.',
   'set.autoRefresh.desc': 'Watch the scan folders and rebuild the index when documents change.',
+  'set.bibFiles.name': 'Bibliographies',
+  'set.bibFiles.desc': 'BibTeX (.bib) or CSL-JSON files to read citation keys from, one path per line — absolute, or relative to the reference root. A link inserted to a document with a key is pinned to it, so it survives the document being renamed or re-filed.',
+  'set.bibFiles.stats': '{matched} of {keys} key(s) matched to an indexed document',
+  'set.bibFiles.none': 'No bibliography loaded — links are pinned to sections only.',
+  'set.bibFiles.notFound': '⚠ Not found — {files}',
   'set.info': 'Reference root: {root} · {entries} indexed',
   'set.rebuild.name': 'Rebuild reference index',
   'set.rebuild.desc': 'Re-scan the document folders now.',

@@ -25,6 +25,7 @@ module.exports = {
   'menu.copyLink': 'Скопировать ссылку на документ',
   'menu.fixLink': 'Актуализировать эту ссылку',
   'menu.pin': 'Закрепить за разделом «{sec}»',
+  'menu.pinCite': 'Закрепить за ключом цитирования «{cite}»',
   'menu.unpin': 'Открепить эту ссылку',
 
   // Notices
@@ -46,8 +47,9 @@ module.exports = {
   'notice.linksPinned': 'Reference Linker: закреплено ссылок — {n}',
   'notice.linksPinnedVault': 'Reference Linker: закреплено ссылок — {n} в заметках: {files}',
   'notice.pinned': 'Reference Linker: ссылка закреплена за разделом «{sec}»',
+  'notice.pinnedCite': 'Reference Linker: ссылка закреплена за ключом цитирования «{cite}»',
   'notice.unpinned': 'Reference Linker: ссылка откреплена — больше не отслеживается',
-  'notice.cantPin': 'Reference Linker: не за что закрепить — на этой странице не начинается раздел',
+  'notice.cantPin': 'Reference Linker: не за что закрепить — на этой странице не начинается раздел, а ключа цитирования у документа нет',
 
   // Inline embeds
   'embed.empty': 'Reference Linker: пустой embed — укажите путь к документу',
@@ -98,6 +100,11 @@ module.exports = {
   'set.format.csv': 'Таблицы CSV и TSV',
   'set.skipFolders.desc': 'Просто имя (node_modules) пропускается на любой глубине; путь со слэшем (archive/raw) пропускает только эту папку относительно корня.',
   'set.autoRefresh.desc': 'Следить за папками сканирования и перестраивать индекс при изменении документов.',
+  'set.bibFiles.name': 'Библиографии',
+  'set.bibFiles.desc': 'Файлы BibTeX (.bib) или CSL-JSON, откуда читаются ключи цитирования, по одному пути в строке — абсолютному или относительно корня документов. Ссылка на документ с ключом закрепляется за ним и переживает переименование и перекладывание документа.',
+  'set.bibFiles.stats': 'сопоставлено с документами ключей: {matched} из {keys}',
+  'set.bibFiles.none': 'Библиография не загружена — ссылки закрепляются только за разделами.',
+  'set.bibFiles.notFound': '⚠ Не найдено — {files}',
   'set.info': 'Корень документов: {root} · проиндексировано {entries}',
   'set.rebuild.name': 'Перестроить индекс документов',
   'set.rebuild.desc': 'Пересканировать папки с документами сейчас.',
