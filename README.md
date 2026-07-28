@@ -10,7 +10,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/github/license/max-fluff/obsidian-reference-linker?color=7c3aed" alt="License: MIT"></a>
 </p>
 
-An Obsidian plugin that autocompletes links to external documents (PDFs, Office files, images) and inserts a markdown link that opens the document in your default app at the right page. For PDFs and PowerPoint decks it also indexes the outline — bookmarks, or one entry per slide — so you can link straight to a section, preview it on hover, and embed it inline.
+An Obsidian plugin that autocompletes links to external documents (PDFs, Office files, images) and inserts a markdown link that opens the document in your default app at the right page. Where a format carries an outline — a PDF's bookmarks, a Word or HTML heading, a workbook's sheets, one entry per slide — it indexes that too, so you can link straight to a section, preview it on hover, and embed it inline.
 
 It's the document counterpart to [Code Linker](https://github.com/max-fluff/obsidian-code-linker), which does the same for source code. Your reference material usually lives outside the vault, in project folders, download folders or a research library. This plugin makes it as linkable as a note, without copying anything in.
 
@@ -91,7 +91,7 @@ What each format gives you:
 | CSV, TSV | — | rendered as a table grid | no |
 | Audio, video | — | the file, seeked to `#t=` seconds | no |
 | Images | — | the image | — |
-| Anything else | — | — | — |
+| Anything else, added under **Other extensions** | — | — | — |
 
 HTML is the one worth setting up: generated documentation (AsciiDoc, Sphinx, Doxygen,
 javadoc) puts an `id` on nearly every heading, so a link lands on the exact section in your
@@ -110,7 +110,7 @@ with no outline is normal rather than a failure, and its preview shows the docum
 
 A document with no outline — a PDF without bookmarks, a plain `.docx`, an `.epub` — is still indexed by file name, and its link still opens it. Only the section entries are missing.
 
-Each of those formats is also read under the extensions its own application saves it as: the macro-enabled `.docm .xlsm .pptm .dotm .xltm .potm`, the templates `.dotx .xltx .potx .ott .ots .otp`. They are the same package under another name. The flat single-file ODF (`.fodt .fods .fodp`) is not — it is one XML file rather than a zip, and it is not read.
+Each of those formats is also read under the extensions its own application saves it as: the macro-enabled `.docm .xlsm .pptm .dotm .xltm .potm`, the templates `.dotx .xltx .potx .ott .ots .otp`. They are the same package under another name, and each format's row in **File extensions** lists every one of them. The flat single-file ODF (`.fodt .fods .fodp`) is not — it is one XML file rather than a zip, and it is not read.
 
 ### Portable `{ref-root}` links
 
@@ -134,7 +134,7 @@ Which fragment a link carries is the format's business: `#page=` for a PDF, `#id
   <img src="docs/images/hover.png" alt="The hover popover over a reference link, showing the target PDF page rendered" width="560">
 </p>
 
-Hover a reference link to preview it without leaving your notes: for a PDF, the target page rendered to a canvas; for a slide, its text; for an image, the image itself. PDF rendering uses the pdf.js that Obsidian already ships, so no second copy is bundled. In live preview, hold Ctrl/Cmd to show it, the way a note preview works; in reading view a plain hover is enough. Toggle it with **Preview on hover** in settings.
+Hover a reference link to preview it without leaving your notes — the PDF page rendered to a canvas, the slide drawn, the document or sheet laid out, the image itself; what each format shows is in the table above. PDF rendering uses the pdf.js that Obsidian already ships, so no second copy is bundled. In live preview, hold Ctrl/Cmd to show it, the way a note preview works; in reading view a plain hover is enough. Toggle it with **Preview on hover** in settings.
 
 ### Inline embeds
 
@@ -223,7 +223,8 @@ The selection commands are also in the editor's right-click menu. Right-clicking
 | --- | --- | --- |
 | **Reference root** | vault's parent folder | Base folder the scan paths resolve against. Empty = the folder containing the vault. |
 | **Scan folders** | whole root | One path per line, relative to the reference root. Empty scans the whole root. |
-| **File extensions** | none | A list of every format the plugin reads: turn on the ones to index, or open a format to pick single extensions. Anything else goes under **Other extensions** and is found by file name only. Nothing is indexed until something is on, so set this first. |
+| **File extensions** | none | Every format the plugin reads, one row each: turn a format on to index all its extensions, or open the row and pick single ones. Nothing is indexed until something is on, so set this first. |
+| **Other extensions** | none | Anything else you want indexed. Found by file name only — no preview, no sections. |
 | **Skip folders** | `.git`, `node_modules`, `.obsidian` | A bare name is skipped at any depth; a path with a slash skips only that folder. |
 | **Auto-refresh index** | on | Watch the scan folders and rebuild when documents change. Not available on Linux, which lacks recursive watching; rebuild manually there. |
 
@@ -235,7 +236,12 @@ The selection commands are also in the editor's right-click menu. Right-clicking
 | **Viewer link preset** | file:// | The link format. With **ask-on-insert** you pick per link; add your own named URL templates under **Your viewers**. |
 | **Editor context menu** | on | Add the convert/open items to the editor right-click menu. |
 
-**Hover preview**: **Preview on hover** (on).
+**Hover preview**
+| Setting | Default | What it does |
+| --- | --- | --- |
+| **Preview on hover** | on | Preview the document when you hover a link. |
+| **Document preview shape** | text column | How a Word or OpenDocument preview is laid out: a text column whose height follows the content, or the whole page the document declares. The page size and margins come from the file either way. |
+
 **Links**: **Mark stale links** (on).
 
 ### Styling
@@ -298,17 +304,19 @@ In an existing clone without the submodule, run `git submodule update --init` fi
 
 - `main.js` — the `Plugin` class: lifecycle, settings, folder scan, link building; applies the mixins below.
 - `constants.js` — default settings and the `file://` preset.
+- `formats/` — one module per document format: which extensions it claims, what it outlines, how it previews, what anchor its links carry. The only place that branches on an extension; see [`CONTRIBUTING.md`](CONTRIBUTING.md) for the handler contract.
+- `zip.js`, `xml.js` — the readers the packaged formats (OOXML, ODF, EPUB) share.
 - `suggest.js` — the `EditorSuggest` that drives autocomplete.
 - `filter.js` — the inline `pdf:` / `sec:` query filter.
 - `pdf.js` — Obsidian's pdf.js via `loadPdfJs()`: outline reading and page rendering.
-- `hover.js` — the page/image popover.
+- `hover.js` — the preview popover.
 - `embed.js` — the inline ` ```reference-link ` block renderer.
 - `actualize.js` — stale/broken detection and the "Update reference links" actions.
 - `api.js` — the public API mixin (`app.plugins.plugins['reference-linker'].api`).
 - `modal.js` — the fuzzy pickers (index entries, viewer formats).
 - `settings-tab.js` — the settings UI.
-- `folder-suggest.js` — filesystem folder autocomplete for the root/scan/skip fields (feature-detected).
-- `shared/` — git submodule shared with the sibling linker plugins: markdown helpers, the link-binding grammar, the i18n engine, the folder-list settings editor, and the family's branding generators (dev-only, nothing under `shared/branding/` is bundled).
+- `styles.css` — this plugin's own styles; the shipped `styles.css` is assembled from the shared ones plus this by `npm run build`.
+- `shared/` — git submodule shared with the sibling linker plugins: markdown helpers, the link-binding grammar, the i18n engine, the folder-list settings editor, the folder autocomplete, and the family's branding generators (dev-only, nothing under `shared/branding/` is bundled).
 - `locales/` — interface strings (English and Russian), fed to the shared i18n engine.
 
 The header images are generated rather than hand-drawn. `docs/branding.config.mjs` holds this plugin's mark, motif and copy, and the shared generators turn it into the assets:
