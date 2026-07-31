@@ -237,7 +237,7 @@ The selection commands are also in the editor's right-click menu. Right-clicking
 | **File extensions** | none | Every format the plugin reads, one row each: turn a format on to index all its extensions, or open the row and pick single ones. Nothing is indexed until something is on, so set this first. |
 | **Other extensions** | none | Anything else you want indexed. Found by file name only — no preview, no sections. |
 | **Skip folders** | `.git`, `node_modules`, `.obsidian` | A bare name is skipped at any depth; a path with a slash skips only that folder. |
-| **Auto-refresh index** | on | Watch the scan folders and rebuild when documents change. Not available on Linux, which lacks recursive watching; rebuild manually there. |
+| **Auto-refresh index** | on | Watch the scan folders and rebuild when documents change. Linux has no recursive watch, so there the plugin falls back to watching each directory of the tree; it works, but a very large tree can hit the OS watch limit (the plugin says so if it does). |
 
 **Suggestions & links**
 | Setting | Default | What it does |
@@ -357,7 +357,7 @@ After enabling, set **Reference root** and turn on the **File extensions** to in
 
 ## Compatibility
 
-Requires Obsidian 1.4.0 or newer. Desktop-only: the index is built by reading the filesystem through Node's API, which isn't available on mobile. On Linux, **Auto-refresh index** isn't available because it relies on recursive `fs.watch`; rebuild manually there, everything else works. Interface in English and Russian, following Obsidian's language.
+Requires Obsidian 1.4.0 or newer. Desktop-only: the index is built by reading the filesystem through Node's API, which isn't available on mobile. On Linux, where Node has no recursive `fs.watch`, **Auto-refresh index** falls back to watching each directory of the scan tree; it works, but a very large tree can hit the OS watch limit (the plugin says so, and a manual rebuild always works). Interface in English and Russian, following Obsidian's language.
 
 None of these are required, the plugin runs on its own, but it cooperates with them if you have them installed:
 
