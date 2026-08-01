@@ -35,11 +35,19 @@ const slider = (row, cls, label, max, value) => row.createEl('input', {
   attr: { min: '0', max: String(max), value: String(value), 'aria-label': label },
 });
 
+// How much of a slider is behind its thumb. A range input paints one track, so the part already
+// played is drawn from this rather than by the browser.
+const fill = (el, part) => el.style.setProperty('--reference-linker-player-fill',
+  Math.max(0, Math.min(100, part * 100)) + '%');
+
 // Draws the row under `media` and wires the two to each other. Returns false where the app's
 // DOM helpers aren't there, so the caller can fall back to the browser's own controls.
-function mountPlayer(el, media, { video }) {
+function mountPlayer(el, media, { video, width }) {
   if (!el.createDiv || !el.createEl) return false;
   const row = el.createDiv({ cls: 'reference-linker-player' });
+  // An audio element with no controls draws nothing, so the row is the only thing with a width:
+  // left to its content it shrinks to the two sliders' minimum.
+  if (width) { row.style.width = width + 'px'; row.style.maxWidth = '100%'; }
   row.tabIndex = 0;
 
   const play = button(row, 'play', t('player.play'), () => toggle());
@@ -48,6 +56,7 @@ function mountPlayer(el, media, { video }) {
   const sound = button(row, 'volume-2', t('player.mute'), () => {
     media.muted = !media.muted;
     setIcon(sound, media.muted ? 'volume-x' : 'volume-2');
+    fill(volume, media.muted ? 0 : media.volume);
   });
   const volume = slider(row, 'volume', t('player.volume'), 100, 100);
   if (video) button(row, 'maximize', t('player.fullscreen'), () => { if (media.requestFullscreen) media.requestFullscreen(); });
@@ -59,7 +68,9 @@ function mountPlayer(el, media, { video }) {
   const show = () => {
     const total = playable(media) ? timecode(media.duration) : '--:--';
     time.setText(timecode(media.currentTime) + ' / ' + total);
-    if (!dragging && playable(media)) seek.value = String(Math.round((media.currentTime / media.duration) * STEPS));
+    const at = playable(media) ? media.currentTime / media.duration : 0;
+    if (!dragging && playable(media)) seek.value = String(Math.round(at * STEPS));
+    fill(seek, dragging ? Number(seek.value) / STEPS : at);
   };
 
   media.addEventListener('loadedmetadata', show);
@@ -69,6 +80,7 @@ function mountPlayer(el, media, { video }) {
   media.addEventListener('ended', () => setIcon(play, 'rotate-ccw'));
   seek.addEventListener('input', () => {
     dragging = true;
+    fill(seek, Number(seek.value) / STEPS);
     if (playable(media)) media.currentTime = (Number(seek.value) / STEPS) * media.duration;
   });
   seek.addEventListener('change', () => { dragging = false; });
@@ -76,6 +88,7 @@ function mountPlayer(el, media, { video }) {
     media.volume = Number(volume.value) / 100;
     media.muted = media.volume === 0;
     setIcon(sound, media.muted ? 'volume-x' : 'volume-2');
+    fill(volume, media.volume);
   });
   if (video) media.addEventListener('click', toggle);
   row.addEventListener('keydown', (evt) => {
@@ -89,6 +102,7 @@ function mountPlayer(el, media, { video }) {
     evt.stopPropagation();
   });
 
+  fill(volume, 1);
   show();
   return true;
 }

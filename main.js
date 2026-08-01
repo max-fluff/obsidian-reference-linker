@@ -3822,10 +3822,18 @@ var require_player = __commonJS({
       type: "range",
       attr: { min: "0", max: String(max), value: String(value), "aria-label": label }
     });
-    function mountPlayer(el, media, { video }) {
+    var fill = (el, part) => el.style.setProperty(
+      "--reference-linker-player-fill",
+      Math.max(0, Math.min(100, part * 100)) + "%"
+    );
+    function mountPlayer(el, media, { video, width }) {
       if (!el.createDiv || !el.createEl)
         return false;
       const row = el.createDiv({ cls: "reference-linker-player" });
+      if (width) {
+        row.style.width = width + "px";
+        row.style.maxWidth = "100%";
+      }
       row.tabIndex = 0;
       const play = button(row, "play", t2("player.play"), () => toggle());
       const seek = slider(row, "seek", t2("player.seek"), STEPS, 0);
@@ -3833,6 +3841,7 @@ var require_player = __commonJS({
       const sound = button(row, "volume-2", t2("player.mute"), () => {
         media.muted = !media.muted;
         setIcon(sound, media.muted ? "volume-x" : "volume-2");
+        fill(volume, media.muted ? 0 : media.volume);
       });
       const volume = slider(row, "volume", t2("player.volume"), 100, 100);
       if (video)
@@ -3855,8 +3864,10 @@ var require_player = __commonJS({
       const show = () => {
         const total = playable(media) ? timecode(media.duration) : "--:--";
         time.setText(timecode(media.currentTime) + " / " + total);
+        const at = playable(media) ? media.currentTime / media.duration : 0;
         if (!dragging && playable(media))
-          seek.value = String(Math.round(media.currentTime / media.duration * STEPS));
+          seek.value = String(Math.round(at * STEPS));
+        fill(seek, dragging ? Number(seek.value) / STEPS : at);
       };
       media.addEventListener("loadedmetadata", show);
       media.addEventListener("timeupdate", show);
@@ -3865,6 +3876,7 @@ var require_player = __commonJS({
       media.addEventListener("ended", () => setIcon(play, "rotate-ccw"));
       seek.addEventListener("input", () => {
         dragging = true;
+        fill(seek, Number(seek.value) / STEPS);
         if (playable(media))
           media.currentTime = Number(seek.value) / STEPS * media.duration;
       });
@@ -3875,6 +3887,7 @@ var require_player = __commonJS({
         media.volume = Number(volume.value) / 100;
         media.muted = media.volume === 0;
         setIcon(sound, media.muted ? "volume-x" : "volume-2");
+        fill(volume, media.volume);
       });
       if (video)
         media.addEventListener("click", toggle);
@@ -3893,6 +3906,7 @@ var require_player = __commonJS({
         evt.preventDefault();
         evt.stopPropagation();
       });
+      fill(volume, 1);
       show();
       return true;
     }
@@ -3935,7 +3949,7 @@ var require_media = __commonJS({
         return false;
       const isVideo = !!VIDEO[req.ext];
       const media = el.createEl(isVideo ? "video" : "audio");
-      media.controls = !mountPlayer(el, media, { video: isVideo });
+      media.controls = !mountPlayer(el, media, { video: isVideo, width: req.width });
       if (!media.controls && !isVideo)
         media.addClass("reference-linker-player-source");
       media.preload = "metadata";

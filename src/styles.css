@@ -83,9 +83,17 @@ settings:
   text-overflow: ellipsis;
 }
 
+/* A note's text carries the editing caret; a document shown in it is not text being edited. */
 .%p%-embed {
   width: fit-content;
   max-width: 100%;
+  cursor: default;
+}
+
+/* Except where the preview is text of its own, which is there to be read and copied. */
+.%p%-embed-body .%p%-rendered,
+.%p%-embed-body .%p%-doc {
+  cursor: text;
 }
 
 /* The header must not widen the frame, or a long title leaves the page floating in dead
@@ -234,6 +242,46 @@ settings:
 .%p%-player-volume {
   flex: 0 0 auto;
   width: 56px;
+}
+
+/* A range input paints one track, so what has been played is drawn as a gradient stopping at
+   --%p%-player-fill, which the player keeps current. */
+.%p%-player-seek,
+.%p%-player-volume {
+  appearance: none;
+  -webkit-appearance: none;
+  height: 12px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.%p%-player-seek::-webkit-slider-runnable-track,
+.%p%-player-volume::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: var(--radius-s);
+  background: linear-gradient(
+    to right,
+    var(--interactive-accent) 0 var(--%p%-player-fill, 0%),
+    var(--background-modifier-border) var(--%p%-player-fill, 0%) 100%);
+}
+
+.%p%-player-seek::-webkit-slider-thumb,
+.%p%-player-volume::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 10px;
+  height: 10px;
+  margin-top: -3px;
+  border-radius: 50%;
+  background: var(--interactive-accent);
+}
+
+.%p%-player-seek:hover::-webkit-slider-thumb,
+.%p%-player-volume:hover::-webkit-slider-thumb,
+.%p%-player-seek:focus-visible::-webkit-slider-thumb,
+.%p%-player-volume:focus-visible::-webkit-slider-thumb {
+  background: var(--interactive-accent-hover);
 }
 
 .%p%-player-time {

@@ -47,7 +47,7 @@ async function render(el, req) {
   const isVideo = !!VIDEO[req.ext];
   const media = el.createEl(isVideo ? 'video' : 'audio');
   // Our own transport, or the browser's bar where there is no DOM to draw one in.
-  media.controls = !mountPlayer(el, media, { video: isVideo });
+  media.controls = !mountPlayer(el, media, { video: isVideo, width: req.width });
   // An audio element with our own transport has nothing left to show, and a hidden element
   // still plays.
   if (!media.controls && !isVideo) media.addClass('reference-linker-player-source');

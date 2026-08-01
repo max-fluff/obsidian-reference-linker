@@ -10,7 +10,8 @@ installStubs();
 const { mountPlayer, timecode } = require('../src/formats/player');
 
 const node = () => {
-  const n = { children: [], style: {}, attrs: {}, listeners: {}, text: '' };
+  const style = { setProperty(k, v) { style[k] = v; } };
+  const n = { children: [], style, attrs: {}, listeners: {}, text: '' };
   n.createEl = (tag, o) => {
     const child = node();
     child.tag = tag;
@@ -104,6 +105,22 @@ describe('the player row', () => {
     p.seek.value = '500';
     p.seek.fire('input');
     assert.strictEqual(Number.isNaN(p.media.currentTime), false, 'seeking a duration-less file set NaN');
+  });
+
+  it('paints the slider up to where the recording has got to', () => {
+    // A range input draws one track, so what is behind the thumb is the player's own doing.
+    const p = player(200);
+    p.media.currentTime = 50;
+    p.media.fire('timeupdate');
+    assert.strictEqual(p.seek.style['--reference-linker-player-fill'], '25%');
+  });
+
+  it('empties the volume slider when muted, and fills it again when it speaks', () => {
+    const p = player();
+    p.sound.click();
+    assert.strictEqual(p.volume.style['--reference-linker-player-fill'], '0%');
+    p.sound.click();
+    assert.strictEqual(p.volume.style['--reference-linker-player-fill'], '100%');
   });
 
   it('mutes and unmutes', () => {

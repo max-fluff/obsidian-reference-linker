@@ -406,9 +406,17 @@ settings:
   text-overflow: ellipsis;
 }
 
+/* A note's text carries the editing caret; a document shown in it is not text being edited. */
 .reference-linker-embed {
   width: fit-content;
   max-width: 100%;
+  cursor: default;
+}
+
+/* Except where the preview is text of its own, which is there to be read and copied. */
+.reference-linker-embed-body .reference-linker-rendered,
+.reference-linker-embed-body .reference-linker-doc {
+  cursor: text;
 }
 
 /* The header must not widen the frame, or a long title leaves the page floating in dead
@@ -557,6 +565,46 @@ settings:
 .reference-linker-player-volume {
   flex: 0 0 auto;
   width: 56px;
+}
+
+/* A range input paints one track, so what has been played is drawn as a gradient stopping at
+   --reference-linker-player-fill, which the player keeps current. */
+.reference-linker-player-seek,
+.reference-linker-player-volume {
+  appearance: none;
+  -webkit-appearance: none;
+  height: 12px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.reference-linker-player-seek::-webkit-slider-runnable-track,
+.reference-linker-player-volume::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: var(--radius-s);
+  background: linear-gradient(
+    to right,
+    var(--interactive-accent) 0 var(--reference-linker-player-fill, 0%),
+    var(--background-modifier-border) var(--reference-linker-player-fill, 0%) 100%);
+}
+
+.reference-linker-player-seek::-webkit-slider-thumb,
+.reference-linker-player-volume::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 10px;
+  height: 10px;
+  margin-top: -3px;
+  border-radius: 50%;
+  background: var(--interactive-accent);
+}
+
+.reference-linker-player-seek:hover::-webkit-slider-thumb,
+.reference-linker-player-volume:hover::-webkit-slider-thumb,
+.reference-linker-player-seek:focus-visible::-webkit-slider-thumb,
+.reference-linker-player-volume:focus-visible::-webkit-slider-thumb {
+  background: var(--interactive-accent-hover);
 }
 
 .reference-linker-player-time {
