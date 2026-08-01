@@ -15,7 +15,7 @@ An Obsidian plugin that autocompletes links to the documents living outside your
 - **11 formats, 53 extensions, no converters.** PDF, Word, Excel, PowerPoint, OpenDocument, EPUB, HTML, Markdown, CSV, images, audio and video — every reader is the plugin's own. No pandoc, no LibreOffice, nothing to install alongside it.
 - **Sections, not just file names.** Where a format carries an outline — a PDF's bookmarks, Word and HTML headings, a workbook's sheets, an EPUB's table of contents, one entry per slide — every section is indexed on its page, so `@!intro` finds the *Introduction* of a paper rather than the paper.
 - **The document, shown in the note.** Hover a link for the page rendered, the slide drawn, the document laid out or the sheet as a real table; a ` ```reference-link ` block puts the same thing inline, and a range stacks several pages at once.
-- **Links that notice the document changed.** A link pinned to its section is checked against the index: when the file is reissued and the section moves, the link is marked and updated in place, one note or the whole vault.
+- **Links that notice the document changed.** A link pinned to its section is checked against the index: when the file is reissued and the section moves, the link is marked and updated in place, one note or the whole vault. Point the plugin at a BibTeX or CSL-JSON bibliography and a link is pinned to its citation key too, so it survives the document being renamed or re-filed.
 - **Nothing is copied in.** Notes keep a portable `{ref-root}` path, so the same vault works on another machine that keeps its library somewhere else.
 
 It's the document counterpart to [Code Linker](https://github.com/max-fluff/obsidian-code-linker), which does the same for source code. Your reference material usually lives in project folders, download folders or a research library. This plugin makes it as linkable as a note.
@@ -217,6 +217,20 @@ To fix drift:
 
 Because the section is named in the title, not read from the label, the label stays yours to write however you like. A multi-word or non-ASCII section name is escaped in the binding (`sec:Chapter%201`) and shown in full again on hover.
 
+#### Citation keys
+
+A `sec:` binding follows a document that reorganises itself. A **citation key** follows one that is renamed or re-filed.
+
+**Bibliographies** (Settings) reads keys from BibTeX (`.bib`) or CSL-JSON files, and matches each against the index: by the file path the entry states, which outranks any name, then by the file name, then by the title reduced to its words. A name that two documents answer to is deliberately left unmatched — a wrong `cite:` in a note outlives the mistake that wrote it, and no key is better than the wrong one. The setting reports how many keys it placed.
+
+After that, a link inserted to a document that has a key carries it beside the section, and **Pin to citation key** is in the link's right-click menu:
+
+```markdown
+[Methods](file:///{ref-root}/papers/paper-with-outline.pdf#page=2 "cite:kovacs2019 sec:Methods")
+```
+
+Rename that PDF, or move it to another folder, and the bibliography still knows which file the key means: the link is marked as moved and updated to the new path, the same way a drifted section is. A key the bibliography no longer has is marked broken. A key it has but cannot place is left unjudged rather than reddened — one mistyped root would otherwise condemn every citation link at once — and with no bibliography loaded, no `cite:` binding is judged at all.
+
 ## Commands (command palette, Ctrl+P)
 
 - **Insert reference link** — insert a link at the cursor.
@@ -239,7 +253,7 @@ Install more than one linker and they will sometimes claim the same word or the 
 
 The list appears only when another linker is installed. Each plugin moves itself, so reordering may take a move from more than one settings tab; every arrangement is reachable that way.
 
-The selection commands are also in the editor's right-click menu. Right-clicking an existing reference link adds link-specific items: **Copy reference link**, **Pin to section** / **Unpin**, and **Update this reference link** when its section has drifted.
+The selection commands are also in the editor's right-click menu, as **Find and convert to reference link** and **Find and open document**. Right-clicking an existing reference link adds link-specific items: **Copy reference link**, **Pin to section** / **Pin to citation key** / **Unpin**, and **Update this reference link** when its section has drifted.
 
 <p align="center">
   <img src="docs/images/context-menu.png" alt="The right-click menu on a reference link, showing the link-specific items" width="420">
@@ -273,7 +287,11 @@ The selection commands are also in the editor's right-click menu. Right-clicking
 | **Preview on hover** | on | Preview the document when you hover a link. |
 | **Document preview shape** | text column | How a Word or OpenDocument preview is laid out: a text column whose height follows the content, or the whole page the document declares. The page size and margins come from the file either way. |
 
-**Links**: **Mark stale links** (on).
+**Links**
+| Setting | Default | What it does |
+| --- | --- | --- |
+| **Mark stale links** | on | Underline links whose section has moved or gone. |
+| **Bibliographies** | none | BibTeX (`.bib`) or CSL-JSON files to read citation keys from, so a link survives its document being renamed or re-filed. Says how many keys it matched to an indexed document. See [Citation keys](#citation-keys). |
 
 ### Styling
 

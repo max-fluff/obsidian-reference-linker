@@ -20,6 +20,8 @@ Your reference material — papers, manuals, decks, spreadsheets, e-books, recor
 
 **Links that notice the document changed.** A link pinned to its section is checked against the index. When the file is reissued and the section moves, the link is marked and repaired in place — one note or the whole vault, with a preview before anything is written.
 
+**Citation keys, if you keep a bibliography.** Point it at a BibTeX or CSL-JSON file and every key is matched to an indexed document. A link then carries the key as well as the section, so it survives the paper being renamed or re-filed — and a name two documents answer to is left unmatched rather than guessed at.
+
 **Nothing is copied in.** Notes keep a portable `{ref-root}` path, so the same vault works on another machine that keeps its library somewhere else.
 
 Desktop only: it reads files from disk through Node's filesystem API, which isn't available on mobile.
