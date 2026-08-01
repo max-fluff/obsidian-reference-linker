@@ -38,14 +38,15 @@ export default {
     tagline: 'Autocomplete document references, jump to the exact page.',
   },
 
-  // Screenshots aren't shot yet — fill in once the demo vault is captured, then npm run plates.
   plates: [
     { src: 'hero.png',       title: 'Jump straight to the page',
       caption: 'Documents outside your vault become links that open at the exact page.' },
     { src: 'hover.png',      title: 'Preview on hover',
       caption: 'Hover a link to read the page itself, without leaving your notes.' },
-    { src: 'embed.png',      title: 'Embed a page in your notes',
-      caption: 'A reference-link block renders a page or an image inline, and follows the file.' },
+    { src: 'embed.png',      title: 'Read the document in the note',
+      caption: 'A reference-link block is a viewer: page through it, zoom it, jump by its contents.' },
+    { src: 'player.png',     title: 'Recordings play where you wrote about them',
+      caption: 'Audio and video embed with their own transport, and open where you left off.' },
     { src: 'stale.png',      title: 'Notice when a link drifts',
       caption: 'A reissued document moves its sections — the links say so, and repair themselves.' },
     { src: 'commands.png',   title: 'Insert, open, repair',
