@@ -234,26 +234,21 @@ settings:
   color: var(--text-muted);
 }
 
-.%p%-player-seek {
+/* Obsidian styles `input[type="range"]` itself, and by element plus attribute that outweighs a
+   class — its own thumb, and its own thumb:hover, win over a plain `.%p%-player-seek` rule and
+   the transport ends up half its look and half ours. Every rule below is written to outweigh
+   them: the element and the attribute, inside the row. */
+.%p%-player input[type="range"] {
   flex: 1 1 auto;
   min-width: 60px;
-}
-
-.%p%-player-volume {
-  flex: 0 0 auto;
-  width: 56px;
-}
-
-/* The bar is the input's own background, painted 4px tall in the exact middle of the box, and
-   the thumb is as tall as the box: where a browser puts ::-webkit-slider-runnable-track, and
-   whether it honours a margin there, is not something to place a control by. */
-.%p%-player-seek,
-.%p%-player-volume {
   appearance: none;
   -webkit-appearance: none;
   height: var(--slider-thumb-height, 14px);
   margin: 0;
   cursor: pointer;
+  /* The bar is the input's own background, painted 4px tall in the exact middle of the box, and
+     the thumb is as tall as the box: where a browser puts ::-webkit-slider-runnable-track, and
+     whether it honours a margin there, is not something to place a control by. */
   background:
     linear-gradient(
       to right,
@@ -262,20 +257,25 @@ settings:
     center / 100% 4px no-repeat;
 }
 
-.%p%-player-seek::-webkit-slider-runnable-track,
-.%p%-player-volume::-webkit-slider-runnable-track {
+.%p%-player input[type="range"].%p%-player-volume {
+  flex: 0 0 auto;
+  width: 56px;
+  min-width: 0;
+}
+
+.%p%-player input[type="range"]::-webkit-slider-runnable-track {
   height: 100%;
   background: transparent;
   cursor: pointer;
 }
 
-.%p%-player-seek::-webkit-slider-thumb,
-.%p%-player-volume::-webkit-slider-thumb {
+.%p%-player input[type="range"]::-webkit-slider-thumb {
   appearance: none;
   -webkit-appearance: none;
   width: var(--slider-thumb-width, 14px);
   height: var(--slider-thumb-height, 14px);
   border-radius: var(--slider-thumb-radius, 50%);
+  border: 0;
   cursor: pointer;
   background: var(--interactive-accent);
   transition: transform 80ms ease-out, box-shadow 80ms ease-out;
@@ -283,22 +283,19 @@ settings:
 
 /* The pointer state is a class the player sets, not :hover — see player.js. The accent and its
    hover shade are a hair apart in most themes, so the thumb grows and takes a halo as well. */
-.%p%-player-seek.is-hot::-webkit-slider-thumb,
-.%p%-player-volume.is-hot::-webkit-slider-thumb,
-.%p%-player-seek:focus-visible::-webkit-slider-thumb,
-.%p%-player-volume:focus-visible::-webkit-slider-thumb {
+.%p%-player input[type="range"].is-hot::-webkit-slider-thumb,
+.%p%-player input[type="range"]:focus-visible::-webkit-slider-thumb {
   background: var(--interactive-accent-hover, var(--interactive-accent));
   transform: scale(1.15);
   box-shadow: 0 0 0 4px var(--background-modifier-border);
 }
 
-.%p%-player-seek:active::-webkit-slider-thumb,
-.%p%-player-volume:active::-webkit-slider-thumb {
+.%p%-player input[type="range"]:active::-webkit-slider-thumb {
   transform: scale(1.25);
 }
 
 /* Silence is the whole control being off, thumb and all — not a grey track with a lit knob. */
-.%p%-player-volume.is-off::-webkit-slider-thumb {
+.%p%-player input[type="range"].is-off::-webkit-slider-thumb {
   background: var(--background-modifier-border);
 }
 
