@@ -601,13 +601,23 @@ settings:
   border-radius: var(--slider-thumb-radius, 50%);
   cursor: pointer;
   background: var(--interactive-accent);
+  transition: transform 80ms ease-out, box-shadow 80ms ease-out;
 }
 
+/* The accent and its hover shade are a hair apart in most themes, so the thumb answers by
+   growing and taking a halo as well — a colour alone reads as no answer at all. */
 .reference-linker-player-seek:hover::-webkit-slider-thumb,
 .reference-linker-player-volume:hover::-webkit-slider-thumb,
 .reference-linker-player-seek:focus-visible::-webkit-slider-thumb,
 .reference-linker-player-volume:focus-visible::-webkit-slider-thumb {
-  background: var(--interactive-accent-hover);
+  background: var(--interactive-accent-hover, var(--interactive-accent));
+  transform: scale(1.15);
+  box-shadow: 0 0 0 4px var(--background-modifier-border);
+}
+
+.reference-linker-player-seek:active::-webkit-slider-thumb,
+.reference-linker-player-volume:active::-webkit-slider-thumb {
+  transform: scale(1.25);
 }
 
 /* Silence is the whole control being off, thumb and all — not a grey track with a lit knob. */
