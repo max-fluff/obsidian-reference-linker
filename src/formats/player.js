@@ -29,11 +29,18 @@ function button(row, icon, label, onClick) {
   return b;
 }
 
-const slider = (row, cls, label, max, value) => row.createEl('input', {
-  cls: 'reference-linker-player-' + cls,
-  type: 'range',
-  attr: { min: '0', max: String(max), value: String(value), 'aria-label': label },
-});
+// Whether the pointer is on a slider is kept on the input itself: a :hover that has to reach
+// ::-webkit-slider-thumb answers differently over the track and over the thumb.
+function slider(row, cls, label, max, value) {
+  const el = row.createEl('input', {
+    cls: 'reference-linker-player-' + cls,
+    type: 'range',
+    attr: { min: '0', max: String(max), value: String(value), 'aria-label': label },
+  });
+  el.addEventListener('mouseenter', () => el.toggleClass('is-hot', true));
+  el.addEventListener('mouseleave', () => el.toggleClass('is-hot', false));
+  return el;
+}
 
 // How much of a slider is behind its thumb. A range input paints one track, so the part already
 // played is drawn from this rather than by the browser.

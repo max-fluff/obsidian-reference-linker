@@ -126,6 +126,16 @@ describe('the player row', () => {
     assert.strictEqual(p.volume.classes['is-off'], false);
   });
 
+  it('marks a slider the pointer is on, so the thumb answers wherever on it the pointer sits', () => {
+    // A :hover that has to reach ::-webkit-slider-thumb answers one way over the track and
+    // another over the thumb itself; a class on the input answers the same either way.
+    const p = player();
+    p.seek.fire('mouseenter');
+    assert.strictEqual(p.seek.classes['is-hot'], true);
+    p.seek.fire('mouseleave');
+    assert.strictEqual(p.seek.classes['is-hot'], false);
+  });
+
   it('mutes and unmutes', () => {
     const p = player();
     p.sound.click();

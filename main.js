@@ -3817,11 +3817,16 @@ var require_player = __commonJS({
       });
       return b;
     }
-    var slider = (row, cls, label, max, value) => row.createEl("input", {
-      cls: "reference-linker-player-" + cls,
-      type: "range",
-      attr: { min: "0", max: String(max), value: String(value), "aria-label": label }
-    });
+    function slider(row, cls, label, max, value) {
+      const el = row.createEl("input", {
+        cls: "reference-linker-player-" + cls,
+        type: "range",
+        attr: { min: "0", max: String(max), value: String(value), "aria-label": label }
+      });
+      el.addEventListener("mouseenter", () => el.toggleClass("is-hot", true));
+      el.addEventListener("mouseleave", () => el.toggleClass("is-hot", false));
+      return el;
+    }
     var fill = (el, part) => el.style.setProperty(
       "--reference-linker-player-fill",
       Math.max(0, Math.min(100, part * 100)) + "%"
