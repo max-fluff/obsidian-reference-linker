@@ -3,6 +3,7 @@
 // The one place that knows what a format can do. A handler declares its extensions and
 // optionally an outline reader and a preview renderer; everything else asks here.
 
+const fs = require('fs');
 const pdf = require('./pdf');
 const image = require('./image');
 const pptx = require('./pptx');
@@ -76,6 +77,38 @@ const positionLabel = (ext, n, to) => {
   return h && h.positionLabel ? h.positionLabel(n, to) : null;
 };
 
+// What an embed's toolbar can offer for this format. A handler that says nothing gets the
+// static embed it had before the toolbar existed.
+const NO_CAPS = { paged: false, zoomable: false, scrollable: false, timed: false };
+
+function capabilities(ext) {
+  const h = handlerFor(ext);
+  try {
+    const c = h && h.capabilities;
+    return Object.assign({}, NO_CAPS, typeof c === 'function' ? c(ext) : c);
+  } catch {
+    return Object.assign({}, NO_CAPS);
+  }
+}
+
+const counts = new Map();
+
+// How many positions the file holds, or 0 when the format doesn't count them. Cached against
+// the file's mtime: a toolbar asks on every render, and counting can mean reading the file.
+async function count(ext, absPath) {
+  const h = handlerFor(ext);
+  if (!h || !h.count) return 0;
+  const key = ext + '|' + absPath;
+  let mtimeMs = null;
+  try { mtimeMs = fs.statSync(absPath).mtimeMs; } catch { /* gone or unreadable */ }
+  const hit = counts.get(key);
+  if (hit && hit.mtimeMs === mtimeMs) return hit.n;
+  let n = 0;
+  try { n = Math.max(0, Math.floor(await h.count(absPath, ext)) || 0); } catch { n = 0; }
+  counts.set(key, { mtimeMs, n });
+  return n;
+}
+
 async function outline(ext, absPath) {
   const h = handlerFor(ext);
   if (!h || !h.outline) return [];
@@ -89,6 +122,10 @@ async function outline(ext, absPath) {
 
 // Draw a preview into `el`. Returns a cleanup function, or false when nothing was drawn —
 // the caller shows its own "unreadable" notice then.
+//
+// `req.width` is the box to lay out into and `req.zoom` how much larger to draw in it. They
+// are two things because a page and a grid disagree: a page redrawn wider is a page zoomed,
+// while a sheet redrawn wider is just a wider sheet, and has to be scaled where it stands.
 async function render(el, req) {
   const h = handlerFor(req.ext);
   if (!h || !h.render) return false;
@@ -102,6 +139,7 @@ async function render(el, req) {
 // Called from onunload, which cannot await: a throw here would surface as an unhandled
 // rejection long after the plugin is gone.
 async function dispose() {
+  counts.clear();
   for (const h of HANDLERS) {
     if (!h.dispose) continue;
     try { await h.dispose(); } catch { /* going away anyway */ }
@@ -119,6 +157,8 @@ module.exports = {
   hasOsAnchor,
   positionUnit,
   positionLabel,
+  capabilities,
+  count,
   outline,
   render,
   dispose,

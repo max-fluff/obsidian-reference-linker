@@ -68,11 +68,11 @@ async function render(el, req) {
   // other place to name its columns.
   const html = gridToHtml(rows, { header: rows.length > 1 });
   if (html) {
-    const done = renderHtml(el, { html, width: req.width, css: SHEET_RULES });
+    const done = renderHtml(el, { html, width: req.width, zoom: req.zoom, css: SHEET_RULES });
     if (done !== false) return done;
   }
   const lines = rows.map((r) => r.filter(Boolean).join(' · ')).filter(Boolean);
-  return renderLines(el, { title: '', body: lines.slice(0, MAX_LINES), width: req.width });
+  return renderLines(el, { title: '', body: lines.slice(0, MAX_LINES), width: req.width, zoom: req.zoom });
 }
 
 module.exports = {
@@ -80,6 +80,7 @@ module.exports = {
   exts: ['csv', 'tsv'],
   // A CSV is opened in whatever the OS hands .csv to; there is no page to land on.
   anchorKind: null,
+  capabilities: { zoomable: true, scrollable: true },
   render,
   parse,
   delimiter,

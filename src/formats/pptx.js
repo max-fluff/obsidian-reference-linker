@@ -489,33 +489,42 @@ const masterPartOf = (zip, layoutPart) => relatedPart(zip, layoutPart, /slideMas
 // theme font on its second master resolves against the wrong one if the first is assumed.
 const themePartOf = (zip, masterPart) => relatedPart(zip, masterPart, /theme\d+\.xml$/) || 'ppt/theme/theme1.xml';
 
+async function count(absPath) {
+  const doc = readSlides(absPath);
+  return doc ? doc.parts.length : 0;
+}
+
 async function render(el, req) {
   const doc = readSlides(req.abs);
   if (!req.isCurrent() || !doc) return false;
   const n = clampPosition(req.position, doc.parts.length);
-  const page = slidePage(doc.zip, doc.parts[n - 1], req.width);
+  const zoom = req.zoom || 1;
+  const width = req.width * zoom;
+  const page = slidePage(doc.zip, doc.parts[n - 1], width);
   if (page) {
     const loadImage = (src) => doc.zip.read(assetSrc(src));
     // The frame first: the sanitizer strips the class attributes every shape's position is
     // written against, and inlining would pile the whole slide into one column.
     const framed = renderFrame(el, {
-      html: page.html, css: page.css, width: req.width, loadImage,
+      html: page.html, css: page.css, width, grow: zoom > 1, page: true, loadImage,
       onFail: () => {
         const slide = slideText(doc.zip.text(doc.parts[n - 1]) || '');
-        renderLines(el, { title: slide.title, body: slide.body, width: req.width });
+        renderLines(el, { title: slide.title, body: slide.body, width: req.width, zoom: req.zoom });
       },
     });
     if (framed !== false) return framed;
   }
   const slide = await readSlide(req.abs, req.position);
   if (!req.isCurrent() || !slide) return false;
-  return renderLines(el, { title: slide.title, body: slide.body, width: req.width });
+  return renderLines(el, { title: slide.title, body: slide.body, width: req.width, zoom: req.zoom });
 }
 
 module.exports = {
   id: 'pptx',
   exts: ['pptx', 'pptm', 'potx', 'potm'],
   anchorKind: null, // PowerPoint takes a fragment as part of the file name and finds nothing
+  capabilities: { paged: true, zoomable: true },
+  count,
   outline: readOutline,
   render,
   readOutline,

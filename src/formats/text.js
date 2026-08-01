@@ -80,17 +80,20 @@ async function render(el, req) {
   if (MARKDOWN.has(req.ext) && sec.raw !== undefined) {
     const md = (sec.title ? '## ' + sec.title + '\n\n' : '') + sec.raw;
     const done = await renderMarkdown(el, {
-      markdown: md, width: req.width, app: req.app, component: req.component, loadImage: assetLoader(req.abs),
+      markdown: md, width: req.width, zoom: req.zoom, app: req.app, component: req.component, loadImage: assetLoader(req.abs),
     });
     if (done !== false) return done;
   }
-  return renderLines(el, { title: sec.title, body: sec.body, width: req.width });
+  return renderLines(el, { title: sec.title, body: sec.body, width: req.width, zoom: req.zoom });
 }
 
 module.exports = {
   id: 'text',
   exts: ['md', 'markdown', 'txt', 'text', 'log'],
   anchorKind: null, // no viewer honours a position in a text file
+  // Not paged: a position here is the heading's line number, not its place in a list of them,
+  // so stepping it by one would move a line, not a section.
+  capabilities: { zoomable: true, scrollable: true },
   outline: readOutline,
   render,
   readOutline,

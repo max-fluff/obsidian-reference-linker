@@ -5,6 +5,7 @@
 
 const fs = require('fs');
 const nodePath = require('path');
+const { mountPlayer, timecode } = require('./player');
 
 const VIDEO = { mp4: 'video/mp4', m4v: 'video/mp4', webm: 'video/webm', mkv: 'video/x-matroska', mov: 'video/quicktime', ogv: 'video/ogg' };
 const AUDIO = { mp3: 'audio/mpeg', m4a: 'audio/mp4', wav: 'audio/wav', flac: 'audio/flac', ogg: 'audio/ogg', opus: 'audio/ogg', aac: 'audio/aac' };
@@ -45,7 +46,11 @@ async function render(el, req) {
   if (!fs.existsSync(req.abs)) return false;
   const isVideo = !!VIDEO[req.ext];
   const media = el.createEl(isVideo ? 'video' : 'audio');
-  media.controls = true;
+  // Our own transport, or the browser's bar where there is no DOM to draw one in.
+  media.controls = !mountPlayer(el, media, { video: isVideo });
+  // An audio element with our own transport has nothing left to show, and a hidden element
+  // still plays.
+  if (!media.controls && !isVideo) media.addClass('reference-linker-player-source');
   media.preload = 'metadata';
   // An explicit width, not width:100%: the popover shrinks to its content, and an <audio>
   // has no intrinsic width, so a percentage resolves against a container that is itself
@@ -80,18 +85,15 @@ async function render(el, req) {
   return dispose;
 }
 
-// A position in a recording is a time, not a page: 125 reads as 2:05.
-function positionLabel(n) {
-  const s = Math.max(0, n | 0);
-  const mm = Math.floor(s / 60);
-  const ss = String(s % 60).padStart(2, '0');
-  return mm >= 60 ? Math.floor(mm / 60) + ':' + String(mm % 60).padStart(2, '0') + ':' + ss : mm + ':' + ss;
-}
+// A position in a recording is a time, not a page: 125 reads as 2:05 — the same clock the
+// player's own readout runs on.
+const positionLabel = timecode;
 
 module.exports = {
   id: 'media',
   exts: [...Object.keys(VIDEO), ...Object.keys(AUDIO)],
   anchorKind: null, // no outline, so nothing writes an anchor; a hand-written #t= still previews
+  capabilities: { timed: true },
   positionUnit: 'time',
   positionLabel,
   render,

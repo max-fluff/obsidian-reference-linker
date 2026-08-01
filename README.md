@@ -87,22 +87,22 @@ Where a format has an outline, the plugin reads it and indexes each section with
 
 What each format gives you:
 
-| Format | Sections | Preview | Opens at the position |
-|---|---|---|---|
-| PDF | outline (bookmarks) | page rendered by pdf.js | yes — `#page=`, when the default app is a browser |
-| HTML, XHTML | every heading that carries an `id` | the section's text | yes — `#id`, and the browser is the default app |
-| Markdown, txt, log | headings, on their line | the text itself | no — see below |
-| EPUB | table of contents (EPUB 2 and 3) | the chapter's text | no |
-| DOCX | heading styles | rendered document (lists, tables, images) | no |
-| XLSX | sheets | rendered as a table grid | no |
-| PPTX | one per slide | the slide, drawn — its shapes, tables and pictures | no |
-| ODT | headings | rendered document (lists, tables, images) | no |
-| ODS | sheets | rendered as a table grid | no |
-| ODP, ODG | slides, drawing pages | the page, drawn | no |
-| CSV, TSV | — | rendered as a table grid | no |
-| Audio, video | — | the file, seeked to `#t=` seconds | no |
-| Images | — | the image | — |
-| Anything else, added under **Other extensions** | — | — | — |
+| Format | Sections | Preview | Embed toolbar | Opens at the position |
+|---|---|---|---|---|
+| PDF | outline (bookmarks) | page rendered by pdf.js | pages, zoom | yes — `#page=`, when the default app is a browser |
+| HTML, XHTML | every heading that carries an `id` | the section's text | sections, zoom | yes — `#id`, and the browser is the default app |
+| Markdown, txt, log | headings, on their line | the text itself | zoom | no — see below |
+| EPUB | table of contents (EPUB 2 and 3) | the chapter's text | chapters, zoom | no |
+| DOCX | heading styles | rendered document (lists, tables, images) | sections, zoom | no |
+| XLSX | sheets | rendered as a table grid | sheets, zoom | no |
+| PPTX | one per slide | the slide, drawn — its shapes, tables and pictures | slides, zoom | no |
+| ODT | headings | rendered document (lists, tables, images) | sections, zoom | no |
+| ODS | sheets | rendered as a table grid | sheets, zoom | no |
+| ODP, ODG | slides, drawing pages | the page, drawn | pages, zoom | no |
+| CSV, TSV | — | rendered as a table grid | zoom | no |
+| Audio, video | — | the file, seeked to `#t=` seconds | play, seek, sound | no |
+| Images | — | the image | zoom | — |
+| Anything else, added under **Other extensions** | — | — | — | — |
 
 HTML is the one worth setting up: generated documentation (AsciiDoc, Sphinx, Doxygen,
 javadoc) puts an `id` on nearly every heading, so a link lands on the exact section in your
@@ -161,15 +161,29 @@ papers/paper-with-outline.pdf#page=3
 - An `#id` anchor works too (`guide.html#_options`) — the same fragment a copied HTML section link carries — resolved through the index to its section.
 - A name or section (`Introduction`) is resolved through the index to its file and page.
 - An image path shows the image; a `.pptx` path shows the slide drawn; a spreadsheet shows the sheet as a table.
-- A **range** stacks several pages or sections: `report.pdf#page=3-5`, or a `page: 3-5` line. Paged and sectioned formats range; images and media render once. Up to 20 at a time.
+- A **range** stacks several pages or sections: `report.pdf#page=3-5`, or a `page: 3-5` line. Paged and sectioned formats range; images and media render once. Up to 20 at a time, and each one is drawn as you scroll to it rather than all at once.
 - A recording is positioned **in time, not in pages**: `time: 1:30` (or `1:02:05`, or plain seconds), or `clip.mp4#t=1:30` in the target — the same timecode the header shows. Each format takes only its own unit: `page:` on a recording, or `time:` on a paged document, is an error that names the right key rather than quietly starting from the top.
-- Optional `key: value` lines after the target tune it, and they are the whole set: `page: N` (or `N-M`) for paged formats, `time: mm:ss` for recordings, `width: N` (CSS px, 600 by default) and `title: …`, which replaces the header text — by default the section or document name and its position.
+- Optional `key: value` lines after the target tune it, and they are the whole set: `page: N` (or `N-M`) for paged formats, `time: mm:ss` for recordings, `width: N` (CSS px, 600 by default), `zoom: 150%` or `zoom: fit` for the formats that zoom, and `title: …`, which replaces the header text — by default the section or document name and its position.
 
 <p align="center">
   <img src="docs/images/embed.png" alt="Two rendered reference-link embeds: a PDF page with a title, and an image" width="640">
 </p>
 
-The header is clickable and opens the document at that page; right-click an embed for **Open** / **Refresh**. Embeds re-render when the index rebuilds, so an open embed follows changes on disk. The command **Insert reference embed** picks an entry and inserts the block.
+#### The embed toolbar
+
+An embed of a single position is a small viewer rather than a still: the header carries a toolbar, and each format shows only the controls it can honour (the table above says which).
+
+- **Contents** — the document's own outline (a PDF's bookmarks, a deck's slide titles, a document's headings), as the index already read it: pick a section and the embed jumps to it. Shown when the file has more than one. A range gets it too, listing only the sections it actually shows and scrolling to them — the rest of the document isn't that block's to open.
+- **Position** — `◀ 3 / 128 ▶`: pages in a PDF, slides in a deck, sheets in a spreadsheet, sections in a document, chapters in an EPUB. The number is a box: type one and press Enter. With the embed focused, `←` / `→` and `PageUp` / `PageDown` step, `Home` / `End` jump to the ends, and the wheel steps when the position itself has nowhere left to scroll. A document with only one position shows no arrows.
+- **Zoom** — `−  100%  +`, plus **Fit width**. 100 % is the width the block asked for (the `width:` line, 600 px by default), and the ladder runs 50–300 %. `Ctrl`+wheel zooms, `+` / `−` step, `Ctrl+0` is 100 %, and a double-click toggles fit against 100 %. A page or a slide is redrawn larger; text, a sheet and a table are scaled where they stand. The embed itself keeps its size: what is zoomed scrolls inside it, rather than pushing the note around.
+- **Open** / **Refresh** — on every embed, whatever its format. The title still opens the document too.
+- **⋯** — the right-click menu, and the one place anything is written back: **Remember this view**. A toolbar button never edits your note.
+
+A recording has no positions to page through, so it gets a transport under the header instead of the browser's bar: play, a seek slider, the clock, sound, and full screen for a video. An embed already has a header, and the browser's player brings a second one. With the transport focused, space plays and pauses, the arrows step five seconds and `m` mutes.
+
+A position and a zoom are yours rather than the block's: they survive an index rebuild, but not closing the note. **Remember this view** writes them into the block as `page:` and `zoom:` lines, so it opens there next time. A range like `#page=3-5` stacks its positions and draws each as you scroll to it, so it takes the contents list but not the arrows; a Markdown or text file is positioned by line rather than by section, so it takes neither.
+
+Embeds re-render when the index rebuilds, so an open embed follows changes on disk. The command **Insert reference embed** picks an entry and inserts the block.
 
 ### Keeping links current
 
@@ -259,7 +273,9 @@ The selection commands are also in the editor's right-click menu. Right-clicking
 
 ### Styling
 
-The stale/broken underline colours and style are exposed to the [Style Settings](https://github.com/mgmeyers/obsidian-style-settings) plugin under a *Reference Linker* section. They're plain CSS variables (`--reference-linker-stale-color`, `--reference-linker-broken-color`) you can override in a snippet.
+Everything the plugin draws around a document is exposed to the [Style Settings](https://github.com/mgmeyers/obsidian-style-settings) plugin under a *Reference Linker* section: the stale/broken underline colours and style, how tall an embed and a hover preview grow before they scroll, and how visible an embed's toolbar is when the pointer is elsewhere. They're plain CSS variables, so a snippet does just as well — `--reference-linker-stale-color`, `--reference-linker-broken-color`, `--reference-linker-mark-underline-style`, `--reference-linker-embed-height`, `--reference-linker-hover-height`, `--reference-linker-embed-tools-idle` (set that last one to `0` and the toolbar stays out of the way until you hover the embed).
+
+One thing is deliberately not yours to restyle: the paper a document is drawn on. A rendered page, slide or sheet keeps its own white sheet and its own colours in a dark vault, because that is what the document looks like — and it is drawn in an isolated frame your vault's CSS cannot reach into, which is the same thing that stops the document's own stylesheet reaching out.
 
 ## Skipped contexts
 
@@ -361,7 +377,7 @@ Requires Obsidian 1.4.0 or newer. Desktop-only: the index is built by reading th
 
 None of these are required, the plugin runs on its own, but it cooperates with them if you have them installed:
 
-- **[Style Settings](https://github.com/mgmeyers/obsidian-style-settings)** — a UI for the stale/broken underline colours and style.
+- **[Style Settings](https://github.com/mgmeyers/obsidian-style-settings)** — a UI for the stale/broken underline colours and style, and for the height of an embed and a hover preview and how visible an embed's toolbar is.
 - **[Dataview](https://github.com/blacksmithgu/obsidian-dataview)** — query the index from DataviewJS through the [public API](#public-api).
 
 ## Related plugins

@@ -27,7 +27,7 @@ async function render(el, req) {
   const url = URL.createObjectURL(new Blob([buf], { type: MIME[req.ext] || 'application/octet-stream' }));
   const img = el.createEl('img');
   img.src = url;
-  img.style.maxWidth = req.width + 'px';
+  img.style.maxWidth = (req.width * (req.zoom || 1)) + 'px';
   return () => {
     try { URL.revokeObjectURL(url); } catch { /* ignore */ }
   };
@@ -37,5 +37,6 @@ module.exports = {
   id: 'image',
   exts: Object.keys(MIME),
   anchorKind: null,
+  capabilities: { zoomable: true },
   render,
 };

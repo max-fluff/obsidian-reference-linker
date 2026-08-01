@@ -146,6 +146,76 @@
   margin: var(--p-spacing, 1em) 0;
 }
 
+/* The embed's header is a row: the title takes what is left of it, the toolbar sits at the
+   end. The controls are Obsidian's own clickable-icon, so they read as the app's. */
+.reference-linker-embed-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.reference-linker-embed-title {
+  cursor: pointer;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Obsidian floats its own edit-block button over the top right of a rendered block, so the
+   last control keeps clear of it. */
+.reference-linker-embed-tools {
+  padding-right: 22px;
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 2px;
+  opacity: var(--reference-linker-embed-tools-idle, 1);
+  transition: opacity 100ms ease-out;
+}
+
+.reference-linker-embed:hover .reference-linker-embed-tools,
+.reference-linker-embed:focus-within .reference-linker-embed-tools {
+  opacity: 1;
+}
+
+.reference-linker-embed-group {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.reference-linker-embed-group:empty {
+  display: none;
+}
+
+.reference-linker-embed-group + .reference-linker-embed-group {
+  margin-left: 4px;
+  padding-left: 5px;
+  border-left: 1px solid var(--background-modifier-border);
+}
+
+.reference-linker-embed-button {
+  height: auto;
+  padding: 2px 4px;
+  color: var(--text-muted);
+  font-family: var(--font-interface);
+}
+
+.reference-linker-embed-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.reference-linker-embed-button.is-active {
+  color: var(--text-accent);
+}
+
+.reference-linker-embed-button.is-hidden,
+.reference-linker-embed-group.is-hidden {
+  display: none;
+}
+
 .reference-linker-embed-error,
 .reference-linker-embed-note {
   padding: 6px 10px;
@@ -284,6 +354,33 @@ settings:
       - dashed
       - solid
       - double
+  -
+    id: reference-linker-embed-height
+    title: Inline embed height
+    description: How tall an inline embed grows before it scrolls, in percent of the window.
+    type: variable-number-slider
+    default: 60
+    min: 20
+    max: 100
+    step: 5
+  -
+    id: reference-linker-hover-height
+    title: Hover preview height
+    description: How tall a hover preview grows before it scrolls, in percent of the window.
+    type: variable-number-slider
+    default: 60
+    min: 20
+    max: 100
+    step: 5
+  -
+    id: reference-linker-embed-tools-idle
+    title: Inline embed toolbar when idle
+    description: How visible the embed's toolbar is while the pointer is elsewhere. 0 keeps it out of the way until you hover the embed or focus it.
+    type: variable-number-slider
+    default: 1
+    min: 0
+    max: 1
+    step: 0.25
 
 */
 
@@ -317,9 +414,47 @@ settings:
 /* The header must not widen the frame, or a long title leaves the page floating in dead
    space; zero intrinsic width + min-width lets it fill and ellipsize instead. */
 .reference-linker-embed-header {
-  cursor: pointer;
   width: 0;
   min-width: 100%;
+}
+
+.reference-linker-embed-zoom {
+  font-size: var(--font-ui-smaller);
+  font-variant-numeric: tabular-nums;
+}
+
+.reference-linker-embed-position {
+  padding: 0 2px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.reference-linker-embed-position:focus {
+  border-color: var(--background-modifier-border);
+  background: var(--background-primary);
+}
+
+.reference-linker-embed-total {
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Zoomed past 100% the reader asked for something bigger than the note is wide, so the page
+   overflows and the body scrolls to it instead of shrinking it back to the note's width. */
+.reference-linker-embed-body.is-zoomed canvas,
+.reference-linker-embed-body.is-zoomed img {
+  max-width: none;
+}
+
+.reference-linker-embed-body:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--background-modifier-border-focus);
 }
 
 .reference-linker-hover-body,
@@ -328,11 +463,35 @@ settings:
   max-height: 60vh;
 }
 
+.reference-linker-hover-body {
+  max-height: calc(var(--reference-linker-hover-height, 60) * 1vh);
+}
+
+.reference-linker-embed-body {
+  position: relative;
+  max-height: calc(var(--reference-linker-embed-height, 60) * 1vh);
+}
+
+/* The position being drawn, laid over the one it replaces: out of the flow so the box keeps
+   its size, and invisible rather than hidden, since a display:none frame never loads. */
+.reference-linker-embed-pending {
+  position: absolute;
+  top: 0;
+  left: 0;
+  visibility: hidden;
+}
+
 /* Stacked pages/sections of a range embed, set apart so the seam between them reads. */
 .reference-linker-embed-slot + .reference-linker-embed-slot {
   margin-top: 10px;
   padding-top: 10px;
   border-top: 1px solid var(--background-modifier-border);
+}
+
+/* A slot waiting to be scrolled to: without a height of its own the range collapses to its
+   first page, and nothing further ever comes into view to be drawn. */
+.reference-linker-embed-slot:empty {
+  min-height: 160px;
 }
 
 /* Rendered PDF page (canvas) or image inside the popover / embed. */
@@ -354,6 +513,64 @@ settings:
   display: block;
   max-width: 100%;
   margin: 8px 4px;
+}
+
+/* An isolated document sits on the note, not in a box of its own: the border and the box are
+   the embed's. Its size is set inline, from the file's own dimensions. */
+.reference-linker-hover-body iframe,
+.reference-linker-embed-body iframe {
+  display: block;
+  border: 0;
+}
+
+/* A recording's own controls: one row, so an embed holds a header and a transport rather than
+   a header and a whole second player. */
+.reference-linker-player {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+}
+
+/* With the transport drawn, the element itself has nothing left to show — and it plays just
+   as well hidden. */
+.reference-linker-player-source {
+  display: none;
+}
+
+.reference-linker-player:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--background-modifier-border-focus);
+}
+
+.reference-linker-player-button {
+  height: auto;
+  padding: 2px 4px;
+  color: var(--text-muted);
+}
+
+.reference-linker-player-seek {
+  flex: 1 1 auto;
+  min-width: 60px;
+}
+
+.reference-linker-player-volume {
+  flex: 0 0 auto;
+  width: 56px;
+}
+
+.reference-linker-player-time {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* A video sits directly on its transport, with nothing between the picture and the row. */
+.reference-linker-embed-body video,
+.reference-linker-hover-body video {
+  margin-bottom: 0;
 }
 
 /* Markdown and HTML preview as themselves. The width is set inline from the request; the

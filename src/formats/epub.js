@@ -133,6 +133,11 @@ async function readChapter(absPath, position) {
   return doc ? chapterAt(doc, position) : null;
 }
 
+async function count(absPath) {
+  const doc = open(absPath);
+  return doc ? doc.spine.order.length : 0;
+}
+
 // A chapter is XHTML, so it renders as markup, and its images live in the same zip — read
 // each member and hand it to the inliner as bytes.
 async function render(el, req) {
@@ -140,10 +145,10 @@ async function render(el, req) {
   const ch = doc && chapterAt(doc, req.position);
   if (!req.isCurrent() || !ch) return false;
   if (ch.raw) {
-    const done = renderHtml(el, { html: ch.raw, width: req.width, loadImage: imageLoader(doc, ch.path) });
+    const done = renderHtml(el, { html: ch.raw, width: req.width, zoom: req.zoom, loadImage: imageLoader(doc, ch.path) });
     if (done !== false) return done;
   }
-  return renderLines(el, { title: ch.title, body: ch.body, width: req.width });
+  return renderLines(el, { title: ch.title, body: ch.body, width: req.width, zoom: req.zoom });
 }
 
 // Reads an image the chapter references out of the same zip, its src resolved against the
@@ -154,6 +159,8 @@ module.exports = {
   id: 'epub',
   exts: ['epub'],
   anchorKind: null, // an e-reader takes the file and ignores the fragment
+  capabilities: { paged: true, zoomable: true, scrollable: true },
+  count,
   outline: readOutline,
   render,
   readOutline,

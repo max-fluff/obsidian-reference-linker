@@ -24,11 +24,16 @@ async function getDoc(absPath) {
   return doc;
 }
 
+async function count(absPath) {
+  const doc = await getDoc(absPath);
+  return doc ? doc.numPages : 0;
+}
+
 async function render(el, req) {
   const doc = await getDoc(req.abs);
   if (!req.isCurrent() || !doc) return false;
   const canvas = el.createEl('canvas');
-  const ok = await renderPageToCanvas(doc, req.position, canvas, req.width);
+  const ok = await renderPageToCanvas(doc, req.position, canvas, req.width * (req.zoom || 1));
   if (!req.isCurrent() || !ok) return false;
   return null;
 }
@@ -39,6 +44,8 @@ module.exports = {
   anchorKind: 'page',
   anchorFor: (e) => (e.kind === 'section' && e.position ? 'page=' + e.position : null),
   positionLabel: (n, to) => 'p.' + n + (to && to > n ? '–' + to : ''),
+  capabilities: { paged: true, zoomable: true },
+  count,
   outline: readOutline,
   render,
   dispose,

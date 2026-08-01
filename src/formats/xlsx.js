@@ -172,6 +172,11 @@ async function readSection(absPath, position) {
   return { title: name, body: lines.slice(0, MAX_LINES), position: n, total: book.sheets.length };
 }
 
+async function count(absPath) {
+  const zip = openZip(absPath);
+  return zip ? sheetParts(zip).length : 0;
+}
+
 async function render(el, req) {
   const book = bookOf(req.abs);
   if (!req.isCurrent() || !book) return false;
@@ -185,15 +190,15 @@ async function render(el, req) {
     // The frame first: the sanitizer strips the class attributes every cell's formatting is
     // written against, so the inline path keeps the grid but shows none of the look.
     const framed = renderFrame(el, {
-      html, css, width: req.width, onFail: () => { renderHtml(el, { html, width: req.width, css }); },
+      html, css, width: req.width, zoom: req.zoom, onFail: () => { renderHtml(el, { html, width: req.width, zoom: req.zoom, css }); },
     });
     if (framed !== false) return framed;
-    const done = renderHtml(el, { html, width: req.width, css });
+    const done = renderHtml(el, { html, width: req.width, zoom: req.zoom, css });
     if (done !== false) return done;
   }
   // No sanitizer (the test stubs) — the same cells as flat lines.
   const lines = grid.map((cells) => cells.map(textOf).filter(Boolean).join(' · ')).filter(Boolean);
-  return renderLines(el, { title: name, body: lines.slice(0, MAX_LINES), width: req.width });
+  return renderLines(el, { title: name, body: lines.slice(0, MAX_LINES), width: req.width, zoom: req.zoom });
 }
 
 module.exports = {
@@ -201,6 +206,8 @@ module.exports = {
   exts: ['xlsx', 'xlsm', 'xltx', 'xltm'],
   // Excel takes the fragment as part of the file name, exactly as Word and PowerPoint do.
   anchorKind: null,
+  capabilities: { paged: true, zoomable: true, scrollable: true },
+  count,
   outline: readOutline,
   render,
   readOutline,

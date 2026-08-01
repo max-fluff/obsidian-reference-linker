@@ -90,7 +90,9 @@ function pageCss(page, viewWidth, view) {
 // a workbook, an ODF sheet and a CSV read as one thing rather than three.
 const SHEET_RULES = [
   'body{margin:0;background:transparent;color:#1a1a1a}',
-  'table{border-collapse:collapse;background:#fff;font:13px system-ui,sans-serif}',
+  // max-content over the frame's own cap on tables: a sheet is as wide as its columns say, and
+  // a wide one is scrolled to rather than squeezed until its columns mean nothing.
+  'table{border-collapse:collapse;background:#fff;font:13px system-ui,sans-serif;max-width:none;width:max-content}',
   'td,th{border:1px solid #d9d9d9;padding:2px 6px;white-space:nowrap}',
   'th{background:#f3f3f3;font-weight:600;text-align:left}',
 ].join('\n');

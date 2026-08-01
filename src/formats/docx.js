@@ -303,33 +303,41 @@ async function readSection(absPath, position) {
   return { title: sec.title, body: body.slice(0, MAX_LINES), position: sec.n, total: sec.total };
 }
 
+async function count(absPath) {
+  const parts = partsOf(absPath);
+  if (!parts) return 0;
+  return headings(parts.body, parts.styles).length || 1;
+}
+
 async function render(el, req) {
   const parts = partsOf(req.abs);
   if (!req.isCurrent() || !parts) return false;
   const loadImage = (src) => parts.zip.read(assetSrc(src));
+  const zoom = req.zoom || 1;
+  const width = req.width * zoom;
 
   const chunk = altChunk(parts.zip, parts.body);
   if (chunk) {
-    const done = renderHtml(el, { html: chunk, width: req.width, loadImage });
+    const done = renderHtml(el, { html: chunk, width: req.width, zoom: req.zoom, loadImage });
     if (done !== false) return done;
   } else {
-    const page = documentPage(parts, req.position, req.width, req.view);
+    const page = documentPage(parts, req.position, width, req.view);
     // The frame first: the sanitizer strips the class attributes the document's own formatting
     // is written against, so inlining it keeps the structure and loses the typography.
     const framed = renderFrame(el, {
-      html: page.html, css: page.css, width: req.width, loadImage, onFail: () => {
-        renderHtml(el, { html: page.html, width: req.width, loadImage });
+      html: page.html, css: page.css, width, grow: zoom > 1, page: true, loadImage, onFail: () => {
+        renderHtml(el, { html: page.html, width, loadImage });
       },
     });
     if (framed !== false) return framed;
-    const done = renderHtml(el, { html: page.html, width: req.width, loadImage });
+    const done = renderHtml(el, { html: page.html, width, loadImage });
     if (done !== false) return done;
   }
 
   // No sanitizer (the test stubs) — the same content as flat lines.
   const sec = await readSection(req.abs, req.position);
   if (!req.isCurrent() || !sec) return false;
-  return renderLines(el, { title: sec.title, body: sec.body, width: req.width });
+  return renderLines(el, { title: sec.title, body: sec.body, width: req.width, zoom: req.zoom });
 }
 
 // Rules the document does not state but a page implies, kept apart from the translated CSS so it
@@ -365,6 +373,8 @@ module.exports = {
   // Word takes the fragment as part of the file name and then opens nothing at all, exactly as
   // PowerPoint does, so a link into a .docx carries no anchor.
   anchorKind: null,
+  capabilities: { paged: true, zoomable: true, scrollable: true },
+  count,
   outline: readOutline,
   render,
   readOutline,

@@ -108,6 +108,12 @@ const styleText = (html) => {
   return out.join('\n');
 };
 
+async function count(absPath) {
+  const html = read(absPath);
+  if (!html) return 0;
+  return headings(html).length || 1;
+}
+
 async function render(el, req) {
   const sec = await readSection(req.abs, req.position);
   if (!req.isCurrent() || !sec) return false;
@@ -117,15 +123,15 @@ async function render(el, req) {
     // A page that brought its own stylesheet is shown in an isolated frame, where it renders
     // as designed. One that brought none is better off with Obsidian's own styling, so it
     // reads like the rest of the vault rather than as bare unstyled markup.
-    const themed = () => renderHtml(el, { html: body, css: sec.css, width: req.width, loadImage: load });
+    const themed = () => renderHtml(el, { html: body, css: sec.css, width: req.width, zoom: req.zoom, loadImage: load });
     if (sec.css) {
-      const framed = renderFrame(el, { html: body, css: sec.css, width: req.width, loadImage: load, onFail: themed });
+      const framed = renderFrame(el, { html: body, css: sec.css, width: req.width, zoom: req.zoom, loadImage: load, onFail: themed });
       if (framed !== false) return framed;
     }
     const done = themed();
     if (done !== false) return done;
   }
-  return renderLines(el, { title: sec.title, body: sec.body, width: req.width });
+  return renderLines(el, { title: sec.title, body: sec.body, width: req.width, zoom: req.zoom });
 }
 
 module.exports = {
@@ -138,6 +144,8 @@ module.exports = {
   exts: ['html', 'htm', 'xhtml'],
   anchorKind: 'id',
   anchorFor: (e) => (e.kind === 'section' && e.anchor ? e.anchor : null),
+  capabilities: { paged: true, zoomable: true, scrollable: true },
+  count,
   outline: readOutline,
   render,
   readOutline,

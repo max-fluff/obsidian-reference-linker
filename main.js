@@ -1059,6 +1059,9 @@ var require_sigil = __commonJS({
       "menu.open.group": "Find and open",
       "notice.updateSkipped": "({n} note(s) skipped \u2014 changed since the preview)",
       "embed.menu.refresh": "Refresh embed",
+      "embed.tool.more": "More actions",
+      "embed.tool.open": "Open",
+      "embed.tool.refresh": "Refresh",
       "modal.embedPlaceholder": "Choose an embed format\u2026",
       "modal.update.summary": "{links} change(s) across {files} note(s). Uncheck any change to skip it, or a note to skip all of its changes.",
       "modal.update.upToDate": "Everything is up to date \u2014 nothing to update.",
@@ -1098,6 +1101,9 @@ var require_sigil = __commonJS({
       "menu.open.group": "\u041D\u0430\u0439\u0442\u0438 \u0438 \u043E\u0442\u043A\u0440\u044B\u0442\u044C",
       "notice.updateSkipped": "(\u043F\u0440\u043E\u043F\u0443\u0449\u0435\u043D\u043E \u0437\u0430\u043C\u0435\u0442\u043E\u043A \u2014 {n}: \u0438\u0437\u043C\u0435\u043D\u0438\u043B\u0438\u0441\u044C \u043F\u043E\u0441\u043B\u0435 \u043F\u0440\u0435\u0434\u043F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0430)",
       "embed.menu.refresh": "\u041E\u0431\u043D\u043E\u0432\u0438\u0442\u044C embed",
+      "embed.tool.more": "\u0415\u0449\u0451 \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u044F",
+      "embed.tool.open": "\u041E\u0442\u043A\u0440\u044B\u0442\u044C",
+      "embed.tool.refresh": "\u041E\u0431\u043D\u043E\u0432\u0438\u0442\u044C",
       "modal.embedPlaceholder": "\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0444\u043E\u0440\u043C\u0430\u0442 embed\u2026",
       "modal.update.summary": "\u041F\u0440\u0430\u0432\u043E\u043A \u2014 {links} \u0432 \u0437\u0430\u043C\u0435\u0442\u043A\u0430\u0445: {files}. \u0421\u043D\u0438\u043C\u0438\u0442\u0435 \u0433\u0430\u043B\u043E\u0447\u043A\u0443 \u0441 \u043F\u0440\u0430\u0432\u043A\u0438, \u0447\u0442\u043E\u0431\u044B \u043F\u0440\u043E\u043F\u0443\u0441\u0442\u0438\u0442\u044C \u0435\u0451, \u0438\u043B\u0438 \u0441 \u0437\u0430\u043C\u0435\u0442\u043A\u0438 \u2014 \u0447\u0442\u043E\u0431\u044B \u043F\u0440\u043E\u043F\u0443\u0441\u0442\u0438\u0442\u044C \u0432\u0441\u0435 \u0435\u0451 \u043F\u0440\u0430\u0432\u043A\u0438.",
       "modal.update.upToDate": "\u0412\u0441\u0451 \u0430\u043A\u0442\u0443\u0430\u043B\u044C\u043D\u043E \u2014 \u043E\u0431\u043D\u043E\u0432\u043B\u044F\u0442\u044C \u043D\u0435\u0447\u0435\u0433\u043E.",
@@ -1649,12 +1655,16 @@ var require_pdf2 = __commonJS({
       }
       return doc;
     }
+    async function count(absPath) {
+      const doc = await getDoc(absPath);
+      return doc ? doc.numPages : 0;
+    }
     async function render(el, req) {
       const doc = await getDoc(req.abs);
       if (!req.isCurrent() || !doc)
         return false;
       const canvas = el.createEl("canvas");
-      const ok = await renderPageToCanvas(doc, req.position, canvas, req.width);
+      const ok = await renderPageToCanvas(doc, req.position, canvas, req.width * (req.zoom || 1));
       if (!req.isCurrent() || !ok)
         return false;
       return null;
@@ -1665,6 +1675,8 @@ var require_pdf2 = __commonJS({
       anchorKind: "page",
       anchorFor: (e) => e.kind === "section" && e.position ? "page=" + e.position : null,
       positionLabel: (n, to) => "p." + n + (to && to > n ? "\u2013" + to : ""),
+      capabilities: { paged: true, zoomable: true },
+      count,
       outline: readOutline,
       render,
       dispose
@@ -1699,7 +1711,7 @@ var require_image = __commonJS({
       const url = URL.createObjectURL(new Blob([buf], { type: MIME[req.ext] || "application/octet-stream" }));
       const img = el.createEl("img");
       img.src = url;
-      img.style.maxWidth = req.width + "px";
+      img.style.maxWidth = req.width * (req.zoom || 1) + "px";
       return () => {
         try {
           URL.revokeObjectURL(url);
@@ -1711,6 +1723,7 @@ var require_image = __commonJS({
       id: "image",
       exts: Object.keys(MIME),
       anchorKind: null,
+      capabilities: { zoomable: true },
       render
     };
   }
@@ -2025,11 +2038,14 @@ var require_preview = __commonJS({
       });
     }
     var FRAME_MIN = 80;
-    var FRAME_MAX = 2e3;
-    var frameDoc = (html, css) => '<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>html,body{margin:0;padding:8px;overflow-x:auto}img,table,pre{max-width:100%}</style>' + (css ? "<style>" + String(css) + "</style>" : "") + "</head><body>" + html + "</body></html>";
-    function renderFrame(el, { html, css, width, loadImage, onFail }) {
+    var FRAME_MAX = 6e3;
+    var FRAME_WIDE = 4e3;
+    var FRAME_PAD = 8;
+    var frameDoc = (html, css, zoom, pad = FRAME_PAD) => '<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>html,body{margin:0;padding:' + pad + "px;overflow-x:auto}img,table,pre{max-width:100%}</style>" + (css ? "<style>" + String(css) + "</style>" : "") + (zoom && zoom !== 1 ? "<style>html{zoom:" + zoom + "}</style>" : "") + "</head><body>" + html + "</body></html>";
+    function renderFrame(el, { html, css, width, zoom, grow, page, loadImage, onFail }) {
       if (typeof document === "undefined" || !el.createEl)
         return false;
+      const pad = page ? 0 : FRAME_PAD;
       let frame;
       try {
         frame = el.createEl("iframe");
@@ -2038,10 +2054,8 @@ var require_preview = __commonJS({
         frame.setAttribute("sandbox", "allow-same-origin");
         frame.setAttribute("referrerpolicy", "no-referrer");
         frame.style.width = width + "px";
-        frame.style.maxWidth = "100%";
+        frame.style.maxWidth = grow || zoom > 1 ? "none" : "100%";
         frame.style.height = FRAME_MIN + "px";
-        frame.style.border = "0";
-        frame.style.display = "block";
         frame.addEventListener("load", () => {
           let body2 = null;
           try {
@@ -2059,15 +2073,30 @@ var require_preview = __commonJS({
             return;
           }
           let height = 0;
+          let content = 0;
           try {
-            height = body2.getBoundingClientRect().height;
+            const box = body2.getBoundingClientRect();
+            height = box.height;
+            content = box.width;
+            for (const child of body2.children || [])
+              content = Math.max(content, child.getBoundingClientRect().width);
           } catch (e) {
             height = 0;
           }
-          frame.style.height = Math.max(FRAME_MIN, Math.min(FRAME_MAX, (height || body2.scrollHeight) + 16)) + "px";
+          const wantHeight = (height || body2.scrollHeight) + 2 * pad + 2;
+          const wantWidth = content + 2 * pad + 2;
+          frame.style.height = Math.max(FRAME_MIN, Math.min(FRAME_MAX, wantHeight)) + "px";
+          if (content > width + 1) {
+            frame.style.width = Math.min(FRAME_WIDE, wantWidth) + "px";
+            frame.style.maxWidth = "none";
+          }
+          const capped = wantHeight > FRAME_MAX || wantWidth > FRAME_WIDE;
+          const root = frame.contentDocument.documentElement;
+          if (root)
+            root.style.overflow = capped ? "auto" : "hidden";
         });
         const body = expandSelfClosing(html);
-        frame.srcdoc = frameDoc(loadImage ? inlineImagesAsData(body, loadImage) : body, css);
+        frame.srcdoc = frameDoc(loadImage ? inlineImagesAsData(body, loadImage) : body, css, zoom, pad);
       } catch (e) {
         if (frame && frame.remove)
           frame.remove();
@@ -2114,13 +2143,14 @@ var require_preview = __commonJS({
       out.push(containment(scope));
       return out.join("\n");
     }
-    async function renderMarkdown(el, { markdown, width, app, component, loadImage }) {
+    async function renderMarkdown(el, { markdown, width, zoom, app, component, loadImage }) {
       const R = obsidian.MarkdownRenderer;
       const render = R && (R.render || R.renderMarkdown);
       if (!render || !component)
         return false;
       const box = el.createDiv({ cls: "reference-linker-rendered markdown-rendered" });
       box.style.maxWidth = width + "px";
+      scale(box, zoom);
       try {
         if (R.render)
           await R.render(app, markdown, box, "", component);
@@ -2132,13 +2162,18 @@ var require_preview = __commonJS({
       }
       return revoker(loadImage ? inlineImages(box, loadImage) : []);
     }
-    function renderHtml(el, { html, width, loadImage, css }) {
+    function scale(box, zoom) {
+      if (zoom && zoom !== 1)
+        box.style.zoom = zoom;
+    }
+    function renderHtml(el, { html, width, zoom, loadImage, css }) {
       if (typeof obsidian.sanitizeHTMLToDom !== "function")
         return false;
       const scopeCls = "reference-linker-scope-" + ++scopeSeq;
       const scoped = css && typeof document !== "undefined" ? scopeCss(css, "." + scopeCls) : "";
       const box = el.createDiv({ cls: "reference-linker-rendered " + (scoped ? "" : "markdown-rendered ") + scopeCls });
       box.style.maxWidth = width + "px";
+      scale(box, zoom);
       try {
         if (scoped) {
           const style = document.createElement("style");
@@ -2152,9 +2187,10 @@ var require_preview = __commonJS({
       }
       return revoker(loadImage ? inlineImages(box, loadImage) : []);
     }
-    function renderLines(el, { title, body, width }) {
+    function renderLines(el, { title, body, width, zoom }) {
       const box = el.createDiv({ cls: "reference-linker-doc" });
       box.style.maxWidth = width + "px";
+      scale(box, zoom);
       if (title)
         box.createDiv({ cls: "reference-linker-doc-title", text: title });
       for (const line of body || [])
@@ -2353,7 +2389,9 @@ var require_css = __commonJS({
     }
     var SHEET_RULES = [
       "body{margin:0;background:transparent;color:#1a1a1a}",
-      "table{border-collapse:collapse;background:#fff;font:13px system-ui,sans-serif}",
+      // max-content over the frame's own cap on tables: a sheet is as wide as its columns say, and
+      // a wide one is scrolled to rather than squeezed until its columns mean nothing.
+      "table{border-collapse:collapse;background:#fff;font:13px system-ui,sans-serif;max-width:none;width:max-content}",
       "td,th{border:1px solid #d9d9d9;padding:2px 6px;white-space:nowrap}",
       "th{background:#f3f3f3;font-weight:600;text-align:left}"
     ].join("\n");
@@ -3311,22 +3349,30 @@ var require_pptx = __commonJS({
     var layoutPartOf = (zip, slidePart) => relatedPart(zip, slidePart, /slideLayout\d+\.xml$/);
     var masterPartOf = (zip, layoutPart) => relatedPart(zip, layoutPart, /slideMaster\d+\.xml$/);
     var themePartOf = (zip, masterPart) => relatedPart(zip, masterPart, /theme\d+\.xml$/) || "ppt/theme/theme1.xml";
+    async function count(absPath) {
+      const doc = readSlides(absPath);
+      return doc ? doc.parts.length : 0;
+    }
     async function render(el, req) {
       const doc = readSlides(req.abs);
       if (!req.isCurrent() || !doc)
         return false;
       const n = clampPosition(req.position, doc.parts.length);
-      const page = slidePage(doc.zip, doc.parts[n - 1], req.width);
+      const zoom = req.zoom || 1;
+      const width = req.width * zoom;
+      const page = slidePage(doc.zip, doc.parts[n - 1], width);
       if (page) {
         const loadImage = (src) => doc.zip.read(assetSrc(src));
         const framed = renderFrame(el, {
           html: page.html,
           css: page.css,
-          width: req.width,
+          width,
+          grow: zoom > 1,
+          page: true,
           loadImage,
           onFail: () => {
             const slide2 = slideText(doc.zip.text(doc.parts[n - 1]) || "");
-            renderLines(el, { title: slide2.title, body: slide2.body, width: req.width });
+            renderLines(el, { title: slide2.title, body: slide2.body, width: req.width, zoom: req.zoom });
           }
         });
         if (framed !== false)
@@ -3335,13 +3381,15 @@ var require_pptx = __commonJS({
       const slide = await readSlide(req.abs, req.position);
       if (!req.isCurrent() || !slide)
         return false;
-      return renderLines(el, { title: slide.title, body: slide.body, width: req.width });
+      return renderLines(el, { title: slide.title, body: slide.body, width: req.width, zoom: req.zoom });
     }
     module2.exports = {
       id: "pptx",
       exts: ["pptx", "pptm", "potx", "potm"],
       anchorKind: null,
       // PowerPoint takes a fragment as part of the file name and finds nothing
+      capabilities: { paged: true, zoomable: true },
+      count,
       outline: readOutline,
       render,
       readOutline,
@@ -3436,6 +3484,12 @@ var require_html = __commonJS({
         out.push(m[1]);
       return out.join("\n");
     };
+    async function count(absPath) {
+      const html = read(absPath);
+      if (!html)
+        return 0;
+      return headings(html).length || 1;
+    }
     async function render(el, req) {
       const sec = await readSection(req.abs, req.position);
       if (!req.isCurrent() || !sec)
@@ -3443,9 +3497,9 @@ var require_html = __commonJS({
       if (sec.raw) {
         const body = sec.raw.replace(DROP, "");
         const load = assetLoader(req.abs);
-        const themed = () => renderHtml(el, { html: body, css: sec.css, width: req.width, loadImage: load });
+        const themed = () => renderHtml(el, { html: body, css: sec.css, width: req.width, zoom: req.zoom, loadImage: load });
         if (sec.css) {
-          const framed = renderFrame(el, { html: body, css: sec.css, width: req.width, loadImage: load, onFail: themed });
+          const framed = renderFrame(el, { html: body, css: sec.css, width: req.width, zoom: req.zoom, loadImage: load, onFail: themed });
           if (framed !== false)
             return framed;
         }
@@ -3453,7 +3507,7 @@ var require_html = __commonJS({
         if (done !== false)
           return done;
       }
-      return renderLines(el, { title: sec.title, body: sec.body, width: req.width });
+      return renderLines(el, { title: sec.title, body: sec.body, width: req.width, zoom: req.zoom });
     }
     module2.exports = {
       id: "html",
@@ -3465,6 +3519,8 @@ var require_html = __commonJS({
       exts: ["html", "htm", "xhtml"],
       anchorKind: "id",
       anchorFor: (e) => e.kind === "section" && e.anchor ? e.anchor : null,
+      capabilities: { paged: true, zoomable: true, scrollable: true },
+      count,
       outline: readOutline,
       render,
       readOutline,
@@ -3554,6 +3610,7 @@ var require_text = __commonJS({
         const done = await renderMarkdown(el, {
           markdown: md,
           width: req.width,
+          zoom: req.zoom,
           app: req.app,
           component: req.component,
           loadImage: assetLoader(req.abs)
@@ -3561,13 +3618,16 @@ var require_text = __commonJS({
         if (done !== false)
           return done;
       }
-      return renderLines(el, { title: sec.title, body: sec.body, width: req.width });
+      return renderLines(el, { title: sec.title, body: sec.body, width: req.width, zoom: req.zoom });
     }
     module2.exports = {
       id: "text",
       exts: ["md", "markdown", "txt", "text", "log"],
       anchorKind: null,
       // no viewer honours a position in a text file
+      // Not paged: a position here is the heading's line number, not its place in a list of them,
+      // so stepping it by one would move a line, not a section.
+      capabilities: { zoomable: true, scrollable: true },
       outline: readOutline,
       render,
       readOutline,
@@ -3700,17 +3760,21 @@ var require_epub = __commonJS({
       const doc = open(absPath);
       return doc ? chapterAt(doc, position) : null;
     }
+    async function count(absPath) {
+      const doc = open(absPath);
+      return doc ? doc.spine.order.length : 0;
+    }
     async function render(el, req) {
       const doc = open(req.abs);
       const ch = doc && chapterAt(doc, req.position);
       if (!req.isCurrent() || !ch)
         return false;
       if (ch.raw) {
-        const done = renderHtml(el, { html: ch.raw, width: req.width, loadImage: imageLoader(doc, ch.path) });
+        const done = renderHtml(el, { html: ch.raw, width: req.width, zoom: req.zoom, loadImage: imageLoader(doc, ch.path) });
         if (done !== false)
           return done;
       }
-      return renderLines(el, { title: ch.title, body: ch.body, width: req.width });
+      return renderLines(el, { title: ch.title, body: ch.body, width: req.width, zoom: req.zoom });
     }
     var imageLoader = (doc, chapterPath) => (src) => doc.zip.read(resolve(chapterPath, assetSrc(src)));
     module2.exports = {
@@ -3718,6 +3782,8 @@ var require_epub = __commonJS({
       exts: ["epub"],
       anchorKind: null,
       // an e-reader takes the file and ignores the fragment
+      capabilities: { paged: true, zoomable: true, scrollable: true },
+      count,
       outline: readOutline,
       render,
       readOutline,
@@ -3728,12 +3794,125 @@ var require_epub = __commonJS({
   }
 });
 
+// src/formats/player.js
+var require_player = __commonJS({
+  "src/formats/player.js"(exports2, module2) {
+    "use strict";
+    var { setIcon } = require("obsidian");
+    var { t: t2 } = require_i18n();
+    var STEPS = 1e3;
+    var NUDGE = 5;
+    function timecode(n) {
+      const s = Math.max(0, Math.floor(Number(n) || 0));
+      const mm = Math.floor(s / 60);
+      const ss = String(s % 60).padStart(2, "0");
+      return mm >= 60 ? Math.floor(mm / 60) + ":" + String(mm % 60).padStart(2, "0") + ":" + ss : mm + ":" + ss;
+    }
+    var playable = (media) => Number.isFinite(media.duration) && media.duration > 0;
+    function button(row, icon, label, onClick) {
+      const b = row.createEl("button", {
+        cls: "clickable-icon reference-linker-player-button",
+        attr: { type: "button", "aria-label": label, title: label }
+      });
+      if (typeof setIcon === "function")
+        setIcon(b, icon);
+      b.addEventListener("click", (evt) => {
+        evt.preventDefault();
+        evt.stopPropagation();
+        onClick();
+      });
+      return b;
+    }
+    var slider = (row, cls, label, max, value) => row.createEl("input", {
+      cls: "reference-linker-player-" + cls,
+      type: "range",
+      attr: { min: "0", max: String(max), value: String(value), "aria-label": label }
+    });
+    function mountPlayer(el, media, { video }) {
+      if (!el.createDiv || !el.createEl)
+        return false;
+      const row = el.createDiv({ cls: "reference-linker-player" });
+      row.tabIndex = 0;
+      const play = button(row, "play", t2("player.play"), () => toggle());
+      const seek = slider(row, "seek", t2("player.seek"), STEPS, 0);
+      const time = row.createSpan({ cls: "reference-linker-player-time", text: timecode(0) });
+      const sound = button(row, "volume-2", t2("player.mute"), () => {
+        media.muted = !media.muted;
+        setIcon(sound, media.muted ? "volume-x" : "volume-2");
+      });
+      const volume = slider(row, "volume", t2("player.volume"), 100, 100);
+      if (video)
+        button(row, "maximize", t2("player.fullscreen"), () => {
+          if (media.requestFullscreen)
+            media.requestFullscreen();
+        });
+      const toggle = () => {
+        if (media.paused)
+          media.play().catch(() => {
+          });
+        else
+          media.pause();
+      };
+      const nudge = (by) => {
+        if (playable(media))
+          media.currentTime = Math.min(media.duration, Math.max(0, media.currentTime + by));
+      };
+      let dragging = false;
+      const show = () => {
+        const total = playable(media) ? timecode(media.duration) : "--:--";
+        time.setText(timecode(media.currentTime) + " / " + total);
+        if (!dragging && playable(media))
+          seek.value = String(Math.round(media.currentTime / media.duration * STEPS));
+      };
+      media.addEventListener("loadedmetadata", show);
+      media.addEventListener("timeupdate", show);
+      media.addEventListener("play", () => setIcon(play, "pause"));
+      media.addEventListener("pause", () => setIcon(play, "play"));
+      media.addEventListener("ended", () => setIcon(play, "rotate-ccw"));
+      seek.addEventListener("input", () => {
+        dragging = true;
+        if (playable(media))
+          media.currentTime = Number(seek.value) / STEPS * media.duration;
+      });
+      seek.addEventListener("change", () => {
+        dragging = false;
+      });
+      volume.addEventListener("input", () => {
+        media.volume = Number(volume.value) / 100;
+        media.muted = media.volume === 0;
+        setIcon(sound, media.muted ? "volume-x" : "volume-2");
+      });
+      if (video)
+        media.addEventListener("click", toggle);
+      row.addEventListener("keydown", (evt) => {
+        const key = evt.key;
+        if (key === " " || key === "k")
+          toggle();
+        else if (key === "ArrowLeft")
+          nudge(-NUDGE);
+        else if (key === "ArrowRight")
+          nudge(NUDGE);
+        else if (key === "m")
+          sound.click();
+        else
+          return;
+        evt.preventDefault();
+        evt.stopPropagation();
+      });
+      show();
+      return true;
+    }
+    module2.exports = { mountPlayer, timecode };
+  }
+});
+
 // src/formats/media.js
 var require_media = __commonJS({
   "src/formats/media.js"(exports2, module2) {
     "use strict";
     var fs2 = require("fs");
     var nodePath2 = require("path");
+    var { mountPlayer, timecode } = require_player();
     var VIDEO = { mp4: "video/mp4", m4v: "video/mp4", webm: "video/webm", mkv: "video/x-matroska", mov: "video/quicktime", ogv: "video/ogg" };
     var AUDIO = { mp3: "audio/mpeg", m4a: "audio/mp4", wav: "audio/wav", flac: "audio/flac", ogg: "audio/ogg", opus: "audio/ogg", aac: "audio/aac" };
     var BLOB_LIMIT = 96 * 1024 * 1024;
@@ -3762,7 +3941,9 @@ var require_media = __commonJS({
         return false;
       const isVideo = !!VIDEO[req.ext];
       const media = el.createEl(isVideo ? "video" : "audio");
-      media.controls = true;
+      media.controls = !mountPlayer(el, media, { video: isVideo });
+      if (!media.controls && !isVideo)
+        media.addClass("reference-linker-player-source");
       media.preload = "metadata";
       media.style.width = req.width + "px";
       media.style.maxWidth = "100%";
@@ -3805,17 +3986,13 @@ var require_media = __commonJS({
       }
       return dispose;
     }
-    function positionLabel(n) {
-      const s = Math.max(0, n | 0);
-      const mm = Math.floor(s / 60);
-      const ss = String(s % 60).padStart(2, "0");
-      return mm >= 60 ? Math.floor(mm / 60) + ":" + String(mm % 60).padStart(2, "0") + ":" + ss : mm + ":" + ss;
-    }
+    var positionLabel = timecode;
     module2.exports = {
       id: "media",
       exts: [...Object.keys(VIDEO), ...Object.keys(AUDIO)],
       anchorKind: null,
       // no outline, so nothing writes an anchor; a hand-written #t= still previews
+      capabilities: { timed: true },
       positionUnit: "time",
       positionLabel,
       render
@@ -4259,6 +4436,16 @@ var require_odf = __commonJS({
         lines.shift();
       return { title: sec.title, body: lines.slice(0, MAX_LINES), position: sec.n, total: sec.total };
     }
+    async function count(absPath, ext) {
+      const xml = contentOf(absPath);
+      if (!xml)
+        return 0;
+      if (kindOf(ext) === "odp")
+        return elements(xml, "draw:page").length;
+      if (kindOf(ext) === "ods")
+        return elements(xml, "table:table").length;
+      return odtHeadings(xml).length || 1;
+    }
     var imageLoader = (zip) => (src) => zip ? zip.read(assetSrc(src)) : null;
     var PAGE_RULES = [
       "body{margin:0;background:transparent}",
@@ -4331,6 +4518,8 @@ var require_odf = __commonJS({
     }
     async function render(el, req) {
       const kind = kindOf(req.ext);
+      const zoom = req.zoom || 1;
+      const width = kind === "ods" ? req.width : req.width * zoom;
       if (kind === "ods") {
         const zip = openZip(req.abs);
         const xml = zip ? readable(zip.text("content.xml")) : null;
@@ -4343,14 +4532,15 @@ var require_odf = __commonJS({
             const framed = renderFrame(el, {
               html,
               css,
-              width: req.width,
+              width,
+              zoom,
               onFail: () => {
-                renderHtml(el, { html, width: req.width, css });
+                renderHtml(el, { html, width, zoom, css });
               }
             });
             if (framed !== false)
               return framed;
-            const done = renderHtml(el, { html, width: req.width, css });
+            const done = renderHtml(el, { html, width, zoom, css });
             if (done !== false)
               return done;
           }
@@ -4360,20 +4550,22 @@ var require_odf = __commonJS({
         const zip = openZip(req.abs);
         const xml = zip ? readable(zip.text("content.xml")) : null;
         if (req.isCurrent() && xml) {
-          const page = documentPage(zip, xml, req.position, req.width, req.view);
+          const page = documentPage(zip, xml, req.position, width, req.view);
           const loadImage = imageLoader(zip);
           const framed = renderFrame(el, {
             html: page.html,
             css: page.css,
-            width: req.width,
+            width,
+            grow: zoom > 1,
+            page: true,
             loadImage,
             onFail: () => {
-              renderHtml(el, { html: page.html, width: req.width, loadImage });
+              renderHtml(el, { html: page.html, width, loadImage });
             }
           });
           if (framed !== false)
             return framed;
-          const done = renderHtml(el, { html: page.html, width: req.width, loadImage });
+          const done = renderHtml(el, { html: page.html, width, loadImage });
           if (done !== false)
             return done;
         }
@@ -4381,14 +4573,16 @@ var require_odf = __commonJS({
       if (kind === "odp") {
         const zip = openZip(req.abs);
         const xml = zip ? readable(zip.text("content.xml")) : null;
-        const page = xml && req.isCurrent() ? slidePage(zip, xml, req.position, req.width) : null;
+        const page = xml && req.isCurrent() ? slidePage(zip, xml, req.position, width) : null;
         if (page) {
           const loadImage = imageLoader(zip);
-          const flat = () => readSection(req.abs, req.ext, req.position).then((sec2) => sec2 && renderLines(el, { title: sec2.title, body: sec2.body, width: req.width }));
+          const flat = () => readSection(req.abs, req.ext, req.position).then((sec2) => sec2 && renderLines(el, { title: sec2.title, body: sec2.body, width: req.width, zoom }));
           const framed = renderFrame(el, {
             html: page.html,
             css: page.css,
-            width: req.width,
+            width,
+            grow: zoom > 1,
+            page: true,
             loadImage,
             onFail: flat
           });
@@ -4399,12 +4593,14 @@ var require_odf = __commonJS({
       const sec = await readSection(req.abs, req.ext, req.position);
       if (!req.isCurrent() || !sec)
         return false;
-      return renderLines(el, { title: sec.title, body: sec.body, width: req.width });
+      return renderLines(el, { title: sec.title, body: sec.body, width: req.width, zoom });
     }
     module2.exports = {
       id: "odf",
       exts: ["odt", "ods", "odp", "odg", "ott", "ots", "otp", "otg"],
       anchorKind: null,
+      capabilities: (ext) => ({ paged: true, zoomable: true, scrollable: kindOf(ext) !== "odp" }),
+      count,
       outline: (abs, ext) => readOutline(abs, ext),
       render,
       readOutline,
@@ -4940,37 +5136,47 @@ var require_docx = __commonJS({
       }
       return { title: sec.title, body: body.slice(0, MAX_LINES), position: sec.n, total: sec.total };
     }
+    async function count(absPath) {
+      const parts = partsOf(absPath);
+      if (!parts)
+        return 0;
+      return headings(parts.body, parts.styles).length || 1;
+    }
     async function render(el, req) {
       const parts = partsOf(req.abs);
       if (!req.isCurrent() || !parts)
         return false;
       const loadImage = (src) => parts.zip.read(assetSrc(src));
+      const zoom = req.zoom || 1;
+      const width = req.width * zoom;
       const chunk = altChunk(parts.zip, parts.body);
       if (chunk) {
-        const done = renderHtml(el, { html: chunk, width: req.width, loadImage });
+        const done = renderHtml(el, { html: chunk, width: req.width, zoom: req.zoom, loadImage });
         if (done !== false)
           return done;
       } else {
-        const page = documentPage(parts, req.position, req.width, req.view);
+        const page = documentPage(parts, req.position, width, req.view);
         const framed = renderFrame(el, {
           html: page.html,
           css: page.css,
-          width: req.width,
+          width,
+          grow: zoom > 1,
+          page: true,
           loadImage,
           onFail: () => {
-            renderHtml(el, { html: page.html, width: req.width, loadImage });
+            renderHtml(el, { html: page.html, width, loadImage });
           }
         });
         if (framed !== false)
           return framed;
-        const done = renderHtml(el, { html: page.html, width: req.width, loadImage });
+        const done = renderHtml(el, { html: page.html, width, loadImage });
         if (done !== false)
           return done;
       }
       const sec = await readSection(req.abs, req.position);
       if (!req.isCurrent() || !sec)
         return false;
-      return renderLines(el, { title: sec.title, body: sec.body, width: req.width });
+      return renderLines(el, { title: sec.title, body: sec.body, width: req.width, zoom: req.zoom });
     }
     var PAGE_RULES = [
       "body{margin:0;background:transparent}",
@@ -4998,6 +5204,8 @@ var require_docx = __commonJS({
       // Word takes the fragment as part of the file name and then opens nothing at all, exactly as
       // PowerPoint does, so a link into a .docx carries no anchor.
       anchorKind: null,
+      capabilities: { paged: true, zoomable: true, scrollable: true },
+      count,
       outline: readOutline,
       render,
       readOutline,
@@ -5528,6 +5736,10 @@ var require_xlsx = __commonJS({
       const lines = grid.map((cells) => cells.map(textOf).filter(Boolean).join(" \xB7 ")).filter(Boolean);
       return { title: name, body: lines.slice(0, MAX_LINES), position: n, total: book.sheets.length };
     }
+    async function count(absPath) {
+      const zip = openZip(absPath);
+      return zip ? sheetParts(zip).length : 0;
+    }
     async function render(el, req) {
       const book = bookOf(req.abs);
       if (!req.isCurrent() || !book)
@@ -5541,24 +5753,27 @@ var require_xlsx = __commonJS({
           html,
           css,
           width: req.width,
+          zoom: req.zoom,
           onFail: () => {
-            renderHtml(el, { html, width: req.width, css });
+            renderHtml(el, { html, width: req.width, zoom: req.zoom, css });
           }
         });
         if (framed !== false)
           return framed;
-        const done = renderHtml(el, { html, width: req.width, css });
+        const done = renderHtml(el, { html, width: req.width, zoom: req.zoom, css });
         if (done !== false)
           return done;
       }
       const lines = grid.map((cells) => cells.map(textOf).filter(Boolean).join(" \xB7 ")).filter(Boolean);
-      return renderLines(el, { title: name, body: lines.slice(0, MAX_LINES), width: req.width });
+      return renderLines(el, { title: name, body: lines.slice(0, MAX_LINES), width: req.width, zoom: req.zoom });
     }
     module2.exports = {
       id: "xlsx",
       exts: ["xlsx", "xlsm", "xltx", "xltm"],
       // Excel takes the fragment as part of the file name, exactly as Word and PowerPoint do.
       anchorKind: null,
+      capabilities: { paged: true, zoomable: true, scrollable: true },
+      count,
       outline: readOutline,
       render,
       readOutline,
@@ -5653,18 +5868,19 @@ var require_csv = __commonJS({
         return false;
       const html = gridToHtml(rows, { header: rows.length > 1 });
       if (html) {
-        const done = renderHtml(el, { html, width: req.width, css: SHEET_RULES });
+        const done = renderHtml(el, { html, width: req.width, zoom: req.zoom, css: SHEET_RULES });
         if (done !== false)
           return done;
       }
       const lines = rows.map((r) => r.filter(Boolean).join(" \xB7 ")).filter(Boolean);
-      return renderLines(el, { title: "", body: lines.slice(0, MAX_LINES), width: req.width });
+      return renderLines(el, { title: "", body: lines.slice(0, MAX_LINES), width: req.width, zoom: req.zoom });
     }
     module2.exports = {
       id: "csv",
       exts: ["csv", "tsv"],
       // A CSV is opened in whatever the OS hands .csv to; there is no page to land on.
       anchorKind: null,
+      capabilities: { zoomable: true, scrollable: true },
       render,
       parse,
       delimiter,
@@ -5677,6 +5893,7 @@ var require_csv = __commonJS({
 var require_formats = __commonJS({
   "src/formats/index.js"(exports2, module2) {
     "use strict";
+    var fs2 = require("fs");
     var pdf = require_pdf2();
     var image = require_image();
     var pptx = require_pptx();
@@ -5725,6 +5942,39 @@ var require_formats = __commonJS({
       const h = handlerFor(ext);
       return h && h.positionLabel ? h.positionLabel(n, to) : null;
     };
+    var NO_CAPS = { paged: false, zoomable: false, scrollable: false, timed: false };
+    function capabilities(ext) {
+      const h = handlerFor(ext);
+      try {
+        const c = h && h.capabilities;
+        return Object.assign({}, NO_CAPS, typeof c === "function" ? c(ext) : c);
+      } catch (e) {
+        return Object.assign({}, NO_CAPS);
+      }
+    }
+    var counts = /* @__PURE__ */ new Map();
+    async function count(ext, absPath) {
+      const h = handlerFor(ext);
+      if (!h || !h.count)
+        return 0;
+      const key = ext + "|" + absPath;
+      let mtimeMs = null;
+      try {
+        mtimeMs = fs2.statSync(absPath).mtimeMs;
+      } catch (e) {
+      }
+      const hit = counts.get(key);
+      if (hit && hit.mtimeMs === mtimeMs)
+        return hit.n;
+      let n = 0;
+      try {
+        n = Math.max(0, Math.floor(await h.count(absPath, ext)) || 0);
+      } catch (e) {
+        n = 0;
+      }
+      counts.set(key, { mtimeMs, n });
+      return n;
+    }
     async function outline(ext, absPath) {
       const h = handlerFor(ext);
       if (!h || !h.outline)
@@ -5746,6 +5996,7 @@ var require_formats = __commonJS({
       }
     }
     async function dispose() {
+      counts.clear();
       for (const h of HANDLERS) {
         if (!h.dispose)
           continue;
@@ -5766,6 +6017,8 @@ var require_formats = __commonJS({
       hasOsAnchor,
       positionUnit,
       positionLabel,
+      capabilities,
+      count,
       outline,
       render,
       dispose
@@ -6032,13 +6285,725 @@ var require_hover = __commonJS({
   }
 });
 
+// src/shared/embed-frame.js
+var require_embed_frame = __commonJS({
+  "src/shared/embed-frame.js"(exports2, module2) {
+    "use strict";
+    var obsidian = require("obsidian");
+    var { t: t2 } = require_i18n();
+    function parseSpec(source, keys) {
+      const spec = { target: "" };
+      for (const k of keys)
+        spec[k] = "";
+      const re = new RegExp("^(" + keys.join("|") + ")\\s*:\\s*(.*)$", "i");
+      for (const raw of String(source == null ? "" : source).split("\n")) {
+        const line = raw.trim();
+        if (!line)
+          continue;
+        const m = re.exec(line);
+        if (m)
+          spec[m[1].toLowerCase()] = m[2].trim();
+        else if (!spec.target)
+          spec.target = line;
+      }
+      return spec;
+    }
+    function setSpecLine(body, key, value) {
+      const re = new RegExp("^\\s*" + key + "\\s*:", "i");
+      const at = body.findIndex((l) => re.test(l));
+      if (!value)
+        return body.filter((l) => !re.test(l));
+      if (at < 0)
+        return [...body, key + ": " + value];
+      const out = body.slice();
+      out[at] = key + ": " + value;
+      return out;
+    }
+    async function writeEmbedBody(app, sourcePath, info, body) {
+      const view = app.workspace.getActiveViewOfType(obsidian.MarkdownView);
+      const editor = view && view.file && view.file.path === sourcePath ? view.editor : null;
+      if (editor) {
+        editor.replaceRange(body.join("\n") + "\n", { line: info.lineStart + 1, ch: 0 }, { line: info.lineEnd, ch: 0 });
+        return true;
+      }
+      const file = app.vault.getAbstractFileByPath(sourcePath);
+      if (!file)
+        return false;
+      let moved = false;
+      await app.vault.process(file, (data) => {
+        const lines = data.split("\n");
+        const here = lines.slice(info.lineStart, info.lineEnd + 1).join("\n");
+        if (here !== info.text.split("\n").slice(info.lineStart, info.lineEnd + 1).join("\n")) {
+          moved = true;
+          return data;
+        }
+        lines.splice(info.lineStart + 1, info.lineEnd - info.lineStart - 1, ...body);
+        return lines.join("\n");
+      });
+      return !moved;
+    }
+    function toolButton(parent, cls, icon, label, onClick) {
+      const b = parent.createEl("button", {
+        cls: "clickable-icon " + cls + "-embed-button",
+        attr: { type: "button", "aria-label": label, title: label }
+      });
+      if (icon && typeof obsidian.setIcon === "function")
+        obsidian.setIcon(b, icon);
+      b.addEventListener("click", (evt) => {
+        evt.preventDefault();
+        evt.stopPropagation();
+        onClick(evt);
+      });
+      return b;
+    }
+    var EmbedFrame = class extends obsidian.MarkdownRenderChild {
+      // `cls` is the plugin's class prefix, the same one its stylesheet is written against.
+      constructor(containerEl, plugin, spec, ctx, cls) {
+        super(containerEl);
+        this.plugin = plugin;
+        this.spec = spec;
+        this.ctx = ctx;
+        this.cls = cls;
+        this.renderId = 0;
+        this.lastSig = null;
+      }
+      // --- what a plugin fills in ---------------------------------------------------------------
+      // The spec resolved to whatever renderBody needs, or { error } for an inline notice.
+      resolve() {
+        return { error: "embed-frame: resolve() not implemented" };
+      }
+      // Everything this embed shows, as a string. Same string means nothing changed and the
+      // re-render is skipped; null means the answer isn't knowable, so never skip.
+      sig() {
+        return null;
+      }
+      headerText() {
+        return "";
+      }
+      // Draw into `body`. False means nothing could be drawn — the frame shows its own notice.
+      async renderBody() {
+        return false;
+      }
+      // Fill the plugin's own toolbar row, on every render: a control that reads the result of
+      // one stays current.
+      tools() {
+      }
+      menuItems() {
+      }
+      // The notice text for a target that resolved but could not be read.
+      unreadable() {
+        return "";
+      }
+      release() {
+      }
+      // --- the shell ----------------------------------------------------------------------------
+      onload() {
+        this.containerEl.addEventListener("contextmenu", (evt) => this.onContextMenu(evt));
+        this.render();
+        this.unsub = this.plugin.onIndexChange(() => this.render());
+      }
+      onunload() {
+        if (this.unsub)
+          this.unsub();
+        this.release();
+      }
+      open() {
+        const entry = this.res && this.res.entry;
+        if (!entry)
+          return;
+        this.plugin.withFormat(this.plugin.settings.askOnInsert, (tpl) => this.plugin.openEntry(entry, tpl));
+      }
+      // The right-click menu, and what ⋯ opens — see CONTRIBUTING.md on what a toolbar may carry.
+      menu() {
+        const menu = new obsidian.Menu();
+        if (this.res.entry)
+          menu.addItem((i) => i.setTitle(t2("embed.menu.open")).setIcon("go-to-file").onClick(() => this.open()));
+        menu.addItem((i) => i.setTitle(t2("embed.menu.refresh")).setIcon("refresh-cw").onClick(() => this.refresh()));
+        this.menuItems(menu, this.res);
+        return menu;
+      }
+      onContextMenu(evt) {
+        if (!this.res)
+          return;
+        evt.preventDefault();
+        evt.stopPropagation();
+        this.menu().showAtMouseEvent(evt);
+      }
+      refresh() {
+        return this.render(true);
+      }
+      notice(text) {
+        this.release();
+        this.chrome = null;
+        this.containerEl.empty();
+        this.containerEl.createDiv({ cls: this.cls + "-embed-error", text });
+      }
+      button(parent, icon, label, onClick) {
+        return toolButton(parent, this.cls, icon, label, onClick);
+      }
+      // The header, the toolbar and the body, built once and kept: a plugin that holds state in
+      // its own controls loses it if the row is rebuilt under it.
+      frame() {
+        if (this.chrome && this.chrome.body.parentElement === this.containerEl)
+          return this.chrome;
+        const el = this.containerEl;
+        el.empty();
+        el.addClass(this.cls + "-embed");
+        const header = el.createDiv({ cls: this.cls + "-embed-header" });
+        const title = header.createSpan({ cls: this.cls + "-embed-title mod-clickable" });
+        title.addEventListener("click", () => this.open());
+        const bar = header.createDiv({ cls: this.cls + "-embed-tools" });
+        const own = bar.createDiv({ cls: this.cls + "-embed-group" });
+        const common = bar.createDiv({ cls: this.cls + "-embed-group" });
+        this.button(common, "external-link", t2("embed.tool.open"), () => this.open());
+        this.button(common, "refresh-cw", t2("embed.tool.refresh"), () => this.refresh());
+        this.button(common, "more-horizontal", t2("embed.tool.more"), (evt) => this.menu().showAtMouseEvent(evt));
+        const body = el.createDiv({ cls: this.cls + "-embed-body" });
+        this.chrome = { header, title, tools: own, body };
+        return this.chrome;
+      }
+      async render(force) {
+        const token = ++this.renderId;
+        const res = this.resolve();
+        this.res = res;
+        const sig = res.error ? "err:" + res.error : this.sig(res);
+        if (!force && sig !== null && sig === this.lastSig)
+          return;
+        this.lastSig = sig;
+        if (res.error) {
+          this.notice(res.error);
+          return;
+        }
+        const chrome = this.frame();
+        chrome.title.setText(this.headerText(res));
+        this.tools(chrome.tools, res);
+        const drew = await this.renderBody(chrome.body, res, () => token === this.renderId);
+        if (token !== this.renderId)
+          return;
+        if (!drew) {
+          this.notice(this.unreadable(res));
+          this.lastSig = null;
+        }
+      }
+      setHeader(text) {
+        if (this.chrome)
+          this.chrome.title.setText(text);
+      }
+      // Rewrite this block's own lines in the note. `edit(body)` gets the block body, without the
+      // fences, and returns what it should become, or null to leave the note alone.
+      async writeBody(edit) {
+        const info = this.ctx && this.ctx.getSectionInfo && this.ctx.getSectionInfo(this.containerEl);
+        if (!info)
+          return false;
+        const next = edit(info.text.split("\n").slice(info.lineStart + 1, info.lineEnd));
+        if (!next)
+          return false;
+        return writeEmbedBody(this.plugin.app, this.ctx.sourcePath, info, next);
+      }
+    };
+    module2.exports = { EmbedFrame, parseSpec, setSpecLine, writeEmbedBody, toolButton };
+  }
+});
+
+// src/viewer-state.js
+var require_viewer_state = __commonJS({
+  "src/viewer-state.js"(exports2, module2) {
+    "use strict";
+    var ZOOM_STEPS = [50, 75, 100, 125, 150, 200, 250, 300];
+    var FIT = "fit";
+    var MIN_ZOOM = ZOOM_STEPS[0];
+    var MAX_ZOOM = ZOOM_STEPS[ZOOM_STEPS.length - 1];
+    var MAX_WIDTH = 4e3;
+    function clampPosition(n, count) {
+      const p = Math.max(1, Math.floor(Number(n)) || 1);
+      return count > 0 ? Math.min(p, count) : p;
+    }
+    function parseZoom(raw) {
+      const s = String(raw == null ? "" : raw).trim().toLowerCase();
+      if (!s)
+        return null;
+      if (s === FIT)
+        return FIT;
+      const m = /^(\d+(?:\.\d+)?)\s*%?$/.exec(s);
+      if (!m)
+        return null;
+      return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round(parseFloat(m[1]))));
+    }
+    var formatZoom = (zoom) => zoom === FIT ? FIT : zoom + "%";
+    var same = (a, b) => a.position === b.position && a.zoom === b.zoom && a.count === b.count && a.paged === b.paged && a.zoomable === b.zoomable;
+    function set(state, patch) {
+      const next = Object.assign({}, state, patch);
+      return same(state, next) ? state : next;
+    }
+    function initialState(opts) {
+      const o = opts || {};
+      const count = Math.max(0, Math.floor(Number(o.count)) || 0);
+      const zoom = parseZoom(o.zoom);
+      return {
+        position: clampPosition(o.position, count),
+        zoom: zoom === null ? 100 : zoom,
+        count,
+        paged: !!o.paged,
+        zoomable: !!o.zoomable
+      };
+    }
+    function stepZoom(zoom, dir) {
+      const base = zoom === FIT ? 100 : zoom;
+      const steps = dir > 0 ? ZOOM_STEPS : ZOOM_STEPS.slice().reverse();
+      const next = steps.find((z) => dir > 0 ? z > base : z < base);
+      return next === void 0 ? base : next;
+    }
+    function reduce(state, action) {
+      if (!action)
+        return state;
+      const at = (n) => set(state, { position: clampPosition(n, state.count) });
+      switch (action.type) {
+        case "prev":
+          return state.paged ? at(state.position - 1) : state;
+        case "next":
+          return state.paged ? at(state.position + 1) : state;
+        case "first":
+          return state.paged ? at(1) : state;
+        case "last":
+          return state.paged && state.count > 0 ? at(state.count) : state;
+        case "goto": {
+          const raw = String(action.value == null ? "" : action.value).trim();
+          const n = Math.floor(Number(raw));
+          return state.paged && raw !== "" && Number.isFinite(n) ? at(n) : state;
+        }
+        case "count": {
+          const count = Math.max(0, Math.floor(Number(action.value)) || 0);
+          return set(state, { count, position: clampPosition(state.position, count) });
+        }
+        case "zoomIn":
+          return state.zoomable ? set(state, { zoom: stepZoom(state.zoom, 1) }) : state;
+        case "zoomOut":
+          return state.zoomable ? set(state, { zoom: stepZoom(state.zoom, -1) }) : state;
+        case "zoom": {
+          const z = parseZoom(action.value);
+          return state.zoomable && z !== null ? set(state, { zoom: z }) : state;
+        }
+        case "fit":
+          return state.zoomable ? set(state, { zoom: state.zoom === FIT ? 100 : FIT }) : state;
+        default:
+          return state;
+      }
+    }
+    function keyAction(ev) {
+      if (ev.altKey)
+        return null;
+      if (ev.ctrlKey || ev.metaKey) {
+        if (ev.key === "0")
+          return { type: "zoom", value: 100 };
+        if (ev.key === "+" || ev.key === "=")
+          return { type: "zoomIn" };
+        if (ev.key === "-" || ev.key === "_")
+          return { type: "zoomOut" };
+        return null;
+      }
+      switch (ev.key) {
+        case "ArrowLeft":
+        case "PageUp":
+          return { type: "prev" };
+        case "ArrowRight":
+        case "PageDown":
+          return { type: "next" };
+        case "Home":
+          return { type: "first" };
+        case "End":
+          return { type: "last" };
+        case "+":
+        case "=":
+          return { type: "zoomIn" };
+        case "-":
+          return { type: "zoomOut" };
+        default:
+          return null;
+      }
+    }
+    function renderSize(state, width, containerWidth) {
+      const box = state.zoom === FIT && containerWidth > 0 ? containerWidth : width;
+      const zoom = state.zoom === FIT ? 1 : state.zoom / 100;
+      return { width: Math.round(box), zoom: Math.min(zoom, MAX_WIDTH / Math.max(1, box)) };
+    }
+    module2.exports = {
+      ZOOM_STEPS,
+      FIT,
+      MAX_WIDTH,
+      parseZoom,
+      formatZoom,
+      initialState,
+      reduce,
+      keyAction,
+      renderSize
+    };
+  }
+});
+
+// src/viewer.js
+var require_viewer = __commonJS({
+  "src/viewer.js"(exports2, module2) {
+    "use strict";
+    var { Menu } = require("obsidian");
+    var formats2 = require_formats();
+    var { toolButton } = require_embed_frame();
+    var { t: t2 } = require_i18n();
+    var vs = require_viewer_state();
+    var ZOOM_DEBOUNCE = 120;
+    var EmbedViewer = class {
+      // opts: plugin, spec, component, container, width, label.
+      constructor(opts) {
+        this.opts = opts;
+        this.st = null;
+        this.key = "";
+        this.renderId = 0;
+        this.cleanup = null;
+        this.timer = null;
+        this.wired = null;
+      }
+      state() {
+        return this.st;
+      }
+      async show(res, tools, body) {
+        const key = res.absPath + "|" + res.ext + "|" + res.position + "-" + res.to;
+        this.res = res;
+        if (key !== this.key || tools !== this.tools || body !== this.body) {
+          this.key = key;
+          this.tools = tools;
+          this.body = body;
+          this.ranged = res.to > res.position;
+          const caps = formats2.capabilities(res.ext);
+          this.st = vs.initialState({
+            position: res.position,
+            zoom: this.opts.spec.zoom,
+            count: 0,
+            paged: caps.paged && !this.ranged,
+            zoomable: caps.zoomable
+          });
+          this.build();
+        }
+        this.countPositions();
+        this.sync();
+        return this.draw();
+      }
+      destroy() {
+        this.renderId++;
+        if (this.timer) {
+          clearTimeout(this.timer);
+          this.timer = null;
+        }
+        this.release();
+      }
+      release() {
+        if (this.cleanup) {
+          try {
+            this.cleanup();
+          } catch (e) {
+          }
+          this.cleanup = null;
+        }
+      }
+      build() {
+        const tools = this.tools;
+        tools.empty();
+        this.navEl = null;
+        this.outlineBtn = null;
+        this.posEl = null;
+        this.zoomEl = null;
+        if (this.st.paged || this.ranged) {
+          this.navEl = tools.createDiv({ cls: "reference-linker-embed-group", attr: { "aria-live": "polite" } });
+          this.outlineBtn = this.button(this.navEl, "list", t2("embed.tool.contents"), (evt) => this.showOutline(evt));
+        }
+        if (this.st.paged) {
+          this.prevBtn = this.button(this.navEl, "chevron-left", t2("embed.tool.prev"), () => this.apply({ type: "prev" }));
+          this.posEl = this.navEl.createEl("input", { cls: "reference-linker-embed-position", type: "text" });
+          this.posEl.setAttribute("aria-label", t2("embed.tool.position"));
+          this.posEl.addEventListener("keydown", (evt) => this.onPositionKey(evt));
+          this.posEl.addEventListener("blur", () => this.sync());
+          this.totalEl = this.navEl.createSpan({ cls: "reference-linker-embed-total" });
+          this.nextBtn = this.button(this.navEl, "chevron-right", t2("embed.tool.next"), () => this.apply({ type: "next" }));
+        }
+        if (this.st.zoomable) {
+          const g = tools.createDiv({ cls: "reference-linker-embed-group" });
+          this.button(g, "zoom-out", t2("embed.tool.zoomOut"), () => this.apply({ type: "zoomOut" }));
+          this.zoomEl = this.button(g, null, t2("embed.tool.zoomReset"), () => this.apply({ type: "zoom", value: 100 }));
+          this.zoomEl.addClass("reference-linker-embed-zoom");
+          this.button(g, "zoom-in", t2("embed.tool.zoomIn"), () => this.apply({ type: "zoomIn" }));
+          this.fitBtn = this.button(g, "maximize", t2("embed.tool.fit"), () => this.apply({ type: "fit" }));
+        }
+        this.wire();
+      }
+      // Listeners belong to the body element, which outlives a rebuild of the toolbar.
+      wire() {
+        if (this.wired === this.body || !(this.st.paged || this.st.zoomable))
+          return;
+        this.wired = this.body;
+        this.body.tabIndex = 0;
+        this.body.setAttribute("role", "group");
+        this.body.setAttribute("aria-label", this.opts.label());
+        this.body.addEventListener("keydown", (evt) => this.onKey(evt));
+        this.body.addEventListener("wheel", (evt) => this.onWheel(evt), { passive: false });
+        this.body.addEventListener("dblclick", () => this.apply({ type: "fit" }));
+      }
+      button(parent, icon, label, onClick) {
+        return toolButton(parent, "reference-linker", icon, label, onClick);
+      }
+      // The document's own outline, as the index already read it. A range can only lead to what it
+      // shows: the rest of the document is not this block's to open.
+      sections() {
+        const plugin = this.opts.plugin;
+        if (!this.res || typeof plugin.entriesIn !== "function")
+          return [];
+        let all = [];
+        try {
+          all = plugin.entriesIn(this.res.relPath).filter((e) => e.kind === "section" && e.position > 0);
+        } catch (e) {
+          return [];
+        }
+        return this.ranged ? all.filter((e) => e.position >= this.res.position && e.position <= this.res.to) : all;
+      }
+      showOutline(evt) {
+        const menu = new Menu();
+        for (const section of this.sections()) {
+          const at = formats2.positionLabel(this.res.ext, section.position);
+          menu.addItem((i) => i.setTitle(at ? section.name + "  \xB7  " + at : section.name).setChecked(!this.ranged && section.position === this.st.position).onClick(() => this.goTo(section.position)));
+        }
+        menu.showAtMouseEvent(evt);
+      }
+      // A paged embed changes what it draws; a range already holds the position, so it scrolls to
+      // the slot — which is also what makes the observer draw it.
+      goTo(position) {
+        if (!this.ranged) {
+          this.apply({ type: "goto", value: position });
+          return;
+        }
+        const slot = (this.slots || []).find((s) => s.position === position);
+        if (slot)
+          this.body.scrollTop = slot.el.offsetTop;
+      }
+      sync() {
+        const st = this.st;
+        if (this.navEl) {
+          const pages = st.paged && st.count !== 1;
+          const outline = this.sections().length > 1;
+          this.outlineBtn.toggleClass("is-hidden", !outline);
+          this.navEl.toggleClass("is-hidden", !pages && !outline);
+        }
+        if (st.paged) {
+          if (document.activeElement !== this.posEl)
+            this.posEl.value = String(st.position);
+          this.posEl.size = Math.max(2, String(st.count || st.position).length);
+          this.totalEl.setText(st.count ? "/ " + st.count : "");
+          this.prevBtn.disabled = st.position <= 1;
+          this.nextBtn.disabled = st.count > 0 && st.position >= st.count;
+        }
+        if (st.zoomable) {
+          this.zoomEl.setText((st.zoom === vs.FIT ? Math.round(this.size().width / this.opts.width * 100) : st.zoom) + "%");
+          this.fitBtn.toggleClass("is-active", st.zoom === vs.FIT);
+          this.body.toggleClass("is-zoomed", st.zoom !== vs.FIT && st.zoom > 100);
+        }
+      }
+      apply(action) {
+        const prev = this.st;
+        const next = vs.reduce(prev, action);
+        if (next === prev)
+          return;
+        this.st = next;
+        this.sync();
+        if (next.zoom !== prev.zoom)
+          this.schedule();
+        else if (next.position !== prev.position)
+          this.draw();
+      }
+      schedule() {
+        if (this.timer)
+          clearTimeout(this.timer);
+        this.timer = setTimeout(() => {
+          this.timer = null;
+          this.draw();
+        }, ZOOM_DEBOUNCE);
+      }
+      async countPositions() {
+        if (!this.st.paged)
+          return;
+        const key = this.key;
+        const n = await formats2.count(this.res.ext, this.res.absPath);
+        if (key === this.key)
+          this.apply({ type: "count", value: n });
+      }
+      onKey(evt) {
+        const before = this.st;
+        this.apply(vs.keyAction(evt));
+        if (this.st !== before) {
+          evt.preventDefault();
+          evt.stopPropagation();
+        }
+      }
+      // Typing a page is not paging: the arrows belong to the box while it has the cursor.
+      onPositionKey(evt) {
+        evt.stopPropagation();
+        if (evt.key === "Enter") {
+          evt.preventDefault();
+          this.apply({ type: "goto", value: this.posEl.value });
+          this.body.focus();
+        } else if (evt.key === "Escape") {
+          this.posEl.blur();
+        }
+      }
+      // Only a wheel that moved something is swallowed, or the last page would trap the note.
+      onWheel(evt) {
+        const before = this.st;
+        if (evt.ctrlKey || evt.metaKey) {
+          this.apply({ type: evt.deltaY < 0 ? "zoomIn" : "zoomOut" });
+        } else if (this.st.paged && this.body.scrollHeight <= this.body.clientHeight + 1) {
+          this.apply({ type: evt.deltaY < 0 ? "prev" : "next" });
+        }
+        if (this.st !== before)
+          evt.preventDefault();
+      }
+      size() {
+        const box = this.opts.container.parentElement || this.opts.container;
+        return vs.renderSize(this.st, this.opts.width, box.clientWidth - 2);
+      }
+      async draw() {
+        const token = ++this.renderId;
+        const res = this.res;
+        const size = this.size();
+        this.body.style.maxWidth = size.width + "px";
+        const from = this.st.paged ? this.st.position : res.position;
+        const to = this.st.paged ? this.st.position : res.to;
+        const holder = document.createElement("div");
+        const cleanups = [];
+        let watcher = null;
+        const drop = () => {
+          if (watcher) {
+            watcher.disconnect();
+            watcher = null;
+          }
+          cleanups.forEach((c) => {
+            try {
+              c();
+            } catch (e) {
+            }
+          });
+          cleanups.length = 0;
+        };
+        const paint = async (slot, position) => {
+          const cleanup = await formats2.render(slot, {
+            abs: res.absPath,
+            ext: res.ext,
+            position,
+            width: size.width,
+            zoom: size.zoom,
+            view: this.opts.plugin.settings.documentView,
+            app: this.opts.plugin.app,
+            component: this.opts.component,
+            isCurrent: () => token === this.renderId
+          });
+          if (token !== this.renderId) {
+            if (typeof cleanup === "function") {
+              try {
+                cleanup();
+              } catch (e) {
+              }
+            }
+            return false;
+          }
+          if (typeof cleanup === "function")
+            cleanups.push(cleanup);
+          return cleanup !== false;
+        };
+        const slots = [];
+        for (let p = from; p <= to; p++) {
+          if (to === from) {
+            slots.push({ el: holder, position: p });
+            break;
+          }
+          const el = document.createElement("div");
+          el.className = "reference-linker-embed-slot";
+          holder.appendChild(el);
+          slots.push({ el, position: p });
+        }
+        const drew = await paint(slots[0].el, slots[0].position);
+        if (token !== this.renderId) {
+          drop();
+          return true;
+        }
+        if (!drew) {
+          drop();
+          return false;
+        }
+        this.release();
+        this.swap(holder, token);
+        this.cleanup = drop;
+        this.slots = slots;
+        if (slots.length > 1)
+          watcher = this.watch(slots.slice(1), paint);
+        return true;
+      }
+      // A frame only loads once it is in the document, so the new position cannot be made ready
+      // before it is shown. The old one stays in the flow and holds the box until it is.
+      swap(holder, token) {
+        if (!this.body.firstElementChild) {
+          this.body.appendChild(holder);
+          return;
+        }
+        holder.addClass("reference-linker-embed-pending");
+        this.body.appendChild(holder);
+        const show = () => {
+          if (token !== this.renderId || holder.parentElement !== this.body)
+            return;
+          for (const el of Array.from(this.body.children))
+            if (el !== holder)
+              el.remove();
+          holder.removeClass("reference-linker-embed-pending");
+        };
+        const frames = holder.querySelectorAll("iframe");
+        let left = frames.length;
+        frames.forEach((f) => f.addEventListener("load", () => {
+          if (--left === 0)
+            show();
+        }, { once: true }));
+        if (!frames.length)
+          requestAnimationFrame(show);
+        else
+          setTimeout(show, 1200);
+      }
+      // Each slot painted when it comes near the viewport. Without IntersectionObserver they are
+      // all painted at once, which is what a range did before.
+      watch(slots, paint) {
+        if (typeof IntersectionObserver !== "function") {
+          slots.forEach((s) => paint(s.el, s.position));
+          return null;
+        }
+        const io = new IntersectionObserver((entries) => {
+          for (const entry of entries) {
+            if (!entry.isIntersecting)
+              continue;
+            const slot = slots.find((s) => s.el === entry.target);
+            io.unobserve(entry.target);
+            if (slot)
+              paint(slot.el, slot.position);
+          }
+        }, { root: this.body, rootMargin: "300px" });
+        slots.forEach((s) => io.observe(s.el));
+        return io;
+      }
+    };
+    module2.exports = { EmbedViewer };
+  }
+});
+
 // src/embed.js
 var require_embed = __commonJS({
   "src/embed.js"(exports2, module2) {
     "use strict";
-    var { MarkdownRenderChild, Menu } = require("obsidian");
+    var { Notice: Notice2 } = require("obsidian");
     var nodePath2 = require("path");
     var formats2 = require_formats();
+    var { EmbedViewer } = require_viewer();
+    var { formatZoom } = require_viewer_state();
+    var frame = require_embed_frame();
     var { t: t2 } = require_i18n();
     var EMBED_LANG = "reference-link";
     var DEFAULT_WIDTH = 600;
@@ -6061,20 +7026,8 @@ var require_embed = __commonJS({
         return null;
       return parseInt(m[1] || "0", 10) * 3600 + parseInt(m[2], 10) * 60 + parseInt(m[3], 10);
     }
-    function parseSpec(source) {
-      const spec = { target: "", page: "", time: "", width: "", title: "" };
-      for (const raw of source.split("\n")) {
-        const line = raw.trim();
-        if (!line)
-          continue;
-        const m = /^(page|time|width|title)\s*:\s*(.*)$/i.exec(line);
-        if (m)
-          spec[m[1].toLowerCase()] = m[2].trim();
-        else if (!spec.target)
-          spec.target = line;
-      }
-      return spec;
-    }
+    var SPEC_KEYS = ["page", "time", "width", "title", "zoom"];
+    var parseSpec = (source) => frame.parseSpec(source, SPEC_KEYS);
     function splitTarget2(target) {
       const h = target.indexOf("#");
       if (h >= 0)
@@ -6176,140 +7129,86 @@ var require_embed = __commonJS({
       const kind = position > 1 || to > position ? "section" : "file";
       return { absPath, relPath, ext, position, to, name, entry: { name, kind, path: relPath, line: position, position } };
     }
-    var ReferenceEmbed = class extends MarkdownRenderChild {
-      constructor(containerEl, plugin, spec) {
-        super(containerEl);
-        this.plugin = plugin;
-        this.spec = spec;
-        this.renderId = 0;
-        this.cleanup = null;
+    var ReferenceEmbed = class extends frame.EmbedFrame {
+      constructor(containerEl, plugin, spec, ctx) {
+        super(containerEl, plugin, spec, ctx, "reference-linker");
+        this.viewer = null;
       }
-      onload() {
-        this.containerEl.addEventListener("contextmenu", (evt) => this.onContextMenu(evt));
-        this.render();
-        this.unsub = this.plugin.onIndexChange(() => this.render());
-      }
-      onunload() {
-        if (this.unsub)
-          this.unsub();
-        this.release();
-      }
-      // Open the embedded document where it points — the same path the open/insert commands use.
-      open() {
-        const e = this.res && this.res.entry;
-        if (!e)
-          return;
-        this.plugin.withFormat(this.plugin.settings.askOnInsert, (tpl) => this.plugin.openEntry(e, tpl));
-      }
-      onContextMenu(evt) {
-        if (!this.res)
-          return;
-        evt.preventDefault();
-        evt.stopPropagation();
-        const menu = new Menu();
-        if (this.res.entry)
-          menu.addItem((i) => i.setTitle(t2("embed.menu.open")).setIcon("go-to-file").onClick(() => this.open()));
-        menu.addItem((i) => i.setTitle(t2("embed.menu.refresh")).setIcon("refresh-cw").onClick(() => this.render(true)));
-        menu.showAtMouseEvent(evt);
-      }
-      notice(cls, text) {
-        this.containerEl.empty();
-        this.containerEl.createDiv({ cls, text });
-      }
-      release() {
-        if (this.cleanup) {
-          try {
-            this.cleanup();
-          } catch (e) {
-          }
-          this.cleanup = null;
-        }
+      resolve() {
+        return resolve(this.plugin, this.spec);
       }
       width() {
         const n = parseInt(this.spec.width, 10);
         return Number.isFinite(n) && n > 0 ? n : DEFAULT_WIDTH;
       }
-      async render(force) {
-        const token = ++this.renderId;
-        const res = resolve(this.plugin, this.spec);
-        this.res = res;
+      // The mtime is what says whether the file behind this embed actually changed; without one
+      // there is nothing to compare, so the render is never skipped.
+      sig(res) {
         const cached = res.relPath && this.plugin.fileCache.get(res.relPath);
         const mtime = cached ? cached.mtimeMs : null;
-        const sig = res.error ? "err:" + res.error : res.absPath + "|" + res.position + "-" + res.to + "|" + mtime + "|" + this.width();
-        if (!force && sig === this.lastSig && (res.error || mtime != null))
-          return;
-        this.lastSig = sig;
-        if (res.error) {
-          this.notice("reference-linker-embed-error", res.error);
-          return;
-        }
-        const el = this.containerEl;
-        el.empty();
-        el.addClass("reference-linker-embed");
-        const header = el.createDiv({ cls: "reference-linker-embed-header mod-clickable" });
-        const pos = formats2.positionLabel(res.ext, res.position, res.to);
-        header.createSpan({ text: this.spec.title || res.name + (pos ? "  \xB7  " + pos : "") });
-        header.addEventListener("click", () => this.open());
-        const body = el.createDiv({ cls: "reference-linker-embed-body" });
-        if (!formats2.canPreview(res.ext)) {
-          this.notice("reference-linker-embed-error", t2("embed.unsupported", { path: res.relPath }));
-          this.lastSig = null;
-          return;
-        }
-        this.release();
-        const cleanups = [];
-        let drew = false;
-        for (let p = res.position; p <= res.to; p++) {
-          const slot = res.to > res.position ? body.createDiv({ cls: "reference-linker-embed-slot" }) : body;
-          const cleanup = await formats2.render(slot, {
-            abs: res.absPath,
-            ext: res.ext,
-            position: p,
-            width: this.width(),
-            view: this.plugin.settings.documentView,
-            app: this.plugin.app,
-            component: this,
-            isCurrent: () => token === this.renderId
-          });
-          if (token !== this.renderId) {
-            if (typeof cleanup === "function") {
-              try {
-                cleanup();
-              } catch (e) {
-              }
-            }
-            cleanups.forEach((c) => {
-              try {
-                c();
-              } catch (e) {
-              }
-            });
-            return;
-          }
-          if (cleanup !== false)
-            drew = true;
-          if (typeof cleanup === "function")
-            cleanups.push(cleanup);
-        }
-        if (!drew) {
-          this.fail(res);
-          return;
-        }
-        this.cleanup = cleanups.length ? () => cleanups.forEach((c) => {
-          try {
-            c();
-          } catch (e) {
-          }
-        }) : null;
+        return mtime == null ? null : res.absPath + "|" + res.position + "-" + res.to + "|" + mtime + "|" + this.width();
       }
-      fail(res) {
-        this.notice("reference-linker-embed-error", t2("embed.unreadable", { path: res.relPath }));
-        this.lastSig = null;
+      headerText(res) {
+        if (this.spec.title)
+          return this.spec.title;
+        const paged = formats2.capabilities(res.ext).paged && res.to === res.position;
+        const at = paged ? null : formats2.positionLabel(res.ext, res.position, res.to);
+        return res.name + (at ? "  \xB7  " + at : "");
+      }
+      unreadable(res) {
+        return formats2.canPreview(res.ext) ? t2("embed.unreadable", { path: res.relPath }) : t2("embed.unsupported", { path: res.relPath });
+      }
+      tools(row) {
+        this.row = row;
+      }
+      // The viewer outlives this render: its position and zoom are the reader's, not the block's.
+      async renderBody(body, res) {
+        if (!formats2.canPreview(res.ext))
+          return false;
+        if (!this.viewer) {
+          this.viewer = new EmbedViewer({
+            plugin: this.plugin,
+            spec: this.spec,
+            component: this,
+            container: this.containerEl,
+            width: this.width(),
+            label: () => this.headerText(this.res)
+          });
+        }
+        return this.viewer.show(res, this.row, body);
+      }
+      menuItems(menu) {
+        const st = this.viewer && this.viewer.state();
+        if (!st || !(st.paged || st.zoomable))
+          return;
+        menu.addItem((i) => i.setTitle(t2("embed.menu.remember")).setIcon("bookmark").onClick(() => this.remember()));
+      }
+      // Only on this explicit ask: a block that rewrote itself on every page turn would fill the
+      // note's undo stack and its history with chrome.
+      async remember() {
+        const st = this.viewer && this.viewer.state();
+        if (!st)
+          return;
+        const ok = await this.writeBody((body) => {
+          let out = body;
+          if (st.paged)
+            out = frame.setSpecLine(out, "page", String(st.position));
+          if (st.zoomable)
+            out = frame.setSpecLine(out, "zoom", formatZoom(st.zoom));
+          return out;
+        });
+        new Notice2(ok ? t2("notice.viewRemembered") : t2("notice.embedMoved"));
+      }
+      release() {
+        if (this.viewer) {
+          this.viewer.destroy();
+          this.viewer = null;
+        }
       }
     };
     function registerEmbed2(plugin) {
       plugin.registerMarkdownCodeBlockProcessor(EMBED_LANG, (source, el, ctx) => {
-        ctx.addChild(new ReferenceEmbed(el, plugin, parseSpec(source)));
+        ctx.addChild(new ReferenceEmbed(el, plugin, parseSpec(source), ctx));
       });
     }
     module2.exports = { registerEmbed: registerEmbed2, resolve, splitTarget: splitTarget2, parseSpan, parseSpec, parseTimecode };
@@ -7854,6 +8753,24 @@ var require_en = __commonJS({
       "embed.ambiguous": "Reference Linker: {n} documents match \u201C{query}\u201D \u2014 add a path to pick one",
       "embed.unreadable": "Reference Linker: can\u2019t read {path}",
       "embed.truncated": "Reference Linker: showing the first {max} lines",
+      "embed.menu.remember": "Remember this view",
+      "embed.tool.contents": "Contents",
+      "player.play": "Play / pause",
+      "player.seek": "Position in the recording",
+      "player.mute": "Mute",
+      "player.volume": "Volume",
+      "player.fullscreen": "Full screen",
+      "embed.tool.prev": "Previous",
+      "embed.tool.next": "Next",
+      "embed.tool.position": "Position",
+      "embed.tool.zoomIn": "Zoom in",
+      "embed.tool.zoomOut": "Zoom out",
+      "embed.tool.zoomReset": "Reset zoom to 100%",
+      "embed.tool.fit": "Fit width",
+      "embed.tool.open": "Open document",
+      "embed.tool.refresh": "Refresh",
+      "notice.viewRemembered": "Reference Linker: the embed now opens at this page and zoom",
+      "notice.embedMoved": "Reference Linker: the note changed under the embed \u2014 nothing was written",
       // Status bar
       "status.indexing": "Reference Linker: indexing\u2026 {n}",
       // Command-palette modal
@@ -7984,6 +8901,24 @@ var require_ru = __commonJS({
       "embed.ambiguous": "Reference Linker: \u043F\u043E\u0434 \xAB{query}\xBB \u043F\u043E\u0434\u0445\u043E\u0434\u0438\u0442 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u043E\u0432: {n} \u2014 \u0443\u0442\u043E\u0447\u043D\u0438\u0442\u0435 \u043F\u0443\u0442\u0451\u043C",
       "embed.unreadable": "Reference Linker: \u043D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u0440\u043E\u0447\u0438\u0442\u0430\u0442\u044C {path}",
       "embed.truncated": "Reference Linker: \u043F\u043E\u043A\u0430\u0437\u0430\u043D\u044B \u043F\u0435\u0440\u0432\u044B\u0435 {max} \u0441\u0442\u0440\u043E\u043A",
+      "embed.menu.remember": "\u0417\u0430\u043F\u043E\u043C\u043D\u0438\u0442\u044C \u044D\u0442\u043E\u0442 \u0432\u0438\u0434",
+      "embed.tool.contents": "\u0421\u043E\u0434\u0435\u0440\u0436\u0430\u043D\u0438\u0435",
+      "player.play": "\u041F\u0443\u0441\u043A / \u043F\u0430\u0443\u0437\u0430",
+      "player.seek": "\u041F\u043E\u0437\u0438\u0446\u0438\u044F \u0432 \u0437\u0430\u043F\u0438\u0441\u0438",
+      "player.mute": "\u0411\u0435\u0437 \u0437\u0432\u0443\u043A\u0430",
+      "player.volume": "\u0413\u0440\u043E\u043C\u043A\u043E\u0441\u0442\u044C",
+      "player.fullscreen": "\u041D\u0430 \u0432\u0435\u0441\u044C \u044D\u043A\u0440\u0430\u043D",
+      "embed.tool.prev": "\u041F\u0440\u0435\u0434\u044B\u0434\u0443\u0449\u0430\u044F",
+      "embed.tool.next": "\u0421\u043B\u0435\u0434\u0443\u044E\u0449\u0430\u044F",
+      "embed.tool.position": "\u041F\u043E\u0437\u0438\u0446\u0438\u044F",
+      "embed.tool.zoomIn": "\u0423\u0432\u0435\u043B\u0438\u0447\u0438\u0442\u044C",
+      "embed.tool.zoomOut": "\u0423\u043C\u0435\u043D\u044C\u0448\u0438\u0442\u044C",
+      "embed.tool.zoomReset": "\u0421\u0431\u0440\u043E\u0441\u0438\u0442\u044C \u043C\u0430\u0441\u0448\u0442\u0430\u0431 \u0434\u043E 100%",
+      "embed.tool.fit": "\u041F\u043E \u0448\u0438\u0440\u0438\u043D\u0435",
+      "embed.tool.open": "\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442",
+      "embed.tool.refresh": "\u041E\u0431\u043D\u043E\u0432\u0438\u0442\u044C",
+      "notice.viewRemembered": "Reference Linker: embed \u0431\u0443\u0434\u0435\u0442 \u043E\u0442\u043A\u0440\u044B\u0432\u0430\u0442\u044C\u0441\u044F \u043D\u0430 \u044D\u0442\u043E\u0439 \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0435 \u0438 \u0432 \u044D\u0442\u043E\u043C \u043C\u0430\u0441\u0448\u0442\u0430\u0431\u0435",
+      "notice.embedMoved": "Reference Linker: \u0437\u0430\u043C\u0435\u0442\u043A\u0430 \u0438\u0437\u043C\u0435\u043D\u0438\u043B\u0430\u0441\u044C \u043F\u043E\u0434 embed \u2014 \u043D\u0438\u0447\u0435\u0433\u043E \u043D\u0435 \u0437\u0430\u043F\u0438\u0441\u0430\u043D\u043E",
       // Status bar
       "status.indexing": "Reference Linker: \u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435\u2026 {n}",
       // Command-palette modal

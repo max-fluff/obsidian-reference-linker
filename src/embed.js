@@ -6,9 +6,12 @@
 // range stacks each page/section. The block re-renders on every index change, so an open
 // embed follows changes on disk.
 
-const { MarkdownRenderChild, Menu } = require('obsidian');
+const { Notice } = require('obsidian');
 const nodePath = require('path');
 const formats = require('./formats');
+const { EmbedViewer } = require('./viewer');
+const { formatZoom } = require('./viewer-state');
+const frame = require('./shared/embed-frame');
 const { t } = require('./shared/i18n');
 
 const EMBED_LANG = 'reference-link';
@@ -36,19 +39,10 @@ function parseTimecode(s) {
   return (parseInt(m[1] || '0', 10) * 3600) + (parseInt(m[2], 10) * 60) + parseInt(m[3], 10);
 }
 
-// First non-empty line is the target; later "key: value" lines tune it. `time:` is `page:` for
-// a recording — the same position, written the way a recording's position reads.
-function parseSpec(source) {
-  const spec = { target: '', page: '', time: '', width: '', title: '' };
-  for (const raw of source.split('\n')) {
-    const line = raw.trim();
-    if (!line) continue;
-    const m = /^(page|time|width|title)\s*:\s*(.*)$/i.exec(line);
-    if (m) spec[m[1].toLowerCase()] = m[2].trim();
-    else if (!spec.target) spec.target = line;
-  }
-  return spec;
-}
+// `time:` is `page:` for a recording — the same position, written the way a recording's
+// position reads.
+const SPEC_KEYS = ['page', 'time', 'width', 'title', 'zoom'];
+const parseSpec = (source) => frame.parseSpec(source, SPEC_KEYS);
 
 // Split a trailing position off a path target: the fragment after '#' (a "page=3", "page=3-5",
 // "t=90", or an id like "_options"), or a legacy ":3" / ":3-5" suffix. The legacy one names no
@@ -153,114 +147,83 @@ function resolve(plugin, spec) {
   return { absPath, relPath, ext, position, to, name, entry: { name, kind, path: relPath, line: position, position } };
 }
 
-class ReferenceEmbed extends MarkdownRenderChild {
-  constructor(containerEl, plugin, spec) {
-    super(containerEl);
-    this.plugin = plugin;
-    this.spec = spec;
-    this.renderId = 0;
-    this.cleanup = null;
+class ReferenceEmbed extends frame.EmbedFrame {
+  constructor(containerEl, plugin, spec, ctx) {
+    super(containerEl, plugin, spec, ctx, 'reference-linker');
+    this.viewer = null;
   }
 
-  onload() {
-    this.containerEl.addEventListener('contextmenu', (evt) => this.onContextMenu(evt));
-    this.render();
-    // fs.watch -> rebuildIndex -> notifyIndexChange, so an open embed re-renders on change.
-    this.unsub = this.plugin.onIndexChange(() => this.render());
-  }
+  resolve() { return resolve(this.plugin, this.spec); }
 
-  onunload() {
-    if (this.unsub) this.unsub();
-    this.release();
-  }
-
-  // Open the embedded document where it points — the same path the open/insert commands use.
-  open() {
-    const e = this.res && this.res.entry;
-    if (!e) return;
-    this.plugin.withFormat(this.plugin.settings.askOnInsert, (tpl) => this.plugin.openEntry(e, tpl));
-  }
-
-  onContextMenu(evt) {
-    if (!this.res) return;
-    evt.preventDefault();
-    evt.stopPropagation();
-    const menu = new Menu();
-    if (this.res.entry) menu.addItem((i) => i.setTitle(t('embed.menu.open')).setIcon('go-to-file').onClick(() => this.open()));
-    menu.addItem((i) => i.setTitle(t('embed.menu.refresh')).setIcon('refresh-cw').onClick(() => this.render(true)));
-    menu.showAtMouseEvent(evt);
-  }
-
-  notice(cls, text) { this.containerEl.empty(); this.containerEl.createDiv({ cls, text }); }
-  release() { if (this.cleanup) { try { this.cleanup(); } catch { /* ignore */ } this.cleanup = null; } }
   width() { const n = parseInt(this.spec.width, 10); return Number.isFinite(n) && n > 0 ? n : DEFAULT_WIDTH; }
 
-  async render(force) {
-    const token = ++this.renderId;
-    const res = resolve(this.plugin, this.spec);
-    this.res = res; // for the right-click menu (open / refresh)
-
-    // Skip the re-render when nothing this embed shows has changed.
+  // The mtime is what says whether the file behind this embed actually changed; without one
+  // there is nothing to compare, so the render is never skipped.
+  sig(res) {
     const cached = res.relPath && this.plugin.fileCache.get(res.relPath);
     const mtime = cached ? cached.mtimeMs : null;
-    const sig = res.error ? 'err:' + res.error : res.absPath + '|' + res.position + '-' + res.to + '|' + mtime + '|' + this.width();
-    if (!force && sig === this.lastSig && (res.error || mtime != null)) return;
-    this.lastSig = sig;
+    return mtime == null ? null : res.absPath + '|' + res.position + '-' + res.to + '|' + mtime + '|' + this.width();
+  }
 
-    if (res.error) { this.notice('reference-linker-embed-error', res.error); return; }
+  headerText(res) {
+    if (this.spec.title) return this.spec.title;
+    // A paged viewer says where it is in the toolbar; the header would name where the block
+    // started, which is not where the reader is.
+    const paged = formats.capabilities(res.ext).paged && res.to === res.position;
+    const at = paged ? null : formats.positionLabel(res.ext, res.position, res.to);
+    return res.name + (at ? '  ·  ' + at : '');
+  }
 
-    const el = this.containerEl;
-    el.empty();
-    el.addClass('reference-linker-embed');
-    const header = el.createDiv({ cls: 'reference-linker-embed-header mod-clickable' });
-    const pos = formats.positionLabel(res.ext, res.position, res.to);
-    header.createSpan({ text: this.spec.title || res.name + (pos ? '  ·  ' + pos : '') });
-    header.addEventListener('click', () => this.open());
-    const body = el.createDiv({ cls: 'reference-linker-embed-body' });
+  unreadable(res) {
+    return formats.canPreview(res.ext)
+      ? t('embed.unreadable', { path: res.relPath })
+      : t('embed.unsupported', { path: res.relPath });
+  }
 
-    if (!formats.canPreview(res.ext)) {
-      this.notice('reference-linker-embed-error', t('embed.unsupported', { path: res.relPath }));
-      this.lastSig = null;
-      return;
-    }
+  tools(row) { this.row = row; }
 
-    // A range stacks each page/section; a single embed is just the one-item case.
-    this.release();
-    const cleanups = [];
-    let drew = false;
-    for (let p = res.position; p <= res.to; p++) {
-      const slot = res.to > res.position ? body.createDiv({ cls: 'reference-linker-embed-slot' }) : body;
-      const cleanup = await formats.render(slot, {
-        abs: res.absPath,
-        ext: res.ext,
-        position: p,
-        width: this.width(),
-        view: this.plugin.settings.documentView,
-        app: this.plugin.app,
+  // The viewer outlives this render: its position and zoom are the reader's, not the block's.
+  async renderBody(body, res) {
+    if (!formats.canPreview(res.ext)) return false;
+    if (!this.viewer) {
+      this.viewer = new EmbedViewer({
+        plugin: this.plugin,
+        spec: this.spec,
         component: this,
-        isCurrent: () => token === this.renderId,
+        container: this.containerEl,
+        width: this.width(),
+        label: () => this.headerText(this.res),
       });
-      if (token !== this.renderId) {
-        if (typeof cleanup === 'function') { try { cleanup(); } catch { /* ignore */ } }
-        cleanups.forEach((c) => { try { c(); } catch { /* ignore */ } });
-        return;
-      }
-      if (cleanup !== false) drew = true;
-      if (typeof cleanup === 'function') cleanups.push(cleanup);
     }
-    if (!drew) { this.fail(res); return; }
-    this.cleanup = cleanups.length ? () => cleanups.forEach((c) => { try { c(); } catch { /* ignore */ } }) : null;
+    return this.viewer.show(res, this.row, body);
   }
 
-  fail(res) {
-    this.notice('reference-linker-embed-error', t('embed.unreadable', { path: res.relPath }));
-    this.lastSig = null;
+  menuItems(menu) {
+    const st = this.viewer && this.viewer.state();
+    if (!st || !(st.paged || st.zoomable)) return;
+    menu.addItem((i) => i.setTitle(t('embed.menu.remember')).setIcon('bookmark').onClick(() => this.remember()));
   }
+
+  // Only on this explicit ask: a block that rewrote itself on every page turn would fill the
+  // note's undo stack and its history with chrome.
+  async remember() {
+    const st = this.viewer && this.viewer.state();
+    if (!st) return;
+    const ok = await this.writeBody((body) => {
+      let out = body;
+      if (st.paged) out = frame.setSpecLine(out, 'page', String(st.position));
+      if (st.zoomable) out = frame.setSpecLine(out, 'zoom', formatZoom(st.zoom));
+      return out;
+    });
+    new Notice(ok ? t('notice.viewRemembered') : t('notice.embedMoved'));
+  }
+
+  release() { if (this.viewer) { this.viewer.destroy(); this.viewer = null; } }
 }
 
 function registerEmbed(plugin) {
   plugin.registerMarkdownCodeBlockProcessor(EMBED_LANG, (source, el, ctx) => {
-    ctx.addChild(new ReferenceEmbed(el, plugin, parseSpec(source)));
+    ctx.addChild(new ReferenceEmbed(el, plugin, parseSpec(source), ctx));
   });
 }
 

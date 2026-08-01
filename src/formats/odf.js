@@ -336,6 +336,14 @@ async function readSection(absPath, ext, position) {
   return { title: sec.title, body: lines.slice(0, MAX_LINES), position: sec.n, total: sec.total };
 }
 
+async function count(absPath, ext) {
+  const xml = contentOf(absPath);
+  if (!xml) return 0;
+  if (kindOf(ext) === 'odp') return elements(xml, 'draw:page').length;
+  if (kindOf(ext) === 'ods') return elements(xml, 'table:table').length;
+  return odtHeadings(xml).length || 1;
+}
+
 // Images in an odt live in the zip (the href is a member path like "Pictures/1000.png").
 const imageLoader = (zip) => (src) => (zip ? zip.read(assetSrc(src)) : null);
 
@@ -427,6 +435,8 @@ function documentPage(zip, xml, position, width, view) {
 
 async function render(el, req) {
   const kind = kindOf(req.ext);
+  const zoom = req.zoom || 1;
+  const width = kind === 'ods' ? req.width : req.width * zoom;
   // A spreadsheet is a grid, not a list of values; a text document is structure, not lines.
   // Both render as HTML when the app can, and fall back to the flat text otherwise (the test
   // stubs have no sanitizer).
@@ -442,10 +452,10 @@ async function render(el, req) {
         // The frame first, for the same reason odt uses it: the sanitizer strips the class
         // attributes every cell's formatting is written against.
         const framed = renderFrame(el, {
-          html, css, width: req.width, onFail: () => { renderHtml(el, { html, width: req.width, css }); },
+          html, css, width, zoom, onFail: () => { renderHtml(el, { html, width, zoom, css }); },
         });
         if (framed !== false) return framed;
-        const done = renderHtml(el, { html, width: req.width, css });
+        const done = renderHtml(el, { html, width, zoom, css });
         if (done !== false) return done;
       }
     }
@@ -454,16 +464,16 @@ async function render(el, req) {
     const zip = openZip(req.abs);
     const xml = zip ? readable(zip.text('content.xml')) : null;
     if (req.isCurrent() && xml) {
-      const page = documentPage(zip, xml, req.position, req.width, req.view);
+      const page = documentPage(zip, xml, req.position, width, req.view);
       const loadImage = imageLoader(zip);
       // The frame first: the sanitizer strips the class attributes the document's own
       // formatting is written against, and inlining keeps the structure but loses it.
       const framed = renderFrame(el, {
-        html: page.html, css: page.css, width: req.width, loadImage,
-        onFail: () => { renderHtml(el, { html: page.html, width: req.width, loadImage }); },
+        html: page.html, css: page.css, width, grow: zoom > 1, page: true, loadImage,
+        onFail: () => { renderHtml(el, { html: page.html, width, loadImage }); },
       });
       if (framed !== false) return framed;
-      const done = renderHtml(el, { html: page.html, width: req.width, loadImage });
+      const done = renderHtml(el, { html: page.html, width, loadImage });
       if (done !== false) return done;
     }
   }
@@ -471,15 +481,15 @@ async function render(el, req) {
   if (kind === 'odp') {
     const zip = openZip(req.abs);
     const xml = zip ? readable(zip.text('content.xml')) : null;
-    const page = xml && req.isCurrent() ? slidePage(zip, xml, req.position, req.width) : null;
+    const page = xml && req.isCurrent() ? slidePage(zip, xml, req.position, width) : null;
     if (page) {
       const loadImage = imageLoader(zip);
       const flat = () => readSection(req.abs, req.ext, req.position)
-        .then((sec) => sec && renderLines(el, { title: sec.title, body: sec.body, width: req.width }));
+        .then((sec) => sec && renderLines(el, { title: sec.title, body: sec.body, width: req.width, zoom }));
       // A frame the app refuses must still leave something readable: renderFrame reports its
       // own success before the document has laid out, so the tail below is never reached.
       const framed = renderFrame(el, {
-        html: page.html, css: page.css, width: req.width, loadImage, onFail: flat,
+        html: page.html, css: page.css, width, grow: zoom > 1, page: true, loadImage, onFail: flat,
       });
       if (framed !== false) return framed;
     }
@@ -487,13 +497,15 @@ async function render(el, req) {
 
   const sec = await readSection(req.abs, req.ext, req.position);
   if (!req.isCurrent() || !sec) return false;
-  return renderLines(el, { title: sec.title, body: sec.body, width: req.width });
+  return renderLines(el, { title: sec.title, body: sec.body, width: req.width, zoom });
 }
 
 module.exports = {
   id: 'odf',
   exts: ['odt', 'ods', 'odp', 'odg', 'ott', 'ots', 'otp', 'otg'],
   anchorKind: null,
+  capabilities: (ext) => ({ paged: true, zoomable: true, scrollable: kindOf(ext) !== 'odp' }),
+  count,
   outline: (abs, ext) => readOutline(abs, ext),
   render,
   readOutline,

@@ -65,14 +65,22 @@ function inlineImagesAsData(html, load) {
 }
 
 const FRAME_MIN = 80;
-const FRAME_MAX = 2000;
+// Room for everything the readers cap themselves at — a sheet is 100 rows, a preview 60 lines.
+// Short of it the frame is exactly its content and the embed is the one thing that scrolls;
+// past it the frame scrolls too, which is the price of a document that has no sections at all.
+const FRAME_MAX = 6000;
+const FRAME_WIDE = 4000; // a sheet wider than this is scrolled inside the frame after all
+
+const FRAME_PAD = 8; // room around loose markup; a page that draws its own sheet asks for none
 
 // A self-contained document for the frame: the page's own stylesheet and markup, untouched.
-// `base` keeps relative links from resolving against the app.
-const frameDoc = (html, css) => '<!doctype html><html><head><meta charset="utf-8">'
+// `base` keeps relative links from resolving against the app. The zoom comes last, after a
+// page that scales itself to the box (a slide, a document page) has had its say.
+const frameDoc = (html, css, zoom, pad = FRAME_PAD) => '<!doctype html><html><head><meta charset="utf-8">'
   + '<base target="_blank">'
-  + '<style>html,body{margin:0;padding:8px;overflow-x:auto}img,table,pre{max-width:100%}</style>'
+  + '<style>html,body{margin:0;padding:' + pad + 'px;overflow-x:auto}img,table,pre{max-width:100%}</style>'
   + (css ? '<style>' + String(css) + '</style>' : '')
+  + (zoom && zoom !== 1 ? '<style>html{zoom:' + zoom + '}</style>' : '')
   + '</head><body>' + html + '</body></html>';
 
 // Render a document the way a browser would: inside an iframe, which is the only real style
@@ -82,8 +90,11 @@ const frameDoc = (html, css) => '<!doctype html><html><head><meta charset="utf-8
 //
 // No `allow-scripts`, so nothing in the document executes; `allow-same-origin` only so the
 // height can be measured once it has laid out.
-function renderFrame(el, { html, css, width, loadImage, onFail }) {
+function renderFrame(el, { html, css, width, zoom, grow, page, loadImage, onFail }) {
   if (typeof document === 'undefined' || !el.createEl) return false;
+  // A page is laid out to exactly the width it was given, so padding around it is width the
+  // document does not have: it scrolls sideways by the padding and loses as much off its edge.
+  const pad = page ? 0 : FRAME_PAD;
   let frame;
   try {
     frame = el.createEl('iframe');
@@ -91,10 +102,10 @@ function renderFrame(el, { html, css, width, loadImage, onFail }) {
     frame.setAttribute('sandbox', 'allow-same-origin');
     frame.setAttribute('referrerpolicy', 'no-referrer');
     frame.style.width = width + 'px';
-    frame.style.maxWidth = '100%';
+    // A frame kept inside the box would answer a zoom with its own scrollbar; asked for more
+    // room than there is, it lets the embed scroll to it, the way a zoomed page does.
+    frame.style.maxWidth = grow || zoom > 1 ? 'none' : '100%';
     frame.style.height = FRAME_MIN + 'px';
-    frame.style.border = '0';
-    frame.style.display = 'block';
     // Whether the app's CSP lets a srcdoc frame load at all can only be learned here. An empty
     // or unreadable frame is a blank hole in the note, so it hands back to the caller's own
     // rendering instead.
@@ -110,11 +121,32 @@ function renderFrame(el, { html, css, width, loadImage, onFail }) {
       // reports its unscaled height to scrollHeight, and the frame would be twice as tall as
       // what it draws.
       let height = 0;
-      try { height = body.getBoundingClientRect().height; } catch { height = 0; }
-      frame.style.height = Math.max(FRAME_MIN, Math.min(FRAME_MAX, (height || body.scrollHeight) + 16)) + 'px';
+      let content = 0;
+      try {
+        const box = body.getBoundingClientRect();
+        height = box.height;
+        // The same measure for the same reason: scrollWidth reports what a page that scales
+        // itself to the box is written at, not what it is drawn at.
+        content = box.width;
+        for (const child of body.children || []) content = Math.max(content, child.getBoundingClientRect().width);
+      } catch { height = 0; }
+      const wantHeight = (height || body.scrollHeight) + 2 * pad + 2;
+      const wantWidth = content + 2 * pad + 2;
+      frame.style.height = Math.max(FRAME_MIN, Math.min(FRAME_MAX, wantHeight)) + 'px';
+      // A frame grown to its content leaves the scrolling to the embed, whose edges are on
+      // screen. Its own bar would sit at its bottom — for a long sheet, far below the fold.
+      if (content > width + 1) {
+        frame.style.width = Math.min(FRAME_WIDE, wantWidth) + 'px';
+        frame.style.maxWidth = 'none';
+      }
+      // And with the room it asked for, nothing inside it may scroll: a document left with a
+      // few pixels of slack answers the wheel itself, and the embed's own scroll never moves.
+      const capped = wantHeight > FRAME_MAX || wantWidth > FRAME_WIDE;
+      const root = frame.contentDocument.documentElement;
+      if (root) root.style.overflow = capped ? 'auto' : 'hidden';
     });
     const body = expandSelfClosing(html);
-    frame.srcdoc = frameDoc(loadImage ? inlineImagesAsData(body, loadImage) : body, css);
+    frame.srcdoc = frameDoc(loadImage ? inlineImagesAsData(body, loadImage) : body, css, zoom, pad);
   } catch {
     if (frame && frame.remove) frame.remove();
     return false;
@@ -176,12 +208,13 @@ function scopeCss(css, scope) {
 // Markdown and HTML are already documents; showing them as a list of lines throws away the
 // headings, lists and code blocks that are half the content. Both routes are feature-detected
 // so an older app (and the test stubs) fall back to plain lines rather than breaking.
-async function renderMarkdown(el, { markdown, width, app, component, loadImage }) {
+async function renderMarkdown(el, { markdown, width, zoom, app, component, loadImage }) {
   const R = obsidian.MarkdownRenderer;
   const render = R && (R.render || R.renderMarkdown);
   if (!render || !component) return false;
   const box = el.createDiv({ cls: 'reference-linker-rendered markdown-rendered' });
   box.style.maxWidth = width + 'px';
+  scale(box, zoom);
   try {
     // render(app, md, el, sourcePath, component) is current; renderMarkdown drops the app.
     if (R.render) await R.render(app, markdown, box, '', component);
@@ -193,7 +226,12 @@ async function renderMarkdown(el, { markdown, width, app, component, loadImage }
   return revoker(loadImage ? inlineImages(box, loadImage) : []);
 }
 
-function renderHtml(el, { html, width, loadImage, css }) {
+// Text has no raster to redraw, so the box itself is scaled — absolute font sizes and all.
+function scale(box, zoom) {
+  if (zoom && zoom !== 1) box.style.zoom = zoom;
+}
+
+function renderHtml(el, { html, width, zoom, loadImage, css }) {
   if (typeof obsidian.sanitizeHTMLToDom !== 'function') return false;
   // A class unique to this render, so one embed's page CSS scopes to its own box and not to
   // every other preview on the page.
@@ -205,6 +243,7 @@ function renderHtml(el, { html, width, loadImage, css }) {
   // light code blocks dark — the document's design has to win inside its own preview.
   const box = el.createDiv({ cls: 'reference-linker-rendered ' + (scoped ? '' : 'markdown-rendered ') + scopeCls });
   box.style.maxWidth = width + 'px';
+  scale(box, zoom);
   try {
     // The sanitizer strips <style>, so the scoped CSS is added as a real element it never sees.
     if (scoped) { const style = document.createElement('style'); style.textContent = scoped; box.appendChild(style); }
@@ -216,9 +255,10 @@ function renderHtml(el, { html, width, loadImage, css }) {
   return revoker(loadImage ? inlineImages(box, loadImage) : []);
 }
 
-function renderLines(el, { title, body, width }) {
+function renderLines(el, { title, body, width, zoom }) {
   const box = el.createDiv({ cls: 'reference-linker-doc' });
   box.style.maxWidth = width + 'px';
+  scale(box, zoom);
   if (title) box.createDiv({ cls: 'reference-linker-doc-title', text: title });
   for (const line of body || []) box.createDiv({ cls: 'reference-linker-doc-line', text: line });
   if (!title && !(body || []).length) {
