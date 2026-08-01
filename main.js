@@ -7308,17 +7308,26 @@ var require_actualize = __commonJS({
         { decorations: (v) => v.decorations }
       );
     }
+    async function processNote(plugin, file, transform) {
+      let count = 0;
+      await plugin.app.vault.process(file, (data) => {
+        const out = transform(plugin, data);
+        count = out.count;
+        return count ? out.text : data;
+      });
+      return count;
+    }
     async function rewriteActiveNote(plugin, transform, noticeKey) {
       const view = plugin.app.workspace.getActiveViewOfType(MarkdownView2);
       const editor = view && view.editor;
       if (editor) {
-        const { text: text2, count: count2 } = transform(plugin, editor.getValue());
-        if (count2) {
+        const { text, count } = transform(plugin, editor.getValue());
+        if (count) {
           const cur = editor.getCursor();
-          editor.setValue(text2);
+          editor.setValue(text);
           editor.setCursor(cur);
         }
-        new Notice2(t2(noticeKey, { n: count2 }));
+        new Notice2(t2(noticeKey, { n: count }));
         return;
       }
       const file = plugin.app.workspace.getActiveFile();
@@ -7326,17 +7335,13 @@ var require_actualize = __commonJS({
         new Notice2(t2(noticeKey, { n: 0 }));
         return;
       }
-      const { text, count } = transform(plugin, await plugin.app.vault.read(file));
-      if (count)
-        await plugin.app.vault.modify(file, text);
-      new Notice2(t2(noticeKey, { n: count }));
+      new Notice2(t2(noticeKey, { n: await processNote(plugin, file, transform) }));
     }
     async function rewriteVault(plugin, transform, noticeKey) {
       let files = 0, total = 0;
       for (const f of plugin.app.vault.getMarkdownFiles()) {
-        const { text, count } = transform(plugin, await plugin.app.vault.read(f));
+        const count = await processNote(plugin, f, transform);
         if (count) {
-          await plugin.app.vault.modify(f, text);
           files++;
           total += count;
         }
