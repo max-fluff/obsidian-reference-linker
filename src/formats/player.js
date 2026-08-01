@@ -55,8 +55,7 @@ function mountPlayer(el, media, { video, width }) {
   const time = row.createSpan({ cls: 'reference-linker-player-time', text: timecode(0) });
   const sound = button(row, 'volume-2', t('player.mute'), () => {
     media.muted = !media.muted;
-    setIcon(sound, media.muted ? 'volume-x' : 'volume-2');
-    fill(volume, media.muted ? 0 : media.volume);
+    showSound();
   });
   const volume = slider(row, 'volume', t('player.volume'), 100, 100);
   if (video) button(row, 'maximize', t('player.fullscreen'), () => { if (media.requestFullscreen) media.requestFullscreen(); });
@@ -65,6 +64,12 @@ function mountPlayer(el, media, { video, width }) {
   const nudge = (by) => { if (playable(media)) media.currentTime = Math.min(media.duration, Math.max(0, media.currentTime + by)); };
 
   let dragging = false;
+  const showSound = () => {
+    const off = media.muted || media.volume === 0;
+    setIcon(sound, off ? 'volume-x' : 'volume-2');
+    volume.toggleClass('is-off', off);
+    fill(volume, off ? 0 : media.volume);
+  };
   const show = () => {
     const total = playable(media) ? timecode(media.duration) : '--:--';
     time.setText(timecode(media.currentTime) + ' / ' + total);
@@ -87,8 +92,7 @@ function mountPlayer(el, media, { video, width }) {
   volume.addEventListener('input', () => {
     media.volume = Number(volume.value) / 100;
     media.muted = media.volume === 0;
-    setIcon(sound, media.muted ? 'volume-x' : 'volume-2');
-    fill(volume, media.volume);
+    showSound();
   });
   if (video) media.addEventListener('click', toggle);
   row.addEventListener('keydown', (evt) => {
@@ -102,7 +106,7 @@ function mountPlayer(el, media, { video, width }) {
     evt.stopPropagation();
   });
 
-  fill(volume, 1);
+  showSound();
   show();
   return true;
 }

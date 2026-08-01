@@ -3840,8 +3840,7 @@ var require_player = __commonJS({
       const time = row.createSpan({ cls: "reference-linker-player-time", text: timecode(0) });
       const sound = button(row, "volume-2", t2("player.mute"), () => {
         media.muted = !media.muted;
-        setIcon(sound, media.muted ? "volume-x" : "volume-2");
-        fill(volume, media.muted ? 0 : media.volume);
+        showSound();
       });
       const volume = slider(row, "volume", t2("player.volume"), 100, 100);
       if (video)
@@ -3861,6 +3860,12 @@ var require_player = __commonJS({
           media.currentTime = Math.min(media.duration, Math.max(0, media.currentTime + by));
       };
       let dragging = false;
+      const showSound = () => {
+        const off = media.muted || media.volume === 0;
+        setIcon(sound, off ? "volume-x" : "volume-2");
+        volume.toggleClass("is-off", off);
+        fill(volume, off ? 0 : media.volume);
+      };
       const show = () => {
         const total = playable(media) ? timecode(media.duration) : "--:--";
         time.setText(timecode(media.currentTime) + " / " + total);
@@ -3886,8 +3891,7 @@ var require_player = __commonJS({
       volume.addEventListener("input", () => {
         media.volume = Number(volume.value) / 100;
         media.muted = media.volume === 0;
-        setIcon(sound, media.muted ? "volume-x" : "volume-2");
-        fill(volume, media.volume);
+        showSound();
       });
       if (video)
         media.addEventListener("click", toggle);
@@ -3906,7 +3910,7 @@ var require_player = __commonJS({
         evt.preventDefault();
         evt.stopPropagation();
       });
-      fill(volume, 1);
+      showSound();
       show();
       return true;
     }

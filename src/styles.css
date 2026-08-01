@@ -244,13 +244,14 @@ settings:
   width: 56px;
 }
 
-/* A range input paints one track, so what has been played is drawn as a gradient stopping at
-   --%p%-player-fill, which the player keeps current. */
+/* Obsidian's own slider, down to the variables its settings sliders read: a round thumb on a
+   thin track. A range input paints one track, so what has been played is a gradient stopping
+   at --%p%-player-fill, which the player keeps current. */
 .%p%-player-seek,
 .%p%-player-volume {
   appearance: none;
   -webkit-appearance: none;
-  height: 12px;
+  height: var(--slider-thumb-height, 14px);
   margin: 0;
   background: transparent;
   cursor: pointer;
@@ -258,8 +259,11 @@ settings:
 
 .%p%-player-seek::-webkit-slider-runnable-track,
 .%p%-player-volume::-webkit-slider-runnable-track {
-  height: 4px;
+  height: var(--slider-track-height, 3px);
+  /* Its own margin centres it: the track is laid at the top of the box otherwise. */
+  margin: calc((var(--slider-thumb-height, 14px) - var(--slider-track-height, 3px)) / 2) 0;
   border-radius: var(--radius-s);
+  cursor: pointer;
   background: linear-gradient(
     to right,
     var(--interactive-accent) 0 var(--%p%-player-fill, 0%),
@@ -270,10 +274,11 @@ settings:
 .%p%-player-volume::-webkit-slider-thumb {
   appearance: none;
   -webkit-appearance: none;
-  width: 10px;
-  height: 10px;
-  margin-top: -3px;
-  border-radius: 50%;
+  width: var(--slider-thumb-width, 14px);
+  height: var(--slider-thumb-height, 14px);
+  margin-top: calc((var(--slider-track-height, 3px) - var(--slider-thumb-height, 14px)) / 2);
+  border-radius: var(--slider-thumb-radius, 50%);
+  cursor: pointer;
   background: var(--interactive-accent);
 }
 
@@ -282,6 +287,11 @@ settings:
 .%p%-player-seek:focus-visible::-webkit-slider-thumb,
 .%p%-player-volume:focus-visible::-webkit-slider-thumb {
   background: var(--interactive-accent-hover);
+}
+
+/* Silence is the whole control being off, thumb and all — not a grey track with a lit knob. */
+.%p%-player-volume.is-off::-webkit-slider-thumb {
+  background: var(--background-modifier-border);
 }
 
 .%p%-player-time {

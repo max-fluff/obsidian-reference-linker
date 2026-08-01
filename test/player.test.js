@@ -27,6 +27,7 @@ const node = () => {
   n.createDiv = (o) => n.createEl('div', o);
   n.createSpan = (o) => n.createEl('span', o);
   n.setText = (s) => { n.text = s; };
+  n.toggleClass = (cls, on) => { n.classes = Object.assign({}, n.classes, { [cls]: !!on }); };
   n.addEventListener = (name, fn) => { (n.listeners[name] = n.listeners[name] || []).push(fn); };
   n.fire = (name, ev) => (n.listeners[name] || []).slice()
     .forEach((f) => f(Object.assign({ preventDefault() {}, stopPropagation() {} }, ev)));
@@ -115,12 +116,14 @@ describe('the player row', () => {
     assert.strictEqual(p.seek.style['--reference-linker-player-fill'], '25%');
   });
 
-  it('empties the volume slider when muted, and fills it again when it speaks', () => {
+  it('empties the volume slider when muted, thumb and all, and fills it again when it speaks', () => {
     const p = player();
     p.sound.click();
     assert.strictEqual(p.volume.style['--reference-linker-player-fill'], '0%');
+    assert.strictEqual(p.volume.classes['is-off'], true, 'the track went grey but the thumb stayed lit');
     p.sound.click();
     assert.strictEqual(p.volume.style['--reference-linker-player-fill'], '100%');
+    assert.strictEqual(p.volume.classes['is-off'], false);
   });
 
   it('mutes and unmutes', () => {
