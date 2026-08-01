@@ -7,7 +7,7 @@ const { describe, it, assert } = require('../src/shared/testing/harness');
 const { installStubs } = require('../src/shared/testing/stubs');
 
 installStubs();
-const { mountPlayer, timecode } = require('../src/formats/player');
+const { mountPlayer, timecode, parseVolume, formatVolume } = require('../src/formats/player');
 
 const node = () => {
   const style = { setProperty(k, v) { style[k] = v; } };
@@ -27,6 +27,7 @@ const node = () => {
   n.createDiv = (o) => n.createEl('div', o);
   n.createSpan = (o) => n.createEl('span', o);
   n.setText = (s) => { n.text = s; };
+  n.setAttribute = (k, v) => { n.attrs[k] = v; };
   n.toggleClass = (cls, on) => { n.classes = Object.assign({}, n.classes, { [cls]: !!on }); };
   n.addEventListener = (name, fn) => { (n.listeners[name] = n.listeners[name] || []).push(fn); };
   n.fire = (name, ev) => (n.listeners[name] || []).slice()
@@ -48,8 +49,8 @@ const player = (duration = 200, video = false) => {
   const media = fakeMedia(duration);
   assert.strictEqual(mountPlayer(el, media, { video }), true);
   const row = el.children[0];
-  const [play, seek, time, sound, volume] = row.children;
-  return { row, media, play, seek, time, sound, volume, full: row.children[5] };
+  const [play, seek, time, sound, volume, level] = row.children;
+  return { row, media, play, seek, time, sound, volume, level, full: row.children[6] };
 };
 
 describe('timecode', () => {
@@ -64,6 +65,30 @@ describe('timecode', () => {
   it('survives what a media element reports before it knows anything', () => {
     assert.strictEqual(timecode(NaN), '0:00');
     assert.strictEqual(timecode(-5), '0:00');
+  });
+});
+
+describe('the sound a block asks for', () => {
+  it('reads a percentage, with or without its sign', () => {
+    assert.deepStrictEqual(parseVolume('40%'), { volume: 0.4, muted: false });
+    assert.deepStrictEqual(parseVolume('40'), { volume: 0.4, muted: false });
+  });
+
+  it('reads silence as silence, not as nothing said', () => {
+    assert.deepStrictEqual(parseVolume('off'), { volume: 1, muted: true });
+    assert.deepStrictEqual(parseVolume('0%'), { volume: 0, muted: true });
+  });
+
+  it('is nothing said when the line is missing or not a volume', () => {
+    assert.strictEqual(parseVolume(''), null);
+    assert.strictEqual(parseVolume(undefined), null);
+    assert.strictEqual(parseVolume('loud'), null);
+  });
+
+  it('writes back what it reads', () => {
+    assert.strictEqual(formatVolume({ volume: 0.4, muted: false }), '40%');
+    assert.strictEqual(formatVolume({ volume: 1, muted: true }), 'off');
+    assert.deepStrictEqual(parseVolume(formatVolume({ volume: 0.4, muted: false })), { volume: 0.4, muted: false });
   });
 });
 
@@ -109,26 +134,42 @@ describe('the player row', () => {
   });
 
   it('paints the slider up to where the recording has got to', () => {
-    // A range input draws one track, so what is behind the thumb is the player's own doing.
     const p = player(200);
     p.media.currentTime = 50;
     p.media.fire('timeupdate');
     assert.strictEqual(p.seek.style['--reference-linker-player-fill'], '25%');
   });
 
-  it('empties the volume slider when muted, thumb and all, and fills it again when it speaks', () => {
+  it('empties the volume bar when muted, and fills it again when it speaks', () => {
     const p = player();
     p.sound.click();
     assert.strictEqual(p.volume.style['--reference-linker-player-fill'], '0%');
-    assert.strictEqual(p.volume.classes['is-off'], true, 'the track went grey but the thumb stayed lit');
     p.sound.click();
     assert.strictEqual(p.volume.style['--reference-linker-player-fill'], '100%');
-    assert.strictEqual(p.volume.classes['is-off'], false);
   });
 
-  it('marks a slider the pointer is on, so the thumb answers wherever on it the pointer sits', () => {
-    // A :hover that has to reach ::-webkit-slider-thumb answers one way over the track and
-    // another over the thumb itself; a class on the input answers the same either way.
+  it('follows a volume it did not set itself', () => {
+    // The block's own volume is applied before the row is drawn, so the row has to follow it.
+    const p = player();
+    p.media.volume = 0.25;
+    p.media.fire('volumechange');
+    assert.strictEqual(p.level.text, '25%');
+    assert.strictEqual(p.volume.value, '25');
+  });
+
+  it('says the volume it is at, in the row', () => {
+    const p = player();
+    assert.strictEqual(p.level.text, '100%');
+    p.volume.value = '40';
+    p.volume.fire('input');
+    assert.strictEqual(p.level.text, '40%');
+    p.sound.click();
+    assert.strictEqual(p.level.text, '0%');
+  });
+
+  it('marks a slider the pointer is on, so the bar answers wherever on it the pointer sits', () => {
+    // A :hover reaching a browser's own slider parts answers differently over the track and
+    // over the thumb; a class on the input answers the same either way.
     const p = player();
     p.seek.fire('mouseenter');
     assert.strictEqual(p.seek.classes['is-hot'], true);

@@ -5,6 +5,7 @@
 
 const { Menu } = require('obsidian');
 const formats = require('./formats');
+const { timecode, formatVolume } = require('./formats/player');
 const { toolButton } = require('./shared/embed-frame');
 const { t } = require('./shared/i18n');
 const vs = require('./viewer-state');
@@ -12,7 +13,6 @@ const vs = require('./viewer-state');
 const ZOOM_DEBOUNCE = 120; // ms; a PDF page is rasterised on every step of the ladder
 
 class EmbedViewer {
-  // opts: plugin, spec, component, container, width, label.
   constructor(opts) {
     this.opts = opts;
     this.st = null;
@@ -32,8 +32,6 @@ class EmbedViewer {
       this.key = key;
       this.tools = tools;
       this.body = body;
-      // A range is a scroll of its own positions: it doesn't page, but its contents still lead
-      // somewhere — down the scroll rather than to another position.
       this.ranged = res.to > res.position;
       const caps = formats.capabilities(res.ext);
       this.st = vs.initialState({
@@ -63,8 +61,6 @@ class EmbedViewer {
   build() {
     const tools = this.tools;
     tools.empty();
-    // The row is rebuilt from the state, so what the new one has no place for must not be left
-    // pointing at the old one's detached elements.
     this.navEl = null;
     this.outlineBtn = null;
     this.posEl = null;
@@ -93,12 +89,10 @@ class EmbedViewer {
     this.wire();
   }
 
-  // Listeners belong to the body element, which outlives a rebuild of the toolbar.
   wire() {
     if (this.wired === this.body || !(this.st.paged || this.st.zoomable)) return;
     this.wired = this.body;
-    // Focusable, or the keys below have nobody to reach; named, or a screen reader announces
-    // the focus stop as an unlabelled group.
+    // Focusable, or the keys below have nobody to reach.
     this.body.tabIndex = 0;
     this.body.setAttribute('role', 'group');
     this.body.setAttribute('aria-label', this.opts.label());
@@ -111,8 +105,6 @@ class EmbedViewer {
     return toolButton(parent, 'reference-linker', icon, label, onClick);
   }
 
-  // The document's own outline, as the index already read it. A range can only lead to what it
-  // shows: the rest of the document is not this block's to open.
   sections() {
     const plugin = this.opts.plugin;
     if (!this.res || typeof plugin.entriesIn !== 'function') return [];
@@ -137,8 +129,6 @@ class EmbedViewer {
     menu.showAtMouseEvent(evt);
   }
 
-  // A paged embed changes what it draws; a range already holds the position, so it scrolls to
-  // the slot — which is also what makes the observer draw it.
   goTo(position) {
     if (!this.ranged) { this.apply({ type: 'goto', value: position }); return; }
     const slot = (this.slots || []).find((s) => s.position === position);
@@ -148,8 +138,6 @@ class EmbedViewer {
   sync() {
     const st = this.st;
     if (this.navEl) {
-      // Both answers arrive late: the count is read from the file, and the index may still have
-      // been reading it when the block was drawn.
       const pages = st.paged && st.count !== 1;
       const outline = this.sections().length > 1;
       this.outlineBtn.toggleClass('is-hidden', !outline);
@@ -221,6 +209,11 @@ class EmbedViewer {
     if (this.st !== before) evt.preventDefault();
   }
 
+  sound() {
+    const media = this.body && this.body.querySelector && this.body.querySelector('audio, video');
+    return media ? { time: timecode(media.currentTime), volume: formatVolume(media) } : null;
+  }
+
   size() {
     const box = this.opts.container.parentElement || this.opts.container;
     return vs.renderSize(this.st, this.opts.width, box.clientWidth - 2);
@@ -230,8 +223,7 @@ class EmbedViewer {
     const token = ++this.renderId;
     const res = this.res;
     const size = this.size();
-    // The box is the reader's, not the content's: zooming scrolls inside it rather than
-    // stretching the embed and the toolbar along with the page.
+    // Zooming scrolls inside the box rather than stretching the embed and its toolbar.
     this.body.style.maxWidth = size.width + 'px';
     const from = this.st.paged ? this.st.position : res.position;
     const to = this.st.paged ? this.st.position : res.to;
@@ -251,6 +243,7 @@ class EmbedViewer {
         position,
         width: size.width,
         zoom: size.zoom,
+        volume: this.opts.spec.volume,
         view: this.opts.plugin.settings.documentView,
         app: this.opts.plugin.app,
         component: this.opts.component,
@@ -273,8 +266,6 @@ class EmbedViewer {
       slots.push({ el, position: p });
     }
 
-    // The first position decides whether anything can be shown at all; the rest of a range is
-    // drawn as it is scrolled to, so a twenty-page span doesn't rasterise twenty pages at once.
     const drew = await paint(slots[0].el, slots[0].position);
     if (token !== this.renderId) { drop(); return true; }
     if (!drew) { drop(); return false; }
@@ -287,14 +278,12 @@ class EmbedViewer {
     return true;
   }
 
-  // A frame only loads once it is in the document, so the new position cannot be made ready
-  // before it is shown. The old one stays in the flow and holds the box until it is.
+  // A frame only loads once it is in the document, so the old position holds the box until the
+  // new one has loaded.
   swap(holder, token) {
     if (!this.body.firstElementChild) { this.body.appendChild(holder); return; }
     holder.addClass('reference-linker-embed-pending');
     this.body.appendChild(holder);
-    // Everything else goes, not just the position this one replaces: a turn made while another
-    // was still loading leaves its half-drawn holder behind.
     const show = () => {
       if (token !== this.renderId || holder.parentElement !== this.body) return;
       for (const el of Array.from(this.body.children)) if (el !== holder) el.remove();
@@ -308,8 +297,6 @@ class EmbedViewer {
     else setTimeout(show, 1200);
   }
 
-  // Each slot painted when it comes near the viewport. Without IntersectionObserver they are
-  // all painted at once, which is what a range did before.
   watch(slots, paint) {
     if (typeof IntersectionObserver !== 'function') {
       slots.forEach((s) => paint(s.el, s.position));

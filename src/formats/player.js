@@ -9,7 +9,6 @@ const { t } = require('../shared/i18n');
 const STEPS = 1000; // the seek slider's resolution, in place of a duration it may not know yet
 const NUDGE = 5; // seconds an arrow key moves
 
-// Seconds as a timecode: 125 reads as 2:05, an hour in as 1:02:05.
 function timecode(n) {
   const s = Math.max(0, Math.floor(Number(n) || 0));
   const mm = Math.floor(s / 60);
@@ -18,6 +17,18 @@ function timecode(n) {
 }
 
 const playable = (media) => Number.isFinite(media.duration) && media.duration > 0;
+
+function parseVolume(raw) {
+  const s = String(raw == null ? '' : raw).trim().toLowerCase();
+  if (!s) return null;
+  if (s === 'off' || s === 'mute' || s === 'muted') return { volume: 1, muted: true };
+  const m = /^(\d+(?:\.\d+)?)\s*%?$/.exec(s);
+  if (!m) return null;
+  const volume = Math.min(100, Math.max(0, parseFloat(m[1]))) / 100;
+  return { volume, muted: volume === 0 };
+}
+
+const formatVolume = (media) => (media.muted || !media.volume ? 'off' : Math.round(media.volume * 100) + '%');
 
 function button(row, icon, label, onClick) {
   const b = row.createEl('button', {
@@ -29,8 +40,8 @@ function button(row, icon, label, onClick) {
   return b;
 }
 
-// Whether the pointer is on a slider is kept on the input itself: a :hover that has to reach
-// ::-webkit-slider-thumb answers differently over the track and over the thumb.
+// The pointer state lives on the input: a :hover reaching ::-webkit-slider-thumb answers
+// differently over the track and over the thumb.
 function slider(row, cls, label, max, value) {
   const el = row.createEl('input', {
     cls: 'reference-linker-player-' + cls,
@@ -42,18 +53,14 @@ function slider(row, cls, label, max, value) {
   return el;
 }
 
-// How much of a slider is behind its thumb. A range input paints one track, so the part already
-// played is drawn from this rather than by the browser.
+// A range input paints one track, so what is behind the thumb is drawn from this.
 const fill = (el, part) => el.style.setProperty('--reference-linker-player-fill',
   Math.max(0, Math.min(100, part * 100)) + '%');
 
-// Draws the row under `media` and wires the two to each other. Returns false where the app's
-// DOM helpers aren't there, so the caller can fall back to the browser's own controls.
+// False where the app's DOM helpers aren't there, so the caller keeps the browser's controls.
 function mountPlayer(el, media, { video, width }) {
   if (!el.createDiv || !el.createEl) return false;
   const row = el.createDiv({ cls: 'reference-linker-player' });
-  // An audio element with no controls draws nothing, so the row is the only thing with a width:
-  // left to its content it shrinks to the two sliders' minimum.
   if (width) { row.style.width = width + 'px'; row.style.maxWidth = '100%'; }
   row.tabIndex = 0;
 
@@ -65,6 +72,7 @@ function mountPlayer(el, media, { video, width }) {
     showSound();
   });
   const volume = slider(row, 'volume', t('player.volume'), 100, 100);
+  const level = row.createSpan({ cls: 'reference-linker-player-level' });
   if (video) button(row, 'maximize', t('player.fullscreen'), () => { if (media.requestFullscreen) media.requestFullscreen(); });
 
   const toggle = () => { if (media.paused) media.play().catch(() => {}); else media.pause(); };
@@ -74,8 +82,9 @@ function mountPlayer(el, media, { video, width }) {
   const showSound = () => {
     const off = media.muted || media.volume === 0;
     setIcon(sound, off ? 'volume-x' : 'volume-2');
-    volume.toggleClass('is-off', off);
+    volume.value = String(Math.round(media.volume * 100));
     fill(volume, off ? 0 : media.volume);
+    level.setText(off ? '0%' : Math.round(media.volume * 100) + '%');
   };
   const show = () => {
     const total = playable(media) ? timecode(media.duration) : '--:--';
@@ -85,6 +94,7 @@ function mountPlayer(el, media, { video, width }) {
     fill(seek, dragging ? Number(seek.value) / STEPS : at);
   };
 
+  media.addEventListener('volumechange', showSound);
   media.addEventListener('loadedmetadata', show);
   media.addEventListener('timeupdate', show);
   media.addEventListener('play', () => setIcon(play, 'pause'));
@@ -118,4 +128,4 @@ function mountPlayer(el, media, { video, width }) {
   return true;
 }
 
-module.exports = { mountPlayer, timecode };
+module.exports = { mountPlayer, timecode, parseVolume, formatVolume };

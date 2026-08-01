@@ -37,7 +37,6 @@ const rendered = (height) => ({
   getBoundingClientRect: () => ({ width: 600, height }),
 });
 
-// The box a preview sits in, as tall as the embed body's max-height says.
 const withDocument = (fn, boxMaxHeight) => () => {
   const had = { document: global.document, style: global.getComputedStyle };
   global.document = { createElement: () => ({}) };
@@ -66,8 +65,7 @@ describe('frame document', () => {
   });
 
   it('lets a sheet keep the width its columns say', () => {
-    // The frame caps tables so a stray wide one can't blow the box out; a spreadsheet is the
-    // case where that cap is wrong, and its own rules are written after the cap to undo it.
+    // The frame caps tables; a spreadsheet is where that cap is wrong, so its own rules undo it.
     const { SHEET_RULES } = require('../src/formats/css');
     const doc = frameDoc('<table></table>', SHEET_RULES, 1, 8);
     assert.ok(doc.includes('width:max-content'), 'the sheet did not ask for its own width');
@@ -76,9 +74,7 @@ describe('frame document', () => {
   });
 
   it('leaves the scrolling to the frame’s own window', () => {
-    // On the body instead, the bars sit at the foot of the whole document rather than at the
-    // frame's edge: for a long sheet that is below the fold, and a gesture over a frame never
-    // reaches anything outside it.
+    // On the body the bars sit at the foot of the whole document, below the fold for a sheet.
     const doc = frameDoc('<table></table>', '', 1, 8);
     assert.ok(doc.includes('html{overflow:auto}'), doc.slice(0, 240));
     assert.ok(!/body\{[^}]*overflow/.test(doc), 'the body scrolls, so its bars are wherever it ends');
@@ -133,8 +129,7 @@ describe('renderFrame', () => {
   }));
 
   it('gives a page no padding, which it would scroll sideways by and lose off its edge', withDocument(() => {
-    // A slide is laid out to exactly the width it was given: 8px of frame padding is 16px the
-    // document does not have, and the frame answers with a scrollbar that moves nothing useful.
+    // A slide is laid out to the width it was given: padding is 16px the document does not have.
     const page = el();
     renderFrame(page, { html: '<div class="slide">x</div>', css: '', width: 600, page: true });
     assert.ok(page.children[0].srcdoc.includes('padding:0px'), page.children[0].srcdoc.slice(0, 200));
@@ -145,9 +140,7 @@ describe('renderFrame', () => {
   }));
 
   it('never grows taller than the box it is shown in', withDocument(() => {
-    // Taller than the box, the frame's own scrollbars sit below the fold: the horizontal one is
-    // out of reach, and a middle-click autoscroll — which never crosses into a frame — has
-    // nothing under the pointer that can move.
+    // Taller than the box, its own scrollbars sit below the fold, out of reach.
     const root = el();
     root.parentElement = null;
     renderFrame(root, { html: '<table></table>', css: '', width: 600 });

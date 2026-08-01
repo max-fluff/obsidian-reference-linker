@@ -5,7 +5,7 @@
 
 const fs = require('fs');
 const nodePath = require('path');
-const { mountPlayer, timecode } = require('./player');
+const { mountPlayer, timecode, parseVolume } = require('./player');
 
 const VIDEO = { mp4: 'video/mp4', m4v: 'video/mp4', webm: 'video/webm', mkv: 'video/x-matroska', mov: 'video/quicktime', ogv: 'video/ogg' };
 const AUDIO = { mp3: 'audio/mpeg', m4a: 'audio/mp4', wav: 'audio/wav', flac: 'audio/flac', ogg: 'audio/ogg', opus: 'audio/ogg', aac: 'audio/aac' };
@@ -46,6 +46,9 @@ async function render(el, req) {
   if (!fs.existsSync(req.abs)) return false;
   const isVideo = !!VIDEO[req.ext];
   const media = el.createEl(isVideo ? 'video' : 'audio');
+  // Before the transport is drawn: it draws itself from the element.
+  const sound = parseVolume(req.volume);
+  if (sound) { media.volume = sound.volume; media.muted = sound.muted; }
   // Our own transport, or the browser's bar where there is no DOM to draw one in.
   media.controls = !mountPlayer(el, media, { video: isVideo, width: req.width });
   // An audio element with our own transport has nothing left to show, and a hidden element

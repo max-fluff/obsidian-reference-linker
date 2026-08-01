@@ -3803,6 +3803,19 @@ var require_player = __commonJS({
       return mm >= 60 ? Math.floor(mm / 60) + ":" + String(mm % 60).padStart(2, "0") + ":" + ss : mm + ":" + ss;
     }
     var playable = (media) => Number.isFinite(media.duration) && media.duration > 0;
+    function parseVolume(raw) {
+      const s = String(raw == null ? "" : raw).trim().toLowerCase();
+      if (!s)
+        return null;
+      if (s === "off" || s === "mute" || s === "muted")
+        return { volume: 1, muted: true };
+      const m = /^(\d+(?:\.\d+)?)\s*%?$/.exec(s);
+      if (!m)
+        return null;
+      const volume = Math.min(100, Math.max(0, parseFloat(m[1]))) / 100;
+      return { volume, muted: volume === 0 };
+    }
+    var formatVolume = (media) => media.muted || !media.volume ? "off" : Math.round(media.volume * 100) + "%";
     function button(row, icon, label, onClick) {
       const b = row.createEl("button", {
         cls: "clickable-icon reference-linker-player-button",
@@ -3848,6 +3861,7 @@ var require_player = __commonJS({
         showSound();
       });
       const volume = slider(row, "volume", t2("player.volume"), 100, 100);
+      const level = row.createSpan({ cls: "reference-linker-player-level" });
       if (video)
         button(row, "maximize", t2("player.fullscreen"), () => {
           if (media.requestFullscreen)
@@ -3868,8 +3882,9 @@ var require_player = __commonJS({
       const showSound = () => {
         const off = media.muted || media.volume === 0;
         setIcon(sound, off ? "volume-x" : "volume-2");
-        volume.toggleClass("is-off", off);
+        volume.value = String(Math.round(media.volume * 100));
         fill(volume, off ? 0 : media.volume);
+        level.setText(off ? "0%" : Math.round(media.volume * 100) + "%");
       };
       const show = () => {
         const total = playable(media) ? timecode(media.duration) : "--:--";
@@ -3879,6 +3894,7 @@ var require_player = __commonJS({
           seek.value = String(Math.round(at * STEPS));
         fill(seek, dragging ? Number(seek.value) / STEPS : at);
       };
+      media.addEventListener("volumechange", showSound);
       media.addEventListener("loadedmetadata", show);
       media.addEventListener("timeupdate", show);
       media.addEventListener("play", () => setIcon(play, "pause"));
@@ -3919,7 +3935,7 @@ var require_player = __commonJS({
       show();
       return true;
     }
-    module2.exports = { mountPlayer, timecode };
+    module2.exports = { mountPlayer, timecode, parseVolume, formatVolume };
   }
 });
 
@@ -3929,7 +3945,7 @@ var require_media = __commonJS({
     "use strict";
     var fs2 = require("fs");
     var nodePath2 = require("path");
-    var { mountPlayer, timecode } = require_player();
+    var { mountPlayer, timecode, parseVolume } = require_player();
     var VIDEO = { mp4: "video/mp4", m4v: "video/mp4", webm: "video/webm", mkv: "video/x-matroska", mov: "video/quicktime", ogv: "video/ogg" };
     var AUDIO = { mp3: "audio/mpeg", m4a: "audio/mp4", wav: "audio/wav", flac: "audio/flac", ogg: "audio/ogg", opus: "audio/ogg", aac: "audio/aac" };
     var BLOB_LIMIT = 96 * 1024 * 1024;
@@ -3958,6 +3974,11 @@ var require_media = __commonJS({
         return false;
       const isVideo = !!VIDEO[req.ext];
       const media = el.createEl(isVideo ? "video" : "audio");
+      const sound = parseVolume(req.volume);
+      if (sound) {
+        media.volume = sound.volume;
+        media.muted = sound.muted;
+      }
       media.controls = !mountPlayer(el, media, { video: isVideo, width: req.width });
       if (!media.controls && !isVideo)
         media.addClass("reference-linker-player-source");
@@ -6371,7 +6392,6 @@ var require_embed_frame = __commonJS({
       return b;
     }
     var EmbedFrame = class extends obsidian.MarkdownRenderChild {
-      // `cls` is the plugin's class prefix, the same one its stylesheet is written against.
       constructor(containerEl, plugin, spec, ctx, cls) {
         super(containerEl);
         this.plugin = plugin;
@@ -6382,29 +6402,23 @@ var require_embed_frame = __commonJS({
         this.lastSig = null;
       }
       // --- what a plugin fills in ---------------------------------------------------------------
-      // The spec resolved to whatever renderBody needs, or { error } for an inline notice.
       resolve() {
         return { error: "embed-frame: resolve() not implemented" };
       }
-      // Everything this embed shows, as a string. Same string means nothing changed and the
-      // re-render is skipped; null means the answer isn't knowable, so never skip.
+      // Same string means nothing changed and the render is skipped; null means never skip.
       sig() {
         return null;
       }
       headerText() {
         return "";
       }
-      // Draw into `body`. False means nothing could be drawn — the frame shows its own notice.
       async renderBody() {
         return false;
       }
-      // Fill the plugin's own toolbar row, on every render: a control that reads the result of
-      // one stays current.
       tools() {
       }
       menuItems() {
       }
-      // The notice text for a target that resolved but could not be read.
       unreadable() {
         return "";
       }
@@ -6427,7 +6441,6 @@ var require_embed_frame = __commonJS({
           return;
         this.plugin.withFormat(this.plugin.settings.askOnInsert, (tpl) => this.plugin.openEntry(entry, tpl));
       }
-      // The right-click menu, and what ⋯ opens — see CONTRIBUTING.md on what a toolbar may carry.
       menu() {
         const menu = new obsidian.Menu();
         if (this.res.entry)
@@ -6455,8 +6468,7 @@ var require_embed_frame = __commonJS({
       button(parent, icon, label, onClick) {
         return toolButton(parent, this.cls, icon, label, onClick);
       }
-      // The header, the toolbar and the body, built once and kept: a plugin that holds state in
-      // its own controls loses it if the row is rebuilt under it.
+      // Built once and kept: a plugin holding state in its own controls loses it to a rebuild.
       frame() {
         if (this.chrome && this.chrome.body.parentElement === this.containerEl)
           return this.chrome;
@@ -6503,8 +6515,7 @@ var require_embed_frame = __commonJS({
         if (this.chrome)
           this.chrome.title.setText(text);
       }
-      // Rewrite this block's own lines in the note. `edit(body)` gets the block body, without the
-      // fences, and returns what it should become, or null to leave the note alone.
+      // `edit(body)` gets the block body without its fences, and returns null to write nothing.
       async writeBody(edit) {
         const info = this.ctx && this.ctx.getSectionInfo && this.ctx.getSectionInfo(this.containerEl);
         if (!info)
@@ -6660,12 +6671,12 @@ var require_viewer = __commonJS({
     "use strict";
     var { Menu } = require("obsidian");
     var formats2 = require_formats();
+    var { timecode, formatVolume } = require_player();
     var { toolButton } = require_embed_frame();
     var { t: t2 } = require_i18n();
     var vs = require_viewer_state();
     var ZOOM_DEBOUNCE = 120;
     var EmbedViewer = class {
-      // opts: plugin, spec, component, container, width, label.
       constructor(opts) {
         this.opts = opts;
         this.st = null;
@@ -6747,7 +6758,6 @@ var require_viewer = __commonJS({
         }
         this.wire();
       }
-      // Listeners belong to the body element, which outlives a rebuild of the toolbar.
       wire() {
         if (this.wired === this.body || !(this.st.paged || this.st.zoomable))
           return;
@@ -6762,8 +6772,6 @@ var require_viewer = __commonJS({
       button(parent, icon, label, onClick) {
         return toolButton(parent, "reference-linker", icon, label, onClick);
       }
-      // The document's own outline, as the index already read it. A range can only lead to what it
-      // shows: the rest of the document is not this block's to open.
       sections() {
         const plugin = this.opts.plugin;
         if (!this.res || typeof plugin.entriesIn !== "function")
@@ -6784,8 +6792,6 @@ var require_viewer = __commonJS({
         }
         menu.showAtMouseEvent(evt);
       }
-      // A paged embed changes what it draws; a range already holds the position, so it scrolls to
-      // the slot — which is also what makes the observer draw it.
       goTo(position) {
         if (!this.ranged) {
           this.apply({ type: "goto", value: position });
@@ -6875,6 +6881,10 @@ var require_viewer = __commonJS({
         if (this.st !== before)
           evt.preventDefault();
       }
+      sound() {
+        const media = this.body && this.body.querySelector && this.body.querySelector("audio, video");
+        return media ? { time: timecode(media.currentTime), volume: formatVolume(media) } : null;
+      }
       size() {
         const box = this.opts.container.parentElement || this.opts.container;
         return vs.renderSize(this.st, this.opts.width, box.clientWidth - 2);
@@ -6909,6 +6919,7 @@ var require_viewer = __commonJS({
             position,
             width: size.width,
             zoom: size.zoom,
+            volume: this.opts.spec.volume,
             view: this.opts.plugin.settings.documentView,
             app: this.opts.plugin.app,
             component: this.opts.component,
@@ -6955,8 +6966,8 @@ var require_viewer = __commonJS({
           watcher = this.watch(slots.slice(1), paint);
         return true;
       }
-      // A frame only loads once it is in the document, so the new position cannot be made ready
-      // before it is shown. The old one stays in the flow and holds the box until it is.
+      // A frame only loads once it is in the document, so the old position holds the box until the
+      // new one has loaded.
       swap(holder, token) {
         if (!this.body.firstElementChild) {
           this.body.appendChild(holder);
@@ -6983,8 +6994,6 @@ var require_viewer = __commonJS({
         else
           setTimeout(show, 1200);
       }
-      // Each slot painted when it comes near the viewport. Without IntersectionObserver they are
-      // all painted at once, which is what a range did before.
       watch(slots, paint) {
         if (typeof IntersectionObserver !== "function") {
           slots.forEach((s) => paint(s.el, s.position));
@@ -7040,7 +7049,7 @@ var require_embed = __commonJS({
         return null;
       return parseInt(m[1] || "0", 10) * 3600 + parseInt(m[2], 10) * 60 + parseInt(m[3], 10);
     }
-    var SPEC_KEYS = ["page", "time", "width", "title", "zoom"];
+    var SPEC_KEYS = ["page", "time", "width", "title", "zoom", "volume"];
     var parseSpec = (source) => frame.parseSpec(source, SPEC_KEYS);
     function splitTarget2(target) {
       const h = target.indexOf("#");
@@ -7155,8 +7164,6 @@ var require_embed = __commonJS({
         const n = parseInt(this.spec.width, 10);
         return Number.isFinite(n) && n > 0 ? n : DEFAULT_WIDTH;
       }
-      // The mtime is what says whether the file behind this embed actually changed; without one
-      // there is nothing to compare, so the render is never skipped.
       sig(res) {
         const cached = res.relPath && this.plugin.fileCache.get(res.relPath);
         const mtime = cached ? cached.mtimeMs : null;
@@ -7175,7 +7182,6 @@ var require_embed = __commonJS({
       tools(row) {
         this.row = row;
       }
-      // The viewer outlives this render: its position and zoom are the reader's, not the block's.
       async renderBody(body, res) {
         if (!formats2.canPreview(res.ext))
           return false;
@@ -7193,7 +7199,7 @@ var require_embed = __commonJS({
       }
       menuItems(menu) {
         const st = this.viewer && this.viewer.state();
-        if (!st || !(st.paged || st.zoomable))
+        if (!st || !(st.paged || st.zoomable || this.viewer.sound()))
           return;
         menu.addItem((i) => i.setTitle(t2("embed.menu.remember")).setIcon("bookmark").onClick(() => this.remember()));
       }
@@ -7203,12 +7209,17 @@ var require_embed = __commonJS({
         const st = this.viewer && this.viewer.state();
         if (!st)
           return;
+        const sound = this.viewer.sound();
         const ok = await this.writeBody((body) => {
           let out = body;
           if (st.paged)
             out = frame.setSpecLine(out, "page", String(st.position));
           if (st.zoomable)
             out = frame.setSpecLine(out, "zoom", formatZoom(st.zoom));
+          if (sound) {
+            out = frame.setSpecLine(out, "time", sound.time);
+            out = frame.setSpecLine(out, "volume", sound.volume);
+          }
           return out;
         });
         new Notice2(ok ? t2("notice.viewRemembered") : t2("notice.embedMoved"));

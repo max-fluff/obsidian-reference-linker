@@ -77,8 +77,6 @@ const positionLabel = (ext, n, to) => {
   return h && h.positionLabel ? h.positionLabel(n, to) : null;
 };
 
-// What an embed's toolbar can offer for this format. A handler that says nothing gets the
-// static embed it had before the toolbar existed.
 const NO_CAPS = { paged: false, zoomable: false, scrollable: false, timed: false };
 
 function capabilities(ext) {
@@ -93,8 +91,7 @@ function capabilities(ext) {
 
 const counts = new Map();
 
-// How many positions the file holds, or 0 when the format doesn't count them. Cached against
-// the file's mtime: a toolbar asks on every render, and counting can mean reading the file.
+// Cached against the file's mtime: a toolbar asks on every render, and counting reads the file.
 async function count(ext, absPath) {
   const h = handlerFor(ext);
   if (!h || !h.count) return 0;
@@ -123,9 +120,8 @@ async function outline(ext, absPath) {
 // Draw a preview into `el`. Returns a cleanup function, or false when nothing was drawn —
 // the caller shows its own "unreadable" notice then.
 //
-// `req.width` is the box to lay out into and `req.zoom` how much larger to draw in it. They
-// are two things because a page and a grid disagree: a page redrawn wider is a page zoomed,
-// while a sheet redrawn wider is just a wider sheet, and has to be scaled where it stands.
+// `req.width` is the box to lay out into, `req.zoom` how much larger to draw in it: a page
+// redrawn wider is zoomed, a sheet redrawn wider is just wider and has to be scaled instead.
 async function render(el, req) {
   const h = handlerFor(req.ext);
   if (!h || !h.render) return false;

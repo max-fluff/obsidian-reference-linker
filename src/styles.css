@@ -83,14 +83,17 @@ settings:
   text-overflow: ellipsis;
 }
 
-/* A note's text carries the editing caret; a document shown in it is not text being edited. */
 .%p%-embed {
   width: fit-content;
   max-width: 100%;
+}
+
+/* A note's text carries the editing caret; a document shown in it is not being edited — except
+   where the preview is text of its own, which is there to be read. */
+.%p%-embed {
   cursor: default;
 }
 
-/* Except where the preview is text of its own, which is there to be read and copied. */
 .%p%-embed-body .%p%-rendered,
 .%p%-embed-body .%p%-doc {
   cursor: text;
@@ -130,8 +133,7 @@ settings:
   font-variant-numeric: tabular-nums;
 }
 
-/* Zoomed past 100% the reader asked for something bigger than the note is wide, so the page
-   overflows and the body scrolls to it instead of shrinking it back to the note's width. */
+/* Past 100% the page overflows and the body scrolls to it instead of shrinking it back. */
 .%p%-embed-body.is-zoomed canvas,
 .%p%-embed-body.is-zoomed img {
   max-width: none;
@@ -157,8 +159,6 @@ settings:
   max-height: calc(var(--%p%-embed-height, 60) * 1vh);
 }
 
-/* The position being drawn, laid over the one it replaces: out of the flow so the box keeps
-   its size, and invisible rather than hidden, since a display:none frame never loads. */
 .%p%-embed-pending {
   position: absolute;
   top: 0;
@@ -173,8 +173,7 @@ settings:
   border-top: 1px solid var(--background-modifier-border);
 }
 
-/* A slot waiting to be scrolled to: without a height of its own the range collapses to its
-   first page, and nothing further ever comes into view to be drawn. */
+/* Without a height of its own a waiting slot never comes into view to be drawn. */
 .%p%-embed-slot:empty {
   min-height: 160px;
 }
@@ -200,16 +199,12 @@ settings:
   margin: 8px 4px;
 }
 
-/* An isolated document sits on the note, not in a box of its own: the border and the box are
-   the embed's. Its size is set inline, from the file's own dimensions. */
 .%p%-hover-body iframe,
 .%p%-embed-body iframe {
   display: block;
   border: 0;
 }
 
-/* A recording's own controls: one row, so an embed holds a header and a transport rather than
-   a header and a whole second player. */
 .%p%-player {
   display: flex;
   align-items: center;
@@ -217,8 +212,6 @@ settings:
   padding: 6px 10px;
 }
 
-/* With the transport drawn, the element itself has nothing left to show — and it plays just
-   as well hidden. */
 .%p%-player-source {
   display: none;
 }
@@ -234,10 +227,8 @@ settings:
   color: var(--text-muted);
 }
 
-/* Obsidian styles `input[type="range"]` itself, and by element plus attribute that outweighs a
-   class — its own thumb, and its own thumb:hover, win over a plain `.%p%-player-seek` rule and
-   the transport ends up half its look and half ours. Every rule below is written to outweigh
-   them: the element and the attribute, inside the row. */
+/* Obsidian styles `input[type="range"]` itself, and element plus attribute outweighs a class:
+   every rule below carries them too, or the transport is half its look and half ours. */
 .%p%-player input[type="range"] {
   flex: 1 1 auto;
   min-width: 60px;
@@ -245,16 +236,9 @@ settings:
   -webkit-appearance: none;
   height: var(--slider-thumb-height, 14px);
   margin: 0;
+  padding: 0;
   cursor: pointer;
-  /* The bar is the input's own background, painted 4px tall in the exact middle of the box, and
-     the thumb is as tall as the box: where a browser puts ::-webkit-slider-runnable-track, and
-     whether it honours a margin there, is not something to place a control by. */
-  background:
-    linear-gradient(
-      to right,
-      var(--interactive-accent) 0 var(--%p%-player-fill, 0%),
-      var(--background-modifier-border) var(--%p%-player-fill, 0%) 100%)
-    center / 100% 4px no-repeat;
+  background: transparent;
 }
 
 .%p%-player input[type="range"].%p%-player-volume {
@@ -263,40 +247,40 @@ settings:
   min-width: 0;
 }
 
+/* The bar is the whole control. There is no knob: placing one takes a browser's word for where
+   it lays the track and what margin it cuts for a thumb, and the two disagree. */
 .%p%-player input[type="range"]::-webkit-slider-runnable-track {
-  height: 100%;
-  background: transparent;
+  height: 4px;
+  margin: 0;
+  border: 0;
+  border-radius: 2px;
   cursor: pointer;
+  background: linear-gradient(
+    to right,
+    var(--interactive-accent) 0 var(--%p%-player-fill, 0%),
+    var(--background-modifier-border) var(--%p%-player-fill, 0%) 100%);
 }
 
+/* The thumb stays — it is what a drag holds on to — but it is not drawn. */
 .%p%-player input[type="range"]::-webkit-slider-thumb {
   appearance: none;
   -webkit-appearance: none;
   width: var(--slider-thumb-width, 14px);
   height: var(--slider-thumb-height, 14px);
-  border-radius: var(--slider-thumb-radius, 50%);
+  margin: 0;
   border: 0;
+  box-shadow: none;
   cursor: pointer;
-  background: var(--interactive-accent);
-  transition: transform 80ms ease-out, box-shadow 80ms ease-out;
+  background: transparent;
 }
 
-/* The pointer state is a class the player sets, not :hover — see player.js. The accent and its
-   hover shade are a hair apart in most themes, so the thumb grows and takes a halo as well. */
-.%p%-player input[type="range"].is-hot::-webkit-slider-thumb,
-.%p%-player input[type="range"]:focus-visible::-webkit-slider-thumb {
-  background: var(--interactive-accent-hover, var(--interactive-accent));
-  transform: scale(1.15);
-  box-shadow: 0 0 0 4px var(--background-modifier-border);
-}
-
-.%p%-player input[type="range"]:active::-webkit-slider-thumb {
-  transform: scale(1.25);
-}
-
-/* Silence is the whole control being off, thumb and all — not a grey track with a lit knob. */
-.%p%-player input[type="range"].is-off::-webkit-slider-thumb {
-  background: var(--background-modifier-border);
+/* The pointer state is a class the player sets, not :hover — see player.js. */
+.%p%-player input[type="range"].is-hot::-webkit-slider-runnable-track,
+.%p%-player input[type="range"]:focus-visible::-webkit-slider-runnable-track {
+  background: linear-gradient(
+    to right,
+    var(--interactive-accent-hover, var(--interactive-accent)) 0 var(--%p%-player-fill, 0%),
+    var(--background-modifier-border-hover, var(--text-faint)) var(--%p%-player-fill, 0%) 100%);
 }
 
 .%p%-player-time {
@@ -305,6 +289,15 @@ settings:
   font-size: var(--font-ui-smaller);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+.%p%-player-level {
+  flex: 0 0 auto;
+  width: 4ch;
+  text-align: right;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  font-variant-numeric: tabular-nums;
 }
 
 /* A video sits directly on its transport, with nothing between the picture and the row. */

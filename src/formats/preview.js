@@ -68,9 +68,8 @@ const FRAME_MIN = 80;
 const FRAME_MAX = 2000; // where no box says otherwise, as tall as a preview may grow
 const FRAME_PAD = 8; // room around loose markup; a page that draws its own sheet asks for none
 
-// How tall the box the preview sits in lets it be. A frame taller than that leaves its own
-// scrollbars below the fold, and every gesture over it — the wheel, and a middle-click
-// autoscroll, which does not cross into a frame at all — reaches for the wrong thing.
+// A frame taller than its box leaves its own scrollbars below the fold, and a gesture over it
+// never reaches what is around it — a middle-click autoscroll does not cross into a frame.
 function boxHeight(el) {
   if (typeof getComputedStyle !== 'function') return 0;
   for (let node = el; node; node = node.parentElement) {
@@ -80,13 +79,11 @@ function boxHeight(el) {
   return 0;
 }
 
-// A self-contained document for the frame: the page's own stylesheet and markup, untouched.
-// `base` keeps relative links from resolving against the app. The zoom comes last, after a
-// page that scales itself to the box (a slide, a document page) has had its say.
+// The page's own stylesheet and markup, untouched; `base` keeps relative links from resolving
+// against the app. The zoom comes last, after a page that scales itself to the box.
 const frameDoc = (html, css, zoom, pad = FRAME_PAD) => '<!doctype html><html><head><meta charset="utf-8">'
   + '<base target="_blank">'
-  // The frame's own window is the one thing that scrolls, so both its bars sit at the frame's
-  // edges. Left to the body they would sit at the foot of the whole sheet, out of reach.
+  // The window scrolls, not the body: its bars would sit at the foot of the whole sheet.
   + '<style>html{overflow:auto}body{margin:0;padding:' + pad + 'px}img,table,pre{max-width:100%}</style>'
   + (css ? '<style>' + String(css) + '</style>' : '')
   + (zoom && zoom !== 1 ? '<style>html{zoom:' + zoom + '}</style>' : '')
@@ -101,8 +98,7 @@ const frameDoc = (html, css, zoom, pad = FRAME_PAD) => '<!doctype html><html><he
 // height can be measured once it has laid out.
 function renderFrame(el, { html, css, width, zoom, page, loadImage, onFail }) {
   if (typeof document === 'undefined' || !el.createEl) return false;
-  // A page is laid out to exactly the width it was given, so padding around it is width the
-  // document does not have: it scrolls sideways by the padding and loses as much off its edge.
+  // A page is laid out to exactly the width it was given: padding is width it does not have.
   const pad = page ? 0 : FRAME_PAD;
   let frame;
   try {

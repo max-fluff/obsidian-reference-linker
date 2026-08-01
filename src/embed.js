@@ -41,7 +41,7 @@ function parseTimecode(s) {
 
 // `time:` is `page:` for a recording — the same position, written the way a recording's
 // position reads.
-const SPEC_KEYS = ['page', 'time', 'width', 'title', 'zoom'];
+const SPEC_KEYS = ['page', 'time', 'width', 'title', 'zoom', 'volume'];
 const parseSpec = (source) => frame.parseSpec(source, SPEC_KEYS);
 
 // Split a trailing position off a path target: the fragment after '#' (a "page=3", "page=3-5",
@@ -157,8 +157,6 @@ class ReferenceEmbed extends frame.EmbedFrame {
 
   width() { const n = parseInt(this.spec.width, 10); return Number.isFinite(n) && n > 0 ? n : DEFAULT_WIDTH; }
 
-  // The mtime is what says whether the file behind this embed actually changed; without one
-  // there is nothing to compare, so the render is never skipped.
   sig(res) {
     const cached = res.relPath && this.plugin.fileCache.get(res.relPath);
     const mtime = cached ? cached.mtimeMs : null;
@@ -167,8 +165,7 @@ class ReferenceEmbed extends frame.EmbedFrame {
 
   headerText(res) {
     if (this.spec.title) return this.spec.title;
-    // A paged viewer says where it is in the toolbar; the header would name where the block
-    // started, which is not where the reader is.
+    // A paged viewer says where it is in the toolbar; the header would name where it started.
     const paged = formats.capabilities(res.ext).paged && res.to === res.position;
     const at = paged ? null : formats.positionLabel(res.ext, res.position, res.to);
     return res.name + (at ? '  ·  ' + at : '');
@@ -182,7 +179,6 @@ class ReferenceEmbed extends frame.EmbedFrame {
 
   tools(row) { this.row = row; }
 
-  // The viewer outlives this render: its position and zoom are the reader's, not the block's.
   async renderBody(body, res) {
     if (!formats.canPreview(res.ext)) return false;
     if (!this.viewer) {
@@ -200,7 +196,7 @@ class ReferenceEmbed extends frame.EmbedFrame {
 
   menuItems(menu) {
     const st = this.viewer && this.viewer.state();
-    if (!st || !(st.paged || st.zoomable)) return;
+    if (!st || !(st.paged || st.zoomable || this.viewer.sound())) return;
     menu.addItem((i) => i.setTitle(t('embed.menu.remember')).setIcon('bookmark').onClick(() => this.remember()));
   }
 
@@ -209,10 +205,16 @@ class ReferenceEmbed extends frame.EmbedFrame {
   async remember() {
     const st = this.viewer && this.viewer.state();
     if (!st) return;
+    const sound = this.viewer.sound();
     const ok = await this.writeBody((body) => {
       let out = body;
       if (st.paged) out = frame.setSpecLine(out, 'page', String(st.position));
       if (st.zoomable) out = frame.setSpecLine(out, 'zoom', formatZoom(st.zoom));
+      // Where a recording was left is a time and a level, as a document's is a page and a zoom.
+      if (sound) {
+        out = frame.setSpecLine(out, 'time', sound.time);
+        out = frame.setSpecLine(out, 'volume', sound.volume);
+      }
       return out;
     });
     new Notice(ok ? t('notice.viewRemembered') : t('notice.embedMoved'));
