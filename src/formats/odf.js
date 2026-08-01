@@ -469,7 +469,7 @@ async function render(el, req) {
       // The frame first: the sanitizer strips the class attributes the document's own
       // formatting is written against, and inlining keeps the structure but loses it.
       const framed = renderFrame(el, {
-        html: page.html, css: page.css, width, grow: zoom > 1, page: true, loadImage,
+        html: page.html, css: page.css, width, page: true, loadImage,
         onFail: () => { renderHtml(el, { html: page.html, width, loadImage }); },
       });
       if (framed !== false) return framed;
@@ -489,7 +489,7 @@ async function render(el, req) {
       // A frame the app refuses must still leave something readable: renderFrame reports its
       // own success before the document has laid out, so the tail below is never reached.
       const framed = renderFrame(el, {
-        html: page.html, css: page.css, width, grow: zoom > 1, page: true, loadImage, onFail: flat,
+        html: page.html, css: page.css, width, page: true, loadImage, onFail: flat,
       });
       if (framed !== false) return framed;
     }

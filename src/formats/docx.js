@@ -325,7 +325,7 @@ async function render(el, req) {
     // The frame first: the sanitizer strips the class attributes the document's own formatting
     // is written against, so inlining it keeps the structure and loses the typography.
     const framed = renderFrame(el, {
-      html: page.html, css: page.css, width, grow: zoom > 1, page: true, loadImage, onFail: () => {
+      html: page.html, css: page.css, width, page: true, loadImage, onFail: () => {
         renderHtml(el, { html: page.html, width, loadImage });
       },
     });

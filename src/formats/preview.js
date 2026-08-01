@@ -65,20 +65,29 @@ function inlineImagesAsData(html, load) {
 }
 
 const FRAME_MIN = 80;
-// Room for everything the readers cap themselves at — a sheet is 100 rows, a preview 60 lines.
-// Short of it the frame is exactly its content and the embed is the one thing that scrolls;
-// past it the frame scrolls too, which is the price of a document that has no sections at all.
-const FRAME_MAX = 6000;
-const FRAME_WIDE = 4000; // a sheet wider than this is scrolled inside the frame after all
-
+const FRAME_MAX = 2000; // where no box says otherwise, as tall as a preview may grow
 const FRAME_PAD = 8; // room around loose markup; a page that draws its own sheet asks for none
+
+// How tall the box the preview sits in lets it be. A frame taller than that leaves its own
+// scrollbars below the fold, and every gesture over it — the wheel, and a middle-click
+// autoscroll, which does not cross into a frame at all — reaches for the wrong thing.
+function boxHeight(el) {
+  if (typeof getComputedStyle !== 'function') return 0;
+  for (let node = el; node; node = node.parentElement) {
+    const max = parseFloat(getComputedStyle(node).maxHeight);
+    if (Number.isFinite(max) && max > 0) return max;
+  }
+  return 0;
+}
 
 // A self-contained document for the frame: the page's own stylesheet and markup, untouched.
 // `base` keeps relative links from resolving against the app. The zoom comes last, after a
 // page that scales itself to the box (a slide, a document page) has had its say.
 const frameDoc = (html, css, zoom, pad = FRAME_PAD) => '<!doctype html><html><head><meta charset="utf-8">'
   + '<base target="_blank">'
-  + '<style>html,body{margin:0;padding:' + pad + 'px;overflow-x:auto}img,table,pre{max-width:100%}</style>'
+  // The frame's own window is the one thing that scrolls, so both its bars sit at the frame's
+  // edges. Left to the body they would sit at the foot of the whole sheet, out of reach.
+  + '<style>html{overflow:auto}body{margin:0;padding:' + pad + 'px}img,table,pre{max-width:100%}</style>'
   + (css ? '<style>' + String(css) + '</style>' : '')
   + (zoom && zoom !== 1 ? '<style>html{zoom:' + zoom + '}</style>' : '')
   + '</head><body>' + html + '</body></html>';
@@ -90,7 +99,7 @@ const frameDoc = (html, css, zoom, pad = FRAME_PAD) => '<!doctype html><html><he
 //
 // No `allow-scripts`, so nothing in the document executes; `allow-same-origin` only so the
 // height can be measured once it has laid out.
-function renderFrame(el, { html, css, width, zoom, grow, page, loadImage, onFail }) {
+function renderFrame(el, { html, css, width, zoom, page, loadImage, onFail }) {
   if (typeof document === 'undefined' || !el.createEl) return false;
   // A page is laid out to exactly the width it was given, so padding around it is width the
   // document does not have: it scrolls sideways by the padding and loses as much off its edge.
@@ -102,9 +111,9 @@ function renderFrame(el, { html, css, width, zoom, grow, page, loadImage, onFail
     frame.setAttribute('sandbox', 'allow-same-origin');
     frame.setAttribute('referrerpolicy', 'no-referrer');
     frame.style.width = width + 'px';
-    // A frame kept inside the box would answer a zoom with its own scrollbar; asked for more
-    // room than there is, it lets the embed scroll to it, the way a zoomed page does.
-    frame.style.maxWidth = grow || zoom > 1 ? 'none' : '100%';
+    // The frame stays inside its box and scrolls its own document: nothing else can, since a
+    // gesture over a frame never reaches what is around it.
+    frame.style.maxWidth = '100%';
     frame.style.height = FRAME_MIN + 'px';
     // Whether the app's CSP lets a srcdoc frame load at all can only be learned here. An empty
     // or unreadable frame is a blank hole in the note, so it hands back to the caller's own
@@ -121,29 +130,9 @@ function renderFrame(el, { html, css, width, zoom, grow, page, loadImage, onFail
       // reports its unscaled height to scrollHeight, and the frame would be twice as tall as
       // what it draws.
       let height = 0;
-      let content = 0;
-      try {
-        const box = body.getBoundingClientRect();
-        height = box.height;
-        // The same measure for the same reason: scrollWidth reports what a page that scales
-        // itself to the box is written at, not what it is drawn at.
-        content = box.width;
-        for (const child of body.children || []) content = Math.max(content, child.getBoundingClientRect().width);
-      } catch { height = 0; }
-      const wantHeight = (height || body.scrollHeight) + 2 * pad + 2;
-      const wantWidth = content + 2 * pad + 2;
-      frame.style.height = Math.max(FRAME_MIN, Math.min(FRAME_MAX, wantHeight)) + 'px';
-      // A frame grown to its content leaves the scrolling to the embed, whose edges are on
-      // screen. Its own bar would sit at its bottom — for a long sheet, far below the fold.
-      if (content > width + 1) {
-        frame.style.width = Math.min(FRAME_WIDE, wantWidth) + 'px';
-        frame.style.maxWidth = 'none';
-      }
-      // And with the room it asked for, nothing inside it may scroll: a document left with a
-      // few pixels of slack answers the wheel itself, and the embed's own scroll never moves.
-      const capped = wantHeight > FRAME_MAX || wantWidth > FRAME_WIDE;
-      const root = frame.contentDocument.documentElement;
-      if (root) root.style.overflow = capped ? 'auto' : 'hidden';
+      try { height = body.getBoundingClientRect().height; } catch { height = 0; }
+      const room = boxHeight(el) || FRAME_MAX;
+      frame.style.height = Math.max(FRAME_MIN, Math.min(room, (height || body.scrollHeight) + 2 * pad + 2)) + 'px';
     });
     const body = expandSelfClosing(html);
     frame.srcdoc = frameDoc(loadImage ? inlineImagesAsData(body, loadImage) : body, css, zoom, pad);

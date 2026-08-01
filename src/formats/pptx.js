@@ -506,7 +506,7 @@ async function render(el, req) {
     // The frame first: the sanitizer strips the class attributes every shape's position is
     // written against, and inlining would pile the whole slide into one column.
     const framed = renderFrame(el, {
-      html: page.html, css: page.css, width, grow: zoom > 1, page: true, loadImage,
+      html: page.html, css: page.css, width, page: true, loadImage,
       onFail: () => {
         const slide = slideText(doc.zip.text(doc.parts[n - 1]) || '');
         renderLines(el, { title: slide.title, body: slide.body, width: req.width, zoom: req.zoom });

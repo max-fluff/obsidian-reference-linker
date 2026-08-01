@@ -2038,11 +2038,20 @@ var require_preview = __commonJS({
       });
     }
     var FRAME_MIN = 80;
-    var FRAME_MAX = 6e3;
-    var FRAME_WIDE = 4e3;
+    var FRAME_MAX = 2e3;
     var FRAME_PAD = 8;
-    var frameDoc = (html, css, zoom, pad = FRAME_PAD) => '<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>html,body{margin:0;padding:' + pad + "px;overflow-x:auto}img,table,pre{max-width:100%}</style>" + (css ? "<style>" + String(css) + "</style>" : "") + (zoom && zoom !== 1 ? "<style>html{zoom:" + zoom + "}</style>" : "") + "</head><body>" + html + "</body></html>";
-    function renderFrame(el, { html, css, width, zoom, grow, page, loadImage, onFail }) {
+    function boxHeight(el) {
+      if (typeof getComputedStyle !== "function")
+        return 0;
+      for (let node = el; node; node = node.parentElement) {
+        const max = parseFloat(getComputedStyle(node).maxHeight);
+        if (Number.isFinite(max) && max > 0)
+          return max;
+      }
+      return 0;
+    }
+    var frameDoc = (html, css, zoom, pad = FRAME_PAD) => '<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>html{overflow:auto}body{margin:0;padding:' + pad + "px}img,table,pre{max-width:100%}</style>" + (css ? "<style>" + String(css) + "</style>" : "") + (zoom && zoom !== 1 ? "<style>html{zoom:" + zoom + "}</style>" : "") + "</head><body>" + html + "</body></html>";
+    function renderFrame(el, { html, css, width, zoom, page, loadImage, onFail }) {
       if (typeof document === "undefined" || !el.createEl)
         return false;
       const pad = page ? 0 : FRAME_PAD;
@@ -2054,7 +2063,7 @@ var require_preview = __commonJS({
         frame.setAttribute("sandbox", "allow-same-origin");
         frame.setAttribute("referrerpolicy", "no-referrer");
         frame.style.width = width + "px";
-        frame.style.maxWidth = grow || zoom > 1 ? "none" : "100%";
+        frame.style.maxWidth = "100%";
         frame.style.height = FRAME_MIN + "px";
         frame.addEventListener("load", () => {
           let body2 = null;
@@ -2073,27 +2082,13 @@ var require_preview = __commonJS({
             return;
           }
           let height = 0;
-          let content = 0;
           try {
-            const box = body2.getBoundingClientRect();
-            height = box.height;
-            content = box.width;
-            for (const child of body2.children || [])
-              content = Math.max(content, child.getBoundingClientRect().width);
+            height = body2.getBoundingClientRect().height;
           } catch (e) {
             height = 0;
           }
-          const wantHeight = (height || body2.scrollHeight) + 2 * pad + 2;
-          const wantWidth = content + 2 * pad + 2;
-          frame.style.height = Math.max(FRAME_MIN, Math.min(FRAME_MAX, wantHeight)) + "px";
-          if (content > width + 1) {
-            frame.style.width = Math.min(FRAME_WIDE, wantWidth) + "px";
-            frame.style.maxWidth = "none";
-          }
-          const capped = wantHeight > FRAME_MAX || wantWidth > FRAME_WIDE;
-          const root = frame.contentDocument.documentElement;
-          if (root)
-            root.style.overflow = capped ? "auto" : "hidden";
+          const room = boxHeight(el) || FRAME_MAX;
+          frame.style.height = Math.max(FRAME_MIN, Math.min(room, (height || body2.scrollHeight) + 2 * pad + 2)) + "px";
         });
         const body = expandSelfClosing(html);
         frame.srcdoc = frameDoc(loadImage ? inlineImagesAsData(body, loadImage) : body, css, zoom, pad);
@@ -3367,7 +3362,6 @@ var require_pptx = __commonJS({
           html: page.html,
           css: page.css,
           width,
-          grow: zoom > 1,
           page: true,
           loadImage,
           onFail: () => {
@@ -4556,7 +4550,6 @@ var require_odf = __commonJS({
             html: page.html,
             css: page.css,
             width,
-            grow: zoom > 1,
             page: true,
             loadImage,
             onFail: () => {
@@ -4581,7 +4574,6 @@ var require_odf = __commonJS({
             html: page.html,
             css: page.css,
             width,
-            grow: zoom > 1,
             page: true,
             loadImage,
             onFail: flat
@@ -5160,7 +5152,6 @@ var require_docx = __commonJS({
           html: page.html,
           css: page.css,
           width,
-          grow: zoom > 1,
           page: true,
           loadImage,
           onFail: () => {

@@ -29,21 +29,20 @@ const el = () => {
   return node;
 };
 
-// A laid-out document, as the frame reads one back: the body fills the viewport, and what it
-// holds is measured by its own drawn size — `scrollWidth` is the unscaled figure and a lie
-// about anything that zoomed itself to fit.
-const rendered = ({ height, viewport, widest, scrollWidth }) => ({
+// A laid-out document, as the frame reads one back. The rect is the drawn size: scrollHeight
+// is the unscaled figure and a lie about anything that zoomed itself to fit.
+const rendered = (height) => ({
   firstChild: {},
   scrollHeight: height,
-  scrollWidth: scrollWidth === undefined ? widest : scrollWidth,
-  getBoundingClientRect: () => ({ width: viewport, height }),
-  children: [{ getBoundingClientRect: () => ({ width: widest }) }],
+  getBoundingClientRect: () => ({ width: 600, height }),
 });
 
-const withDocument = (fn) => () => {
-  const had = global.document;
+// The box a preview sits in, as tall as the embed body's max-height says.
+const withDocument = (fn, boxMaxHeight) => () => {
+  const had = { document: global.document, style: global.getComputedStyle };
   global.document = { createElement: () => ({}) };
-  try { return fn(); } finally { global.document = had; }
+  global.getComputedStyle = () => ({ maxHeight: boxMaxHeight === undefined ? 'none' : boxMaxHeight + 'px' });
+  try { return fn(); } finally { global.document = had.document; global.getComputedStyle = had.style; }
 };
 
 describe('frame document', () => {
@@ -74,6 +73,15 @@ describe('frame document', () => {
     assert.ok(doc.includes('width:max-content'), 'the sheet did not ask for its own width');
     assert.ok(doc.indexOf('width:max-content') > doc.indexOf('table,pre{max-width:100%}'),
       'the frame’s cap comes after the sheet’s rule and squeezes it again');
+  });
+
+  it('leaves the scrolling to the frame’s own window', () => {
+    // On the body instead, the bars sit at the foot of the whole document rather than at the
+    // frame's edge: for a long sheet that is below the fold, and a gesture over a frame never
+    // reaches anything outside it.
+    const doc = frameDoc('<table></table>', '', 1, 8);
+    assert.ok(doc.includes('html{overflow:auto}'), doc.slice(0, 240));
+    assert.ok(!/body\{[^}]*overflow/.test(doc), 'the body scrolls, so its bars are wherever it ends');
   });
 
   it('says nothing about zoom at natural size', () => {
@@ -136,61 +144,26 @@ describe('renderFrame', () => {
     assert.ok(loose.children[0].srcdoc.includes('padding:8px'), loose.children[0].srcdoc.slice(0, 200));
   }));
 
-  it('grows to a full sheet rather than scrolling inside itself beside the embed', withDocument(() => {
-    // A sheet is a hundred rows at most, and a frame shorter than the rows it holds scrolls
-    // itself while the embed scrolls it too — two vertical bars over one table.
+  it('never grows taller than the box it is shown in', withDocument(() => {
+    // Taller than the box, the frame's own scrollbars sit below the fold: the horizontal one is
+    // out of reach, and a middle-click autoscroll — which never crosses into a frame — has
+    // nothing under the pointer that can move.
     const root = el();
+    root.parentElement = null;
     renderFrame(root, { html: '<table></table>', css: '', width: 600 });
     const frame = root.children[0];
-    frame.contentDocument = { body: rendered({ height: 2200, viewport: 600, widest: 600 }), documentElement: { style: {} } };
+    frame.contentDocument = { body: rendered(2200) };
     frame.fire('load');
-    assert.strictEqual(frame.style.height, '2218px');
-    // And with the room it asked for it must not scroll: a document with slack left answers the
-    // wheel itself, so the gesture reaches the embed only some of the time.
-    assert.strictEqual(frame.contentDocument.documentElement.style.overflow, 'hidden');
-  }));
+    assert.strictEqual(frame.style.height, '900px');
+  }, 900));
 
-  it('keeps its own scrolling only where it could not be given the room', withDocument(() => {
+  it('stops at its own ceiling where no box states a height', withDocument(() => {
     const root = el();
     renderFrame(root, { html: '<p>x</p>', css: '', width: 600 });
     const frame = root.children[0];
-    frame.contentDocument = { body: rendered({ height: 9000, viewport: 600, widest: 600 }), documentElement: { style: {} } };
+    frame.contentDocument = { body: rendered(9000) };
     frame.fire('load');
-    assert.strictEqual(frame.contentDocument.documentElement.style.overflow, 'auto');
-  }));
-
-  it('grows to content wider than the box, so the embed scrolls to it and not the frame', withDocument(() => {
-    // A sheet is taller than the note's window, so the frame's own horizontal bar would sit
-    // below the fold: unreachable, and invisible enough to read as "there is no scrolling".
-    const root = el();
-    renderFrame(root, { html: '<table></table>', css: '', width: 600 });
-    const frame = root.children[0];
-    frame.contentDocument = { body: rendered({ height: 2000, viewport: 600, widest: 1700 }), documentElement: { style: {} } };
-    frame.fire('load');
-    assert.strictEqual(frame.style.width, '1718px');
-    assert.strictEqual(frame.style.maxWidth, 'none');
-  }));
-
-  it('leaves a frame whose content fits at the width it was given', withDocument(() => {
-    const root = el();
-    renderFrame(root, { html: '<p>x</p>', css: '', width: 600 });
-    const frame = root.children[0];
-    frame.contentDocument = { body: rendered({ height: 200, viewport: 600, widest: 584 }), documentElement: { style: {} } };
-    frame.fire('load');
-    assert.strictEqual(frame.style.width, '600px');
-    assert.strictEqual(frame.style.maxWidth, '100%');
-  }));
-
-  it('measures a page that scaled itself as drawn, not as written', withDocument(() => {
-    // A Word or ODF page is written at its paper width and zoomed down to the box. Read from
-    // scrollWidth it looks wider than the box, and the frame grows into a sideways scroll over
-    // nothing at all.
-    const root = el();
-    renderFrame(root, { html: '<div class="page">x</div>', css: '', width: 600, page: true });
-    const frame = root.children[0];
-    frame.contentDocument = { body: rendered({ height: 800, viewport: 600, widest: 600, scrollWidth: 793 }), documentElement: { style: {} } };
-    frame.fire('load');
-    assert.strictEqual(frame.style.width, '600px');
+    assert.strictEqual(frame.style.height, '2000px');
   }));
 
   it('hands back to the caller when the frame comes up empty — a blocked frame is a blank hole', withDocument(() => {
@@ -204,19 +177,14 @@ describe('renderFrame', () => {
     assert.strictEqual(root.children.length, 0, 'the empty frame was left in the note');
   }));
 
-  it('stays inside the box at natural size and takes the room a zoom asks for', withDocument(() => {
+  it('stays inside its box, zoomed or not — what does not fit is scrolled within it', withDocument(() => {
     const inside = el();
     renderFrame(inside, { html: '<p>x</p>', css: '', width: 600 });
     assert.strictEqual(inside.children[0].style.maxWidth, '100%');
 
     const zoomed = el();
     renderFrame(zoomed, { html: '<p>x</p>', css: '', width: 600, zoom: 1.5 });
-    assert.strictEqual(zoomed.children[0].style.maxWidth, 'none');
-
-    // A page that scales itself takes the zoom as a wider box, so it says so outright.
-    const wider = el();
-    renderFrame(wider, { html: '<p>x</p>', css: '', width: 900, grow: true });
-    assert.strictEqual(wider.children[0].style.maxWidth, 'none');
+    assert.strictEqual(zoomed.children[0].style.maxWidth, '100%');
   }));
 
   it('declines when there is no document to build a frame with', () => {
