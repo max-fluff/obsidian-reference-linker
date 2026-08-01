@@ -145,7 +145,8 @@ class EmbedViewer {
     }
     if (st.paged) {
       if (document.activeElement !== this.posEl) this.posEl.value = String(st.position);
-      this.posEl.size = Math.max(2, String(st.count || st.position).length);
+      // Not the size attribute: Chromium pads it by half its own width again.
+      this.posEl.style.width = 'calc(' + Math.max(2, String(st.count || st.position).length) + 'ch + 8px)';
       this.totalEl.setText(st.count ? '/ ' + st.count : '');
       this.prevBtn.disabled = st.position <= 1;
       this.nextBtn.disabled = st.count > 0 && st.position >= st.count;
@@ -223,8 +224,9 @@ class EmbedViewer {
     const token = ++this.renderId;
     const res = this.res;
     const size = this.size();
-    // Zooming scrolls inside the box rather than stretching the embed and its toolbar.
-    this.body.style.maxWidth = size.width + 'px';
+    // The box is what the block asked for, at every zoom: a width, not a cap. Capped, zooming
+    // out drew narrower content, and the embed shrank to it and took the toolbar with it.
+    this.body.style.width = size.width + 'px';
     const from = this.st.paged ? this.st.position : res.position;
     const to = this.st.paged ? this.st.position : res.to;
     const holder = document.createElement('div');

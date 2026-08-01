@@ -123,9 +123,26 @@ describe('renderFrame', () => {
     const root = el();
     renderFrame(root, { html: '<p>x</p>', css: '', width: 600 });
     const frame = root.children[0];
-    frame.contentDocument = { body: { firstChild: {}, scrollHeight: 400 } };
+    frame.contentDocument = { body: rendered(400) };
     frame.fire('load');
-    assert.strictEqual(frame.style.height, '418px');
+    assert.strictEqual(frame.style.height, '402px');
+  }));
+
+  it('does not count the document’s padding twice', withDocument(() => {
+    // The measured box already carries body{padding}. Adding it again made every frame
+    // 2*FRAME_PAD taller than what it draws — a scrollbar with nothing under it.
+    const loose = el();
+    renderFrame(loose, { html: '<p>x</p>', css: '', width: 600 });
+    loose.children[0].contentDocument = { body: rendered(300) };
+    loose.children[0].fire('load');
+
+    const page = el();
+    renderFrame(page, { html: '<div>x</div>', css: '', width: 600, page: true });
+    page.children[0].contentDocument = { body: rendered(300) };
+    page.children[0].fire('load');
+
+    assert.strictEqual(loose.children[0].style.height, page.children[0].style.height,
+      'padded and unpadded frames measured the same content to different heights');
   }));
 
   it('gives a page no padding, which it would scroll sideways by and lose off its edge', withDocument(() => {

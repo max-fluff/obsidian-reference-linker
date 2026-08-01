@@ -128,7 +128,9 @@ function renderFrame(el, { html, css, width, zoom, page, loadImage, onFail }) {
       let height = 0;
       try { height = body.getBoundingClientRect().height; } catch { height = 0; }
       const room = boxHeight(el) || FRAME_MAX;
-      frame.style.height = Math.max(FRAME_MIN, Math.min(room, (height || body.scrollHeight) + 2 * pad + 2)) + 'px';
+      // The measurement is a border box and the document's own padding is already inside it.
+      // Adding it again left every frame 2*pad too tall, and a scrollbar over nothing.
+      frame.style.height = Math.max(FRAME_MIN, Math.min(room, (height || body.scrollHeight) + 2)) + 'px';
     });
     const body = expandSelfClosing(html);
     frame.srcdoc = frameDoc(loadImage ? inlineImagesAsData(body, loadImage) : body, css, zoom, pad);

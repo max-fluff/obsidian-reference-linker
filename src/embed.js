@@ -195,6 +195,7 @@ class ReferenceEmbed extends frame.EmbedFrame {
   }
 
   menuItems(menu) {
+    if (!this.editable()) return;
     const st = this.viewer && this.viewer.state();
     if (!st || !(st.paged || st.zoomable || this.viewer.sound())) return;
     menu.addItem((i) => i.setTitle(t('embed.menu.remember')).setIcon('bookmark').onClick(() => this.remember()));

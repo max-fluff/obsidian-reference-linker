@@ -166,7 +166,7 @@ papers/paper-with-outline.pdf#page=3
 - Optional `key: value` lines after the target tune it, and they are the whole set: `page: N` (or `N-M`) for paged formats, `time: mm:ss` for recordings, `width: N` (CSS px, 600 by default), `zoom: 150%` or `zoom: fit` for the formats that zoom, `volume: 40%` or `volume: off` for a recording, and `title: …`, which replaces the header text — by default the section or document name and its position.
 
 <p align="center">
-  <img src="docs/images/embed.png" alt="Two rendered reference-link embeds: a PDF page with a title, and an image" width="640">
+  <img src="docs/images/embed.png" alt="Two rendered reference-link embeds: a PDF page with a title, and an image, each with the viewer toolbar in its header" width="640">
 </p>
 
 #### The embed toolbar
@@ -177,9 +177,13 @@ An embed of a single position is a small viewer rather than a still: the header 
 - **Position** — `◀ 3 / 128 ▶`: pages in a PDF, slides in a deck, sheets in a spreadsheet, sections in a document, chapters in an EPUB. The number is a box: type one and press Enter. With the embed focused, `←` / `→` and `PageUp` / `PageDown` step, `Home` / `End` jump to the ends, and the wheel steps when the position itself has nowhere left to scroll. A document with only one position shows no arrows.
 - **Zoom** — `−  100%  +`, plus **Fit width**. 100 % is the width the block asked for (the `width:` line, 600 px by default), and the ladder runs 50–300 %. `Ctrl`+wheel zooms, `+` / `−` step, `Ctrl+0` is 100 %, and a double-click toggles fit against 100 %. A page or a slide is redrawn larger; text, a sheet and a table are scaled where they stand. The embed itself keeps its size: what is zoomed scrolls inside it, rather than pushing the note around.
 - **Open** / **Refresh** — on every embed, whatever its format. The title still opens the document too.
-- **⋯** — the right-click menu, and the one place anything is written back: **Remember this view**. A toolbar button never edits your note.
+- **⋯** — the right-click menu, and the one place anything is written back: **Remember this view**. A toolbar button never edits your note, and in reading view nothing does — the item is there only where the note is open in an editor, because that is where a write can be undone.
 
 A recording has no positions to page through, so it gets a transport under the header instead of the browser's bar: play, a bar filled to where it has got to, the clock, sound with the level it is at, and full screen for a video. It is as wide as the block asked for, the same as every other embed. An embed already has a header, and the browser's player brings a second one. The bar is the control itself — click or drag it anywhere, there is no knob to aim at. With the transport focused, space plays and pauses, the arrows step five seconds and `m` mutes.
+
+<p align="center">
+  <img src="docs/images/player.png" alt="A recording embedded in a note, with the plugin's own transport under the header: play, a filled bar, the clock, and the sound level" width="560">
+</p>
 
 Where you left an embed is yours rather than the block's: it survives an index rebuild, but not closing the note. **Remember this view** writes it into the block — `page:` and `zoom:` for a document, `time:` and `volume:` for a recording — so it opens there next time. A range like `#page=3-5` stacks its positions and draws each as you scroll to it, so it takes the contents list but not the arrows; a Markdown or text file is positioned by line rather than by section, so it takes neither.
 

@@ -111,20 +111,32 @@ settings:
   font-variant-numeric: tabular-nums;
 }
 
-.%p%-embed-position {
+/* Obsidian styles `input[type="text"]` itself, and element plus attribute outweighs a class:
+   left to it the box keeps a form field's padding and font, three times the width it needs. */
+input[type="text"].%p%-embed-position {
+  width: calc(2ch + 8px);
+  min-width: 0;
+  height: auto;
   padding: 0 2px;
   border: 1px solid transparent;
   border-radius: var(--radius-s);
   background: transparent;
   color: var(--text-muted);
+  font-family: var(--font-interface);
   font-size: var(--font-ui-smaller);
   font-variant-numeric: tabular-nums;
   text-align: center;
 }
 
-.%p%-embed-position:focus {
+input[type="text"].%p%-embed-position:hover {
+  background: transparent;
+  border-color: transparent;
+}
+
+input[type="text"].%p%-embed-position:focus {
   border-color: var(--background-modifier-border);
   background: var(--background-primary);
+  box-shadow: none;
 }
 
 .%p%-embed-total {
@@ -156,6 +168,7 @@ settings:
 
 .%p%-embed-body {
   position: relative;
+  max-width: 100%;
   max-height: calc(var(--%p%-embed-height, 60) * 1vh);
 }
 

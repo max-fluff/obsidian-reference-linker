@@ -2088,7 +2088,7 @@ var require_preview = __commonJS({
             height = 0;
           }
           const room = boxHeight(el) || FRAME_MAX;
-          frame.style.height = Math.max(FRAME_MIN, Math.min(room, (height || body2.scrollHeight) + 2 * pad + 2)) + "px";
+          frame.style.height = Math.max(FRAME_MIN, Math.min(room, (height || body2.scrollHeight) + 2)) + "px";
         });
         const body = expandSelfClosing(html);
         frame.srcdoc = frameDoc(loadImage ? inlineImagesAsData(body, loadImage) : body, css, zoom, pad);
@@ -6377,6 +6377,7 @@ var require_embed_frame = __commonJS({
       });
       return !moved;
     }
+    var inEditor = (el) => !!(el && el.closest && el.closest(".markdown-source-view"));
     function toolButton(parent, cls, icon, label, onClick) {
       const b = parent.createEl("button", {
         cls: "clickable-icon " + cls + "-embed-button",
@@ -6459,6 +6460,9 @@ var require_embed_frame = __commonJS({
       refresh() {
         return this.render(true);
       }
+      editable() {
+        return inEditor(this.containerEl);
+      }
       notice(text) {
         this.release();
         this.chrome = null;
@@ -6526,7 +6530,7 @@ var require_embed_frame = __commonJS({
         return writeEmbedBody(this.plugin.app, this.ctx.sourcePath, info, next);
       }
     };
-    module2.exports = { EmbedFrame, parseSpec, setSpecLine, writeEmbedBody, toolButton };
+    module2.exports = { EmbedFrame, parseSpec, setSpecLine, writeEmbedBody, toolButton, inEditor };
   }
 });
 
@@ -6812,7 +6816,7 @@ var require_viewer = __commonJS({
         if (st.paged) {
           if (document.activeElement !== this.posEl)
             this.posEl.value = String(st.position);
-          this.posEl.size = Math.max(2, String(st.count || st.position).length);
+          this.posEl.style.width = "calc(" + Math.max(2, String(st.count || st.position).length) + "ch + 8px)";
           this.totalEl.setText(st.count ? "/ " + st.count : "");
           this.prevBtn.disabled = st.position <= 1;
           this.nextBtn.disabled = st.count > 0 && st.position >= st.count;
@@ -6893,7 +6897,7 @@ var require_viewer = __commonJS({
         const token = ++this.renderId;
         const res = this.res;
         const size = this.size();
-        this.body.style.maxWidth = size.width + "px";
+        this.body.style.width = size.width + "px";
         const from = this.st.paged ? this.st.position : res.position;
         const to = this.st.paged ? this.st.position : res.to;
         const holder = document.createElement("div");
@@ -7198,6 +7202,8 @@ var require_embed = __commonJS({
         return this.viewer.show(res, this.row, body);
       }
       menuItems(menu) {
+        if (!this.editable())
+          return;
         const st = this.viewer && this.viewer.state();
         if (!st || !(st.paged || st.zoomable || this.viewer.sound()))
           return;

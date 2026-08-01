@@ -146,17 +146,21 @@
   margin: var(--p-spacing, 1em) 0;
 }
 
-/* The embed's header is a row: the title takes what is left, the toolbar sits at the end. */
+/* The embed's header is a row: the title takes what is left, the toolbar sits at the end.
+   It wraps because a narrow block cannot hold both, and the embed clips what overflows. */
 .reference-linker-embed-header {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 4px;
 }
 
+/* The title yields its width to the toolbar, but not all of it: shrinking to nothing is how
+   it kept the row on one line and pushed the last controls out of the box. */
 .reference-linker-embed-title {
   cursor: pointer;
-  flex: 1;
-  min-width: 0;
+  flex: 1 1 6em;
+  min-width: 4em;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -167,7 +171,9 @@
   padding-right: 22px;
   display: flex;
   align-items: center;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 2px;
   opacity: var(--reference-linker-embed-tools-idle, 1);
   transition: opacity 100ms ease-out;
@@ -433,20 +439,32 @@ settings:
   font-variant-numeric: tabular-nums;
 }
 
-.reference-linker-embed-position {
+/* Obsidian styles `input[type="text"]` itself, and element plus attribute outweighs a class:
+   left to it the box keeps a form field's padding and font, three times the width it needs. */
+input[type="text"].reference-linker-embed-position {
+  width: calc(2ch + 8px);
+  min-width: 0;
+  height: auto;
   padding: 0 2px;
   border: 1px solid transparent;
   border-radius: var(--radius-s);
   background: transparent;
   color: var(--text-muted);
+  font-family: var(--font-interface);
   font-size: var(--font-ui-smaller);
   font-variant-numeric: tabular-nums;
   text-align: center;
 }
 
-.reference-linker-embed-position:focus {
+input[type="text"].reference-linker-embed-position:hover {
+  background: transparent;
+  border-color: transparent;
+}
+
+input[type="text"].reference-linker-embed-position:focus {
   border-color: var(--background-modifier-border);
   background: var(--background-primary);
+  box-shadow: none;
 }
 
 .reference-linker-embed-total {
@@ -478,6 +496,7 @@ settings:
 
 .reference-linker-embed-body {
   position: relative;
+  max-width: 100%;
   max-height: calc(var(--reference-linker-embed-height, 60) * 1vh);
 }
 
