@@ -239,14 +239,23 @@ settings:
   min-width: 60px;
 }
 
+/* Volume is the second question a recording asks, so at rest it is only the speaker. The
+   slider slides out of it under the pointer, and stays out while it has the focus. */
 .%p%-player-volume {
   flex: 0 0 auto;
-  width: 56px;
+  width: 0;
+  opacity: 0;
+  transition: width 120ms ease-out, opacity 120ms ease-out;
 }
 
-/* Obsidian's own slider, down to the variables its settings sliders read: a round thumb on a
-   thin track. A range input paints one track, so what has been played is a gradient stopping
-   at --%p%-player-fill, which the player keeps current. */
+.%p%-player:hover .%p%-player-volume,
+.%p%-player:focus-within .%p%-player-volume {
+  width: 54px;
+  opacity: 1;
+}
+
+/* A transport, not a pair of settings sliders: a flat bar at rest, and the round thumb
+   Obsidian draws — its own --slider-thumb-* size — once a pointer is on the row. */
 .%p%-player-seek,
 .%p%-player-volume {
   appearance: none;
@@ -259,10 +268,10 @@ settings:
 
 .%p%-player-seek::-webkit-slider-runnable-track,
 .%p%-player-volume::-webkit-slider-runnable-track {
-  height: var(--slider-track-height, 3px);
+  height: 4px;
   /* Its own margin centres it: the track is laid at the top of the box otherwise. */
-  margin: calc((var(--slider-thumb-height, 14px) - var(--slider-track-height, 3px)) / 2) 0;
-  border-radius: var(--radius-s);
+  margin: calc((var(--slider-thumb-height, 14px) - 4px) / 2) 0;
+  border-radius: 2px;
   cursor: pointer;
   background: linear-gradient(
     to right,
@@ -276,17 +285,19 @@ settings:
   -webkit-appearance: none;
   width: var(--slider-thumb-width, 14px);
   height: var(--slider-thumb-height, 14px);
-  margin-top: calc((var(--slider-track-height, 3px) - var(--slider-thumb-height, 14px)) / 2);
+  margin-top: calc((4px - var(--slider-thumb-height, 14px)) / 2);
   border-radius: var(--slider-thumb-radius, 50%);
   cursor: pointer;
   background: var(--interactive-accent);
+  opacity: 0;
+  transition: opacity 120ms ease-out;
 }
 
-.%p%-player-seek:hover::-webkit-slider-thumb,
-.%p%-player-volume:hover::-webkit-slider-thumb,
-.%p%-player-seek:focus-visible::-webkit-slider-thumb,
-.%p%-player-volume:focus-visible::-webkit-slider-thumb {
-  background: var(--interactive-accent-hover);
+.%p%-player:hover .%p%-player-seek::-webkit-slider-thumb,
+.%p%-player:hover .%p%-player-volume::-webkit-slider-thumb,
+.%p%-player:focus-within .%p%-player-seek::-webkit-slider-thumb,
+.%p%-player:focus-within .%p%-player-volume::-webkit-slider-thumb {
+  opacity: 1;
 }
 
 /* Silence is the whole control being off, thumb and all — not a grey track with a lit knob. */
