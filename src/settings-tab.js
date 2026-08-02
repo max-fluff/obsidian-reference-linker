@@ -1,11 +1,12 @@
 'use strict';
 
-const { PluginSettingTab, Setting } = require('obsidian');
+const { PluginSettingTab, Setting, setIcon } = require('obsidian');
 const { PRESETS, BIB_EXTS, parseExtensions } = require('./constants');
-const { formatGroups, knownExtensions } = require('./formats');
+const { formatGroups, knownExtensions, canOutline, hasOsAnchor } = require('./formats');
 const { DiskPathSuggest, suggestAvailable } = require('./shared/deeplink/disk-suggest');
 const { renderFolderList } = require('./shared/folder-list');
 const { t, plural } = require('./shared/i18n');
+const { redraw } = require('./shared/settings-redraw');
 const { renderPrecedenceSetting: precedenceSetting } = require('./shared/precedence');
 
 // Path tidy for the folder-list rows: backslashes to slashes, no trailing slash.
@@ -81,8 +82,28 @@ class ReferenceLinkerSettingTab extends PluginSettingTab {
         cls: 'reference-linker-note',
         text: keys ? t('set.bibFiles.stats', { keys, matched }) : t('set.bibFiles.none'),
       });
+      // Which keys found nothing, not only how many: a key silently matching no document is
+      // exactly the case a reader has to fix, and a count cannot say which one it is.
+      const unmatched = this.plugin.unmatchedCitations();
+      if (unmatched.length) {
+        statusEl.createEl('div', {
+          cls: 'reference-linker-note',
+          text: t('set.bibFiles.unmatched', { keys: unmatched.slice(0, 20).join(', ') })
+            + (unmatched.length > 20 ? ' ' + t('modal.andMore', { n: unmatched.length - 20 }) : ''),
+        });
+      }
     };
     drawStatus();
+  }
+
+  // What a format can do, as a mark beside its name. Whether a link lands where it points is
+  // otherwise learnable only by clicking one; the tooltip carries the sentence the icon can't.
+  // Both marks are always drawn, dimmed when the answer is no, so the column stays scannable.
+  // Previewing is not shown at all: every format previews, so the answer would never differ.
+  capIcon(row, on, icon, key) {
+    const el = row.nameEl.createSpan({ cls: 'reference-linker-cap' + (on ? '' : ' is-off') });
+    setIcon(el, icon);
+    el.setAttribute('aria-label', t('set.caps.' + key + (on ? '' : '.no')));
   }
 
   // The setting stays one string — parseExtensions reads it unchanged, the list only
@@ -118,6 +139,11 @@ class ReferenceLinkerSettingTab extends PluginSettingTab {
         .setDesc(partial
           ? t('set.extensions.meta', { n: enabled.length, total: g.exts.length, exts: g.exts.join(' ') })
           : g.exts.join(' '));
+      // Beside the name rather than in the description: the extension list is what the reader
+      // scans, and spelling these out in words crowded it off the row.
+      const ext = g.exts[0].slice(1);
+      this.capIcon(row, canOutline(ext), 'list', 'sections');
+      this.capIcon(row, hasOsAnchor(ext), 'crosshair', 'anchor');
 
       if (g.exts.length > 1) {
         this.foldButton(row, open, () => {
@@ -151,7 +177,12 @@ class ReferenceLinkerSettingTab extends PluginSettingTab {
     });
   }
 
+  // Every fold and toggle redraws the whole pane; the reader keeps their place (shared/settings-redraw).
   display() {
+    redraw(this, () => this.draw());
+  }
+
+  draw() {
     const { containerEl } = this;
     containerEl.empty();
     const s = this.plugin.settings;

@@ -76,9 +76,9 @@ describe('the containers a format comes in', () => {
     docx: ['docm', 'dotx', 'dotm'],
     xlsx: ['xlsm', 'xltx', 'xltm'],
     pptx: ['pptm', 'potx', 'potm'],
-    odt: ['ott'],
-    ods: ['ots'],
-    odp: ['otp', 'odg', 'otg'],
+    odt: ['ott', 'fodt'],
+    ods: ['ots', 'fods'],
+    odp: ['otp', 'odg', 'otg', 'fodp', 'fodg'],
   };
 
   for (const [base, variants] of Object.entries(SAME)) {
@@ -90,8 +90,12 @@ describe('the containers a format comes in', () => {
     });
   }
 
-  it('does not claim the flat single-file ODF, which is not a zip at all', () => {
-    for (const v of ['fodt', 'fods', 'fodp']) assert.strictEqual(formats.handlerFor(v), null);
+  // The flat ODF used to be turned away for being one XML file rather than a zip. It is the
+  // same markup either way, so the handler reads it through a source that answers both parts.
+  it('claims the flat single-file ODF, which is not a zip at all', () => {
+    for (const v of ['fodt', 'fods', 'fodp', 'fodg']) {
+      assert.strictEqual(formats.handlerFor(v), formats.handlerFor('odt'), '.' + v + ' is routed elsewhere');
+    }
   });
 });
 

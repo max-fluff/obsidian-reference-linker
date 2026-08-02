@@ -1,9 +1,10 @@
 'use strict';
 
-// OpenDocument (LibreOffice/OpenOffice): a zip whose content.xml holds the body. A text
-// document renders as HTML, a spreadsheet as a table, a deck and a drawing as pages. No OS
-// anchor: the fragment doesn't survive the viewer.
+// OpenDocument (LibreOffice/OpenOffice): a zip of parts, or one flat XML file saying the same.
+// A text document renders as HTML, a spreadsheet as a table, a deck and a drawing as pages. No
+// OS anchor: the fragment doesn't survive the viewer.
 
+const fs = require('fs');
 const { openZip } = require('../zip');
 const { elements, elementsOf, attr, decodeEntities } = require('../xml');
 const { renderLines, renderHtml, renderFrame } = require('./preview');
@@ -15,13 +16,18 @@ const MAX_LINES = 60;
 
 // A template holds the same content.xml as the document it makes; only the mimetype differs. A
 // drawing is a list of draw:page, which is what a deck is too.
-const KIND = { ott: 'odt', ots: 'ods', otp: 'odp', odg: 'odp', otg: 'odp' };
+const KIND = {
+  ott: 'odt', ots: 'ods', otp: 'odp', odg: 'odp', otg: 'odp',
+  fodt: 'odt', fods: 'ods', fodp: 'odp', fodg: 'odp',
+};
 const kindOf = (ext) => KIND[String(ext || '').toLowerCase()] || ext;
 
 // A drawing reads as a deck, with one difference: its pages are named in the file and shown by
 // name, where a slide's draw:name is the untouched "page1" every deck carries.
-const DRAWING = new Set(['odg', 'otg']);
+const DRAWING = new Set(['odg', 'otg', 'fodg']);
 const named = (ext) => DRAWING.has(String(ext || '').toLowerCase());
+
+const FLAT = new Set(['fodt', 'fods', 'fodp', 'fodg']);
 
 const without = (xml, tag) => elements(xml, tag).reduce((acc, src) => acc.replace(src, ''), xml);
 
@@ -31,9 +37,29 @@ const ASIDES = ['office:annotation', 'office:annotation-end', 'text:tracked-chan
 
 const readable = (xml) => (xml ? ASIDES.reduce(without, xml) : xml);
 
-function contentOf(absPath) {
-  const zip = openZip(absPath);
-  return zip ? readable(zip.text('content.xml')) : null;
+// The document's parts, however they are stored. A flat file answers every part with itself:
+// its automatic styles, master styles and body share one document element. Its images are
+// inline base64 rather than members, so there is nothing for `read` to hand back.
+function openOdf(absPath, ext) {
+  if (!FLAT.has(String(ext || '').toLowerCase())) return openZip(absPath);
+  let xml;
+  try {
+    xml = fs.readFileSync(absPath, 'utf8');
+  } catch {
+    return null;
+  }
+  const parts = new Set(['content.xml', 'styles.xml']);
+  return {
+    names: () => [...parts],
+    has: (name) => parts.has(name),
+    read: () => null,
+    text: (name) => (parts.has(name) ? xml : null),
+  };
+}
+
+function contentOf(absPath, ext) {
+  const src = openOdf(absPath, ext);
+  return src ? readable(src.text('content.xml')) : null;
 }
 
 // A run of ODF markup to readable lines: paragraphs and headings become lines, the space and
@@ -44,6 +70,9 @@ function textLines(xml) {
   let m;
   while ((m = TEXT_BLOCK.exec(xml))) {
     const line = decodeEntities(m[1]
+      // A flat file keeps its pictures in the paragraph that holds them, so stripping tags
+      // alone would read a whole picture out as a line of base64.
+      .replace(/<office:binary-data\b[^>]*>[\s\S]*?<\/office:binary-data>/g, '')
       .replace(/<text:tab\b[^>]*\/?>/g, ' ')
       .replace(/<text:s\b[^>]*\/?>/g, ' ')
       .replace(/<text:line-break\b[^>]*\/?>/g, ' ')
@@ -265,15 +294,49 @@ function blockHtml(span, ctx) {
   return openTag(name, cls) + inner + '</' + name + '>';
 }
 
+// A flat file keeps its pictures in the markup as base64 rather than beside it, so the src is
+// the data itself. The type is sniffed from the first bytes: ODF need not declare one, and a
+// data URI carrying the wrong type does not render at all.
+const IMAGE_MAGIC = [
+  ['image/png', [0x89, 0x50, 0x4e, 0x47]],
+  ['image/jpeg', [0xff, 0xd8, 0xff]],
+  ['image/gif', [0x47, 0x49, 0x46]],
+  ['image/bmp', [0x42, 0x4d]],
+];
+// Past this the data URI is dropped rather than carried: the whole document travels inside one
+// srcdoc string, and a preview is a glance, not a gallery.
+const MAX_INLINE_IMAGE = 4 * 1024 * 1024;
+
+function inlineImageSrc(imageXml) {
+  const held = elements(imageXml, 'office:binary-data')[0];
+  if (!held) return '';
+  const b64 = held.replace(/<[^>]*>/g, '').replace(/\s+/g, '');
+  if (!b64 || b64.length * 0.75 > MAX_INLINE_IMAGE) return '';
+  let head;
+  try { head = Buffer.from(b64.slice(0, 24), 'base64'); } catch { return ''; }
+  const hit = IMAGE_MAGIC.find(([, magic]) => magic.every((b, i) => head[i] === b));
+  let mime = hit && hit[0];
+  if (!mime && head.slice(0, 4).toString('latin1') === 'RIFF') mime = 'image/webp';
+  if (!mime && /<svg|<\?xml/i.test(head.toString('utf8'))) mime = 'image/svg+xml';
+  return 'data:' + (mime || 'image/png') + ';base64,' + b64;
+}
+
+// The picture a draw:image points at, however it holds it. Empty when there is neither a
+// member to load nor data to carry.
+function imageTag(imageXml) {
+  const href = attr(openingTag(imageXml), 'xlink:href');
+  const src = href || inlineImageSrc(imageXml);
+  return src ? '<img src="' + escAttr(src) + '">' : '';
+}
+
 // A run of ODF text markup to HTML: headings, paragraphs, lists, tables and images become their
 // HTML counterparts and everything else is dropped. Not a full ODF renderer — enough structure
 // that a document reads as a document, not a list of lines.
 function odtToHtml(xml, ctx) {
+  // Paired as well as self-closing: a flat file wraps its data in the element, and matching
+  // only the opening tag would spill the base64 into the text.
   const body = readable(xml)
-    .replace(/<draw:image\b[^>]*\/?>/g, (m) => {
-      const href = attr(m, 'xlink:href');
-      return href ? '<img src="' + escAttr(href) + '">' : '';
-    });
+    .replace(/<draw:image\b[^>]*(?:\/>|>[\s\S]*?<\/draw:image>)/g, (m) => imageTag(m));
   return blocks(body).map((b) => blockHtml(b, ctx)).join('');
 }
 
@@ -298,14 +361,14 @@ function outlineFor(ext, xml) {
 }
 
 async function readOutline(absPath, ext) {
-  const xml = contentOf(absPath);
+  const xml = contentOf(absPath, ext);
   return xml ? outlineFor(ext, xml) : [];
 }
 
 // The text of one section: an odt heading's run up to the next, a slide's frames, a sheet's
 // cells.
 async function readSection(absPath, ext, position) {
-  const xml = contentOf(absPath);
+  const xml = contentOf(absPath, ext);
   if (!xml) return null;
 
   if (kindOf(ext) === 'odp') {
@@ -337,7 +400,7 @@ async function readSection(absPath, ext, position) {
 }
 
 async function count(absPath, ext) {
-  const xml = contentOf(absPath);
+  const xml = contentOf(absPath, ext);
   if (!xml) return 0;
   if (kindOf(ext) === 'odp') return elements(xml, 'draw:page').length;
   if (kindOf(ext) === 'ods') return elements(xml, 'table:table').length;
@@ -345,7 +408,7 @@ async function count(absPath, ext) {
 }
 
 // Images in an odt live in the zip (the href is a member path like "Pictures/1000.png").
-const imageLoader = (zip) => (src) => (zip ? zip.read(assetSrc(src)) : null);
+const imageLoader = (doc) => (src) => (doc ? doc.read(assetSrc(src)) : null);
 
 // Rules the document does not state but a page implies, kept apart from the translated CSS so
 // which of the two a declaration came from stays obvious.
@@ -385,26 +448,24 @@ function shapeHtml(shape, ctx) {
   const box = shapeBox(shape);
   if (!box) return '';
   const image = elements(shape, 'draw:image')[0];
-  const href = image && attr(openingTag(image), 'xlink:href');
+  const picture = image ? imageTag(image) : '';
   const css = Object.assign({ position: 'absolute', overflow: 'hidden' }, {
     left: box.left, top: box.top, width: box.width, height: box.height || null,
   }, odfStyles.styleCss(ctx.styles, ownAttr(shape, 'draw:style-name')));
   const cls = ctx.sheet.cls(css);
-  const inner = href
-    ? '<img src="' + escAttr(href) + '">'
-    : blocks(shape).map((b) => blockHtml(b, ctx)).join('');
+  const inner = picture || blocks(shape).map((b) => blockHtml(b, ctx)).join('');
   return inner ? '<div class="' + cls + '">' + inner + '</div>' : '';
 }
 
 // The slide drawn at the size the deck declares, every shape where the deck puts it. A slide is
 // a layout, and text alone throws that away.
-function slidePage(zip, xml, position, width) {
+function slidePage(doc, xml, position, width) {
   const slides = elements(xml, 'draw:page');
   if (!slides.length) return null;
-  const page = odfStyles.pageOf(zip.text('styles.xml'));
+  const page = odfStyles.pageOf(doc.text('styles.xml'));
   if (!page) return null;
   const slide = slides[clampPosition(position, slides.length) - 1];
-  const ctx = { styles: odfStyles.readStyles(zip.text('content.xml'), zip.text('styles.xml')), sheet: cssSheet('o') };
+  const ctx = { styles: odfStyles.readStyles(doc.text('content.xml'), doc.text('styles.xml')), sheet: cssSheet('o') };
   const shapes = SHAPE.flatMap((tag) => elements(slide, tag))
     .map((s) => ({ at: slide.indexOf(s), html: shapeHtml(s, ctx) }))
     .filter((s) => s.html)
@@ -422,11 +483,11 @@ function slidePage(zip, xml, position, width) {
 
 // The section drawn on the sheet the document declares, at that sheet's true size and shrunk to
 // the width there is room for, so the proportions stay the author's.
-function documentPage(zip, xml, position, width, view) {
+function documentPage(doc, xml, position, width, view) {
   const sec = odtSectionXml(xml, position);
-  const ctx = { styles: odfStyles.readStyles(zip.text('content.xml'), zip.text('styles.xml')), sheet: cssSheet('o') };
+  const ctx = { styles: odfStyles.readStyles(doc.text('content.xml'), doc.text('styles.xml')), sheet: cssSheet('o') };
   const body = odtToHtml(sec.xml, ctx);
-  const page = pageCss(odfStyles.pageOf(zip.text('styles.xml')), width, view);
+  const page = pageCss(odfStyles.pageOf(doc.text('styles.xml')), width, view);
   return {
     html: '<div class="page">' + body + '</div>',
     css: [PAGE_RULES, page.css, 'html{zoom:' + page.zoom + '}', ctx.sheet.text()].filter(Boolean).join('\n'),
@@ -441,11 +502,11 @@ async function render(el, req) {
   // Both render as HTML when the app can, and fall back to the flat text otherwise (the test
   // stubs have no sanitizer).
   if (kind === 'ods') {
-    const zip = openZip(req.abs);
-    const xml = zip ? readable(zip.text('content.xml')) : null;
+    const doc = openOdf(req.abs, req.ext);
+    const xml = doc ? readable(doc.text('content.xml')) : null;
     const tables = xml ? elements(xml, 'table:table') : [];
     if (req.isCurrent() && tables.length) {
-      const ctx = { styles: odfStyles.readStyles(zip.text('content.xml'), zip.text('styles.xml')), sheet: cssSheet('o') };
+      const ctx = { styles: odfStyles.readStyles(doc.text('content.xml'), doc.text('styles.xml')), sheet: cssSheet('o') };
       const html = sheetTable(tables[clampPosition(req.position, tables.length) - 1], ctx);
       if (html) {
         const css = [SHEET_RULES, ctx.sheet.text()].join('\n');
@@ -461,11 +522,11 @@ async function render(el, req) {
     }
   }
   if (kind === 'odt') {
-    const zip = openZip(req.abs);
-    const xml = zip ? readable(zip.text('content.xml')) : null;
+    const doc = openOdf(req.abs, req.ext);
+    const xml = doc ? readable(doc.text('content.xml')) : null;
     if (req.isCurrent() && xml) {
-      const page = documentPage(zip, xml, req.position, width, req.view);
-      const loadImage = imageLoader(zip);
+      const page = documentPage(doc, xml, req.position, width, req.view);
+      const loadImage = imageLoader(doc);
       // The frame first: the sanitizer strips the class attributes the document's own
       // formatting is written against, and inlining keeps the structure but loses it.
       const framed = renderFrame(el, {
@@ -479,11 +540,11 @@ async function render(el, req) {
   }
 
   if (kind === 'odp') {
-    const zip = openZip(req.abs);
-    const xml = zip ? readable(zip.text('content.xml')) : null;
-    const page = xml && req.isCurrent() ? slidePage(zip, xml, req.position, width) : null;
+    const doc = openOdf(req.abs, req.ext);
+    const xml = doc ? readable(doc.text('content.xml')) : null;
+    const page = xml && req.isCurrent() ? slidePage(doc, xml, req.position, width) : null;
     if (page) {
-      const loadImage = imageLoader(zip);
+      const loadImage = imageLoader(doc);
       const flat = () => readSection(req.abs, req.ext, req.position)
         .then((sec) => sec && renderLines(el, { title: sec.title, body: sec.body, width: req.width, zoom }));
       // A frame the app refuses must still leave something readable: renderFrame reports its
@@ -502,7 +563,7 @@ async function render(el, req) {
 
 module.exports = {
   id: 'odf',
-  exts: ['odt', 'ods', 'odp', 'odg', 'ott', 'ots', 'otp', 'otg'],
+  exts: ['odt', 'ods', 'odp', 'odg', 'ott', 'ots', 'otp', 'otg', 'fodt', 'fods', 'fodp', 'fodg'],
   anchorKind: null,
   capabilities: (ext) => ({ paged: true, zoomable: true, scrollable: kindOf(ext) !== 'odp' }),
   count,

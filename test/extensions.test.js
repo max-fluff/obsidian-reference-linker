@@ -24,8 +24,18 @@ function render(extensions, expand) {
   tab.display = () => { calls.display++; };
   tab.showExtensions = true;
   if (expand) tab.expandedFormats.add(expand);
+  // The marks are drawn into the name element, which the recording Setting does not keep, so
+  // they are captured here — against the row being built, which is the last one recorded.
+  const marks = [];
+  const drawn = tab.capIcon.bind(tab);
+  tab.capIcon = (row, on, icon, key) => {
+    const last = RecordingSetting.entries[RecordingSetting.entries.length - 1];
+    marks.push({ format: last ? last.name : null, on, key });
+    drawn(row, on, icon, key);
+  };
   tab.renderExtensions(elLike(), async (rebuild) => { calls.save.push(rebuild); });
-  return { settings, calls, on: () => [...parseExtensions(settings.extensions)] };
+  const marksFor = (name) => marks.filter((m) => m.format === name);
+  return { settings, calls, marksFor, on: () => [...parseExtensions(settings.extensions)] };
 }
 
 // Rows are looked up by their rendered name, and another test file may have loaded the
@@ -46,13 +56,38 @@ describe('the file-extension list', () => {
     assert.deepStrictEqual(r.on(), ['.pdf']);
   });
 
+  const descOf = (name) => RecordingSetting.entries.find((e) => e.name === name).desc;
+
+  // The description is the extension list and nothing else: spelling the capabilities out in
+  // words beside them crowded the extensions off the row, which is what the marks replaced.
   it('reads as on while any of its extensions is', () => {
     render('.png');
     assert.strictEqual(RecordingSetting.control(images(), 'toggle').value, true);
     assert.strictEqual(
-      RecordingSetting.entries.find((e) => e.name === images()).desc,
+      descOf(images()),
       t('set.extensions.meta', { n: 1, total: 8, exts: '.png .jpg .jpeg .gif .webp .bmp .svg .avif' }),
     );
+  });
+
+  // Whether a link lands where it points is the one thing the row can say that clicking a
+  // link would otherwise have to.
+  it('marks of each format whether it has sections and opens at the position', () => {
+    const r = render('');
+    assert.deepStrictEqual(r.marksFor(pdf()), [
+      { format: pdf(), on: true, key: 'sections' },
+      { format: pdf(), on: true, key: 'anchor' },
+    ]);
+    assert.deepStrictEqual(r.marksFor(images()), [
+      { format: images(), on: false, key: 'sections' },
+      { format: images(), on: false, key: 'anchor' },
+    ]);
+  });
+
+  // PowerPoint has an outline but its viewer ignores the fragment, so the two marks disagree —
+  // the case a single "supported / not" mark could not tell.
+  it('marks a format that has sections but does not open at them', () => {
+    const r = render('');
+    assert.deepStrictEqual(r.marksFor(t('set.format.pptx')).map((m) => m.on), [true, false]);
   });
 
   it('toggles one extension from the expanded format', async () => {

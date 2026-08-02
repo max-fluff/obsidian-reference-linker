@@ -260,58 +260,60 @@ function buildEpub(chapters, flavour = 'nav') {
   return writeZip(files);
 }
 
-const odfDoc = (body, styles) =>
-  '<?xml version="1.0"?><office:document-content '
-  + 'xmlns:office="urn:o" xmlns:text="urn:t" xmlns:draw="urn:d" xmlns:table="urn:tb" '
-  + 'xmlns:presentation="urn:p" xmlns:style="urn:s" xmlns:fo="urn:f">'
-  + (styles ? '<office:automatic-styles>' + styles + '</office:automatic-styles>' : '')
-  + '<office:body>' + body + '</office:body></office:document-content>';
+// The flat form is the same body under office:document, saved as one file: no zip, and the
+// styles a zip would keep in styles.xml sit here beside the automatic ones.
+const odfDoc = (body, styles, flat) => {
+  const root = flat ? 'office:document' : 'office:document-content';
+  return '<?xml version="1.0"?><' + root + ' '
+    + 'xmlns:office="urn:o" xmlns:text="urn:t" xmlns:draw="urn:d" xmlns:table="urn:tb" '
+    + 'xmlns:presentation="urn:p" xmlns:style="urn:s" xmlns:fo="urn:f">'
+    + (styles ? '<office:automatic-styles>' + styles + '</office:automatic-styles>' : '')
+    + '<office:body>' + body + '</office:body></' + root + '>';
+};
+
+const odfFile = (mimetype, body, styles, flat) => (flat
+  ? odfDoc(body, styles, true)
+  : writeZip([
+    { name: 'mimetype', data: mimetype, store: true },
+    { name: 'content.xml', data: odfDoc(body, styles) },
+  ]));
 
 // An .odt from [{ heading, paras }]. Real ODF wraps the text in office:text; headings carry
 // an outline level.
-function buildOdt(sections) {
+function buildOdt(sections, { flat = false } = {}) {
   const body = '<office:text>' + sections.map((s) =>
     '<text:h text:outline-level="1">' + s.heading + '</text:h>'
     + (s.paras || []).map((p) => '<text:p>' + p + '</text:p>').join('')).join('') + '</office:text>';
-  return writeZip([
-    { name: 'mimetype', data: 'application/vnd.oasis.opendocument.text', store: true },
-    { name: 'content.xml', data: odfDoc(body) },
-  ]);
+  return odfFile('application/vnd.oasis.opendocument.text', body, '', flat);
 }
 
 // An .odp from [{ title, body }]. Each slide is a draw:page; the title sits in a frame marked
 // presentation:class="title". The body frame is written FIRST, before the title frame, so a
 // reader that just took the first text line would get the body, not the title — frame order
 // is not guaranteed in real files.
-function buildOdp(slides) {
+function buildOdp(slides, { flat = false } = {}) {
   const body = '<office:presentation>' + slides.map((s) =>
     '<draw:page draw:name="page">'
     + '<draw:frame presentation:class="outline">' + (s.body || []).map((l) => '<text:p>' + l + '</text:p>').join('') + '</draw:frame>'
     + (s.title ? '<draw:frame presentation:class="title"><text:p>' + s.title + '</text:p></draw:frame>' : '')
     + '</draw:page>').join('') + '</office:presentation>';
-  return writeZip([
-    { name: 'mimetype', data: 'application/vnd.oasis.opendocument.presentation', store: true },
-    { name: 'content.xml', data: odfDoc(body) },
-  ]);
+  return odfFile('application/vnd.oasis.opendocument.presentation', body, '', flat);
 }
 
 // An .odg from [{ name, lines }]. A drawing is draw:page like a deck, but its pages are named
 // rather than titled and a page may hold only shapes.
-function buildOdg(pages) {
+function buildOdg(pages, { flat = false } = {}) {
   const body = '<office:drawing>' + pages.map((p) =>
     '<draw:page draw:name="' + p.name + '">'
     + (p.lines || []).map((l) => '<draw:frame><text:p>' + l + '</text:p></draw:frame>').join('')
     + '</draw:page>').join('') + '</office:drawing>';
-  return writeZip([
-    { name: 'mimetype', data: 'application/vnd.oasis.opendocument.graphics', store: true },
-    { name: 'content.xml', data: odfDoc(body) },
-  ]);
+  return odfFile('application/vnd.oasis.opendocument.graphics', body, '', flat);
 }
 
 // An .ods from [{ name, rows }] (rows is an array of cell-string arrays) or the shorthand
 // [{ name, cells }] for a single row. A cell may be `{ text, style }` and a sheet may carry
 // `cols: [styleName]`; `opts.styles` is the raw style:style run those names refer to.
-function buildOds(sheets, { styles = '' } = {}) {
+function buildOds(sheets, { styles = '', flat = false } = {}) {
   const cellXml = (c) => {
     const { text, style, cols, rows, covered } = typeof c === 'object' && c ? c : { text: c };
     if (covered) return '<table:covered-table-cell/>';
@@ -327,10 +329,7 @@ function buildOds(sheets, { styles = '' } = {}) {
     return '<table:table table:name="' + s.name + '">'
       + (s.cols || []).map(colXml).join('') + rows.map(rowXml).join('') + '</table:table>';
   }).join('') + '</office:spreadsheet>';
-  return writeZip([
-    { name: 'mimetype', data: 'application/vnd.oasis.opendocument.spreadsheet', store: true },
-    { name: 'content.xml', data: odfDoc(body, styles) },
-  ]);
+  return odfFile('application/vnd.oasis.opendocument.spreadsheet', body, styles, flat);
 }
 
 // A .docx from a list of blocks:

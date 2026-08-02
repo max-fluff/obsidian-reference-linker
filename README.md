@@ -12,7 +12,7 @@
 
 An Obsidian plugin that autocompletes links to the documents living outside your vault — papers, manuals, decks, spreadsheets, e-books, recordings — and inserts a markdown link that opens the right page in your default app.
 
-- **11 formats, 53 extensions, no converters.** PDF, Word, Excel, PowerPoint, OpenDocument, EPUB, HTML, Markdown, CSV, images, audio and video — every reader is the plugin's own. No pandoc, no LibreOffice, nothing to install alongside it.
+- **11 formats, 57 extensions, no converters.** PDF, Word, Excel, PowerPoint, OpenDocument, EPUB, HTML, Markdown, CSV, images, audio and video — every reader is the plugin's own. No pandoc, no LibreOffice, nothing to install alongside it.
 - **Sections, not just file names.** Where a format carries an outline — a PDF's bookmarks, Word and HTML headings, a workbook's sheets, an EPUB's table of contents, one entry per slide — every section is indexed on its page, so `@!intro` finds the *Introduction* of a paper rather than the paper.
 - **The document, shown in the note.** Hover a link for the page rendered, the slide drawn, the document laid out or the sheet as a real table; a ` ```reference-link ` block puts the same thing inline, and a range stacks several pages at once.
 - **Links that notice the document changed.** A link pinned to its section is checked against the index: when the file is reissued and the section moves, the link is marked and updated in place, one note or the whole vault. Point the plugin at a BibTeX or CSL-JSON bibliography and a link is pinned to its citation key too, so it survives the document being renamed or re-filed.
@@ -36,6 +36,7 @@ The plugin ships as `main.js`, `manifest.json` and `styles.css`. It scans the fo
   - [Autocomplete as you type](#autocomplete-as-you-type)
   - [Drag & drop from your file manager](#drag--drop-from-your-file-manager)
   - [Document sections](#document-sections)
+  - [Citation keys](#citation-keys)
   - [Portable `{ref-root}` links](#portable-ref-root-links)
   - [Opening at a page](#opening-at-a-page)
   - [Hover preview](#hover-preview)
@@ -121,7 +122,22 @@ with no outline is normal rather than a failure, and its preview shows the docum
 
 A document with no outline — a PDF without bookmarks, a plain `.docx`, an `.epub` — is still indexed by file name, and its link still opens it. Only the section entries are missing.
 
-Each of those formats is also read under the extensions its own application saves it as: the macro-enabled `.docm .xlsm .pptm .dotm .xltm .potm`, the templates `.dotx .xltx .potx .ott .ots .otp`. They are the same package under another name, and each format's row in **File extensions** lists every one of them. The flat single-file ODF (`.fodt .fods .fodp`) is not — it is one XML file rather than a zip, and it is not read.
+Each of those formats is also read under the extensions its own application saves it as: the macro-enabled `.docm .xlsm .pptm .dotm .xltm .potm`, the templates `.dotx .xltx .potx .ott .ots .otp`, and the flat single-file OpenDocument `.fodt .fods .fodp .fodg` that LibreOffice offers alongside the zipped one. They are the same document under another name, and each format's row in **File extensions** lists every one of them — pictures and all, whether the file keeps them beside the text or inside it.
+
+### Citation keys
+
+Point **Bibliographies** at a `.bib` or CSL-`.json` file — or at the folder your manager exports into — and every citation key in it is matched to a document in the index. Zotero, Mendeley, JabRef and Better BibTeX are all read; their quirks (escaped separators, Windows drive letters, `file://` attachment paths) are handled.
+
+A key is matched to the document its bibliography entry attaches to, tried in this order: the full path it states, then the tail of that path, then the file name, then the title with punctuation folded away. **Two documents answering to one name is not a match** — a wrong key in a note outlives the mistake, so no key is better than the wrong one. The settings pane says how many of the keys found a document, and lists the ones that did not.
+
+Once a bibliography is read, a key is two things at once:
+
+- **A way to find a document.** `@!cite:knuth1984` searches the keys instead of the file names, so you reach a paper by how you cite it rather than by what it happens to be called on disk. `@!cite:` on its own lists everything your bibliography knows.
+- **A way to hold onto it.** Right-click a link → **Pin to citation key**, and the key goes into the link's title as `cite:knuth1984`. Where `sec:` asks "did this section move inside the document", `cite:` asks "is this still the document at all" — so when your manager re-files a paper, the link is repaired by path rather than by page. That is the case a rename makes, and `sec:` cannot see it, because the renamed file drops out of the index and takes every link to it along.
+
+The plugin reads keys and never writes bibliographies, and it does not render a formatted citation — that is a bibliography manager's job.
+
+You can also ask what the vault cites: **Export citations used in the vault** collects every key your notes actually pin to and writes them into a note, with the documents and the notes that cite them.
 
 ### Portable `{ref-root}` links
 
@@ -241,6 +257,7 @@ Rename that PDF, or move it to another folder, and the bibliography still knows 
 - **Convert selection to reference link** / **Find and open document** — resolve the selection against the index, then convert it or open the document (one match acts directly, several open the picker).
 - **Update reference links in this note** / **… in the whole vault**.
 - **Pin unpinned reference links in this note** / **… in the whole vault** — attach a `sec:` binding to links whose page begins a section.
+- **Export citations used in the vault** — collect every citation key your notes pin to and write them into a new note. A report is a snapshot, so it never overwrites an earlier one.
 - **Rebuild reference index**.
 
 <p align="center">
@@ -358,7 +375,8 @@ In an existing clone without the submodule, run `git submodule update --init` fi
 - `formats/` — one module per document format: which extensions it claims, what it outlines, how it previews, what anchor its links carry. The only place that branches on an extension; see [`CONTRIBUTING.md`](CONTRIBUTING.md) for the handler contract.
 - `zip.js`, `xml.js` — the readers the packaged formats (OOXML, ODF, EPUB) share.
 - `suggest.js` — the `EditorSuggest` that drives autocomplete.
-- `filter.js` — the inline `pdf:` / `sec:` query filter.
+- `bib.js` — a bibliography read for its citation keys and the files they attach to (BibTeX, CSL-JSON).
+- `citations.js` — which indexed document each key names; plain data, no filesystem.
 - `pdf.js` — Obsidian's pdf.js via `loadPdfJs()`: outline reading and page rendering.
 - `hover.js` — the preview popover.
 - `embed.js` — the inline ` ```reference-link ` block renderer.
@@ -367,7 +385,7 @@ In an existing clone without the submodule, run `git submodule update --init` fi
 - `modal.js` — the fuzzy pickers (index entries, viewer formats).
 - `settings-tab.js` — the settings UI.
 - `styles.css` — this plugin's own styles; the shipped `styles.css` is assembled from the shared ones plus this by `npm run build`.
-- `shared/` — git submodule shared with the sibling linker plugins: markdown helpers, the link-binding grammar, the i18n engine, the folder-list settings editor, the folder autocomplete, and the family's branding generators (dev-only, nothing under `shared/branding/` is bundled).
+- `shared/` — git submodule shared with the sibling linker plugins: markdown helpers, the link-binding grammar, the facet registry behind the inline `pdf:` / `sec:` / `cite:` filters, the i18n engine, the folder-list settings editor, the folder autocomplete, and the family's branding generators (dev-only, nothing under `shared/branding/` is bundled).
 - `locales/` — interface strings (English and Russian), fed to the shared i18n engine.
 
 The header images are generated rather than hand-drawn. `docs/branding.config.mjs` holds this plugin's mark, motif and copy, and the shared generators turn it into the assets:

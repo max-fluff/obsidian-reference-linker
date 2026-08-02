@@ -739,4 +739,21 @@ input[type="text"].reference-linker-embed-position:focus {
   gap: 6px;
 }
 
+/* Format capability marks beside the name in the extension list. */
+.reference-linker-cap {
+  display: inline-flex;
+  vertical-align: middle;
+  margin-left: 6px;
+  color: var(--text-muted);
+}
+
+.reference-linker-cap.is-off {
+  opacity: 0.32;
+}
+
+.reference-linker-cap svg {
+  width: 15px;
+  height: 15px;
+}
+
 /* Reference Linker 1.2.0 */

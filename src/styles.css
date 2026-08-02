@@ -410,3 +410,20 @@ input[type="text"].%p%-embed-position:focus {
   align-items: center;
   gap: 6px;
 }
+
+/* Format capability marks beside the name in the extension list. */
+.%p%-cap {
+  display: inline-flex;
+  vertical-align: middle;
+  margin-left: 6px;
+  color: var(--text-muted);
+}
+
+.%p%-cap.is-off {
+  opacity: 0.32;
+}
+
+.%p%-cap svg {
+  width: 15px;
+  height: 15px;
+}

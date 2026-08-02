@@ -539,3 +539,103 @@ describe('odf as the applications really write it', () => {
     assert.deepStrictEqual(sec.body, ['Body.']);
   });
 });
+
+// A flat document says content.xml and styles.xml in one file, so the reader answers both
+// parts off the same markup. Every kind is covered: what changed is the container, not the
+// reading, and each kind reaches the container by a different path.
+describe('flat odf (one file, no zip)', () => {
+  const { buildOdg } = require('./helpers/ooxml');
+
+  it('reads a .fodt outline and section', async () => {
+    const file = tmp('a.fodt', buildOdt([
+      { heading: 'Introduction', paras: ['First para.'] },
+      { heading: 'Method', paras: ['How it works.'] },
+    ], { flat: true }));
+    assert.deepStrictEqual(await readOutline(file, 'fodt'), [
+      { title: 'Introduction', position: 1 },
+      { title: 'Method', position: 2 },
+    ]);
+    const sec = await readSection(file, 'fodt', 2);
+    assert.strictEqual(sec.title, 'Method');
+    assert.deepStrictEqual(sec.body, ['How it works.']);
+  });
+
+  it('reads a .fods sheet by name', async () => {
+    const file = tmp('a.fods', buildOds([
+      { name: 'Summary', cells: ['Total', '42'] },
+      { name: 'Detail', cells: ['Item'] },
+    ], { flat: true }));
+    assert.deepStrictEqual(await readOutline(file, 'fods'), [
+      { title: 'Summary', position: 1 },
+      { title: 'Detail', position: 2 },
+    ]);
+  });
+
+  it('reads a .fodp slide title', async () => {
+    const file = tmp('a.fodp', buildOdp([{ title: 'Agenda', body: ['One'] }], { flat: true }));
+    assert.deepStrictEqual(await readOutline(file, 'fodp'), [{ title: 'Agenda', position: 1 }]);
+  });
+
+  it('names a .fodg page rather than titling it like a slide', async () => {
+    const file = tmp('a.fodg', buildOdg([{ name: 'Flowchart' }], { flat: true }));
+    assert.deepStrictEqual(await readOutline(file, 'fodg'), [{ title: 'Flowchart', position: 1 }]);
+  });
+
+  it('gives nothing rather than throwing when the file is not there', async () => {
+    const missing = path.join(os.tmpdir(), 'no-such-reflinker-file.fodt');
+    assert.deepStrictEqual(await readOutline(missing, 'fodt'), []);
+    assert.strictEqual(await readSection(missing, 'fodt', 1), null);
+  });
+});
+
+// A zipped document points at a picture beside it; a flat one carries the bytes. Both end as an
+// <img>, but the flat one has to say what it is carrying, since a data URI with the wrong type
+// renders as nothing at all.
+describe('pictures, held either way', () => {
+  const { odtToHtml } = require('../src/formats/odf');
+  const b64 = (bytes) => Buffer.from(bytes).toString('base64');
+  const held = (data) => '<draw:image><office:binary-data>' + data + '</office:binary-data></draw:image>';
+
+  it('points at the member a zipped document names', () => {
+    assert.strictEqual(
+      odtToHtml('<text:p><draw:image xlink:href="Pictures/a.png"/></text:p>'),
+      '<p><img src="Pictures/a.png"></p>',
+    );
+  });
+
+  it('carries the bytes a flat document holds, as the type they are', () => {
+    const png = b64([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]);
+    assert.strictEqual(odtToHtml('<text:p>' + held(png) + '</text:p>'), '<p><img src="data:image/png;base64,' + png + '"></p>');
+  });
+
+  it('tells a JPEG from a PNG by its first bytes, not by a declaration', () => {
+    const jpeg = b64([0xff, 0xd8, 0xff, 0xe0, 0, 16, 0x4a, 0x46, 0x49, 0x46, 0, 1]);
+    assert.ok(odtToHtml('<text:p>' + held(jpeg) + '</text:p>').includes('data:image/jpeg;base64,'));
+  });
+
+  // Matching only the opening tag left the base64 behind as text, which read as a page of
+  // gibberish where the picture should have been.
+  it('does not spill the data into the text', () => {
+    const png = b64([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const html = odtToHtml('<text:p>before' + held(png) + 'after</text:p>');
+    assert.ok(!html.includes('binary-data'), 'the element survived into the output');
+    assert.ok(html.includes('beforeafter') || html.includes('before'), 'the surrounding text was eaten');
+  });
+
+  // A flat file keeps the picture inside the paragraph that holds it, so a text preview that
+  // only strips tags reads the whole picture out as a line of base64.
+  it('keeps the data out of the text preview', async () => {
+    const png = b64([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0, 0, 0, 8]);
+    const file = tmp('a.fodt', buildOdt([{ heading: 'Schema', paras: ['Before.'] }], { flat: true })
+      .replace('<text:p>Before.</text:p>', '<text:p>Before.<draw:frame><draw:image>'
+        + '<office:binary-data>' + png + '</office:binary-data></draw:image></draw:frame></text:p>'));
+    const sec = await readSection(file, 'fodt', 1);
+    assert.deepStrictEqual(sec.body, ['Before.']);
+  });
+
+  it('drops a picture too large to travel inside the document', () => {
+    const huge = 'A'.repeat(8 * 1024 * 1024);
+    const html = odtToHtml('<text:p>text' + held(huge) + '</text:p>');
+    assert.strictEqual(html, '<p>text</p>');
+  });
+});

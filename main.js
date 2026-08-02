@@ -245,9 +245,23 @@ var require_constants = __commonJS({
 var require_binding = __commonJS({
   "src/shared/binding.js"(exports2, module2) {
     "use strict";
-    var ANCHORS = { sym: "sym", kind: "kind", sec: "sec", cite: "cite", line: "hash" };
-    var TOKEN = /^(sym|kind|sec|cite|line):(.+)$/;
-    var OWNERS = { code: ["sym", "kind", "hash"], reference: ["sec", "cite"] };
+    var ANCHOR_LIST = [
+      { token: "sym", field: "sym", owner: "code" },
+      { token: "kind", field: "kind", owner: "code" },
+      { token: "cite", field: "cite", owner: "reference" },
+      { token: "sec", field: "sec", owner: "reference" },
+      // A hash is base36 already, so it is the one value written through unescaped.
+      { token: "line", field: "hash", owner: "code", raw: true }
+    ];
+    var ANCHORS = {};
+    var FIELDS = [];
+    var OWNERS = {};
+    for (const a of ANCHOR_LIST) {
+      ANCHORS[a.token] = a.field;
+      FIELDS.push(a.field);
+      (OWNERS[a.owner] = OWNERS[a.owner] || []).push(a.field);
+    }
+    var TOKEN2 = new RegExp("^(" + ANCHOR_LIST.map((a) => a.token).join("|") + "):(.+)$");
     function ownerOf(binding) {
       if (!binding)
         return null;
@@ -273,27 +287,24 @@ var require_binding = __commonJS({
       const s = String(title || "").trim();
       if (!s)
         return null;
-      const b = { sym: "", kind: "", sec: "", cite: "", hash: "" };
+      const b = {};
+      for (const f of FIELDS)
+        b[f] = "";
       for (const word of s.split(/\s+/)) {
-        const m = TOKEN.exec(word);
+        const m = TOKEN2.exec(word);
         if (!m)
           return null;
         b[ANCHORS[m[1]]] = decodeValue(m[2]);
       }
-      return b.sym || b.kind || b.sec || b.cite || b.hash ? b : null;
+      return FIELDS.some((f) => b[f]) ? b : null;
     }
     function formatBinding2(b) {
       const parts = [];
-      if (b.sym)
-        parts.push("sym:" + encodeValue(b.sym));
-      if (b.kind)
-        parts.push("kind:" + encodeValue(b.kind));
-      if (b.cite)
-        parts.push("cite:" + encodeValue(b.cite));
-      if (b.sec)
-        parts.push("sec:" + encodeValue(b.sec));
-      if (b.hash)
-        parts.push("line:" + b.hash);
+      for (const a of ANCHOR_LIST) {
+        const v = b[a.field];
+        if (v)
+          parts.push(a.token + ":" + (a.raw ? v : encodeValue(v)));
+      }
       return parts.join(" ");
     }
     function bindStateFrom2(hits, stored) {
@@ -304,7 +315,7 @@ var require_binding = __commonJS({
       const line = hits.reduce((a, n) => Math.abs(n - stored) < Math.abs(a - stored) ? n : a);
       return { state: "stale", line };
     }
-    module2.exports = { LINE_RE, PAGE_RE, OWNERS, hashLine, parseBinding: parseBinding2, formatBinding: formatBinding2, bindStateFrom: bindStateFrom2, ownerOf, bindingOwner: bindingOwner2, ownsBinding: ownsBinding2 };
+    module2.exports = { LINE_RE, PAGE_RE, ANCHORS, OWNERS, hashLine, parseBinding: parseBinding2, formatBinding: formatBinding2, bindStateFrom: bindStateFrom2, ownerOf, bindingOwner: bindingOwner2, ownsBinding: ownsBinding2 };
   }
 });
 
@@ -629,6 +640,11 @@ var require_common = __commonJS({
       "modal.andMore": "\u2026and {n} more",
       "btn.apply": "Apply",
       "btn.cancel": "Cancel",
+      "btn.close": "Close",
+      "label.thisNote": "This note",
+      "modal.update.summary": "{links} change(s) across {files} note(s). Uncheck any change to skip it, or a note to skip all of its changes.",
+      "modal.update.upToDate": "Everything is up to date \u2014 nothing to update.",
+      "notice.updateSkipped": "({n} note(s) skipped \u2014 changed since the preview)",
       "set.heading.maintenance": "Maintenance",
       "set.rebuild.button": "Rebuild",
       "set.precedence.name": "Priority among linker plugins",
@@ -641,6 +657,11 @@ var require_common = __commonJS({
       "modal.andMore": "\u2026\u0438 \u0435\u0449\u0451 {n}",
       "btn.apply": "\u041F\u0440\u0438\u043C\u0435\u043D\u0438\u0442\u044C",
       "btn.cancel": "\u041E\u0442\u043C\u0435\u043D\u0430",
+      "btn.close": "\u0417\u0430\u043A\u0440\u044B\u0442\u044C",
+      "label.thisNote": "\u042D\u0442\u0430 \u0437\u0430\u043C\u0435\u0442\u043A\u0430",
+      "modal.update.summary": "\u041F\u0440\u0430\u0432\u043E\u043A \u2014 {links} \u0432 \u0437\u0430\u043C\u0435\u0442\u043A\u0430\u0445: {files}. \u0421\u043D\u0438\u043C\u0438\u0442\u0435 \u0433\u0430\u043B\u043E\u0447\u043A\u0443 \u0441 \u043F\u0440\u0430\u0432\u043A\u0438, \u0447\u0442\u043E\u0431\u044B \u043F\u0440\u043E\u043F\u0443\u0441\u0442\u0438\u0442\u044C \u0435\u0451, \u0438\u043B\u0438 \u0441 \u0437\u0430\u043C\u0435\u0442\u043A\u0438 \u2014 \u0447\u0442\u043E\u0431\u044B \u043F\u0440\u043E\u043F\u0443\u0441\u0442\u0438\u0442\u044C \u0432\u0441\u0435 \u0435\u0451 \u043F\u0440\u0430\u0432\u043A\u0438.",
+      "modal.update.upToDate": "\u0412\u0441\u0451 \u0430\u043A\u0442\u0443\u0430\u043B\u044C\u043D\u043E \u2014 \u043E\u0431\u043D\u043E\u0432\u043B\u044F\u0442\u044C \u043D\u0435\u0447\u0435\u0433\u043E.",
+      "notice.updateSkipped": "(\u043F\u0440\u043E\u043F\u0443\u0449\u0435\u043D\u043E \u0437\u0430\u043C\u0435\u0442\u043E\u043A \u2014 {n}: \u0438\u0437\u043C\u0435\u043D\u0438\u043B\u0438\u0441\u044C \u043F\u043E\u0441\u043B\u0435 \u043F\u0440\u0435\u0434\u043F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0430)",
       "set.heading.maintenance": "\u041E\u0431\u0441\u043B\u0443\u0436\u0438\u0432\u0430\u043D\u0438\u0435",
       "set.rebuild.button": "\u041F\u0435\u0440\u0435\u0441\u0442\u0440\u043E\u0438\u0442\u044C",
       "set.precedence.name": "\u041F\u0440\u0438\u043E\u0440\u0438\u0442\u0435\u0442 \u0441\u0440\u0435\u0434\u0438 \u043F\u043B\u0430\u0433\u0438\u043D\u043E\u0432-\u043B\u0438\u043D\u043A\u0435\u0440\u043E\u0432",
@@ -1057,16 +1078,11 @@ var require_sigil = __commonJS({
       "menu.convert": "Find and convert to link",
       "menu.convert.group": "Find and convert to link",
       "menu.open.group": "Find and open",
-      "notice.updateSkipped": "({n} note(s) skipped \u2014 changed since the preview)",
       "embed.menu.refresh": "Refresh embed",
       "embed.tool.more": "More actions",
       "embed.tool.open": "Open",
       "embed.tool.refresh": "Refresh",
       "modal.embedPlaceholder": "Choose an embed format\u2026",
-      "modal.update.summary": "{links} change(s) across {files} note(s). Uncheck any change to skip it, or a note to skip all of its changes.",
-      "modal.update.upToDate": "Everything is up to date \u2014 nothing to update.",
-      "btn.close": "Close",
-      "label.thisNote": "This note",
       "set.heading.suggestions": "Suggestions & links",
       "set.heading.hover": "Hover preview",
       "set.heading.links": "Links",
@@ -1093,22 +1109,21 @@ var require_sigil = __commonJS({
       "set.contextMenu.name": "Editor context menu",
       "set.markStaleLinks.name": "Mark stale links",
       "set.info.unknownRoot": "(unknown)",
-      "plural.entry": { one: "{n} entry", other: "{n} entries" }
+      "plural.entry": { one: "{n} entry", other: "{n} entries" },
+      "plural.key": { one: "{n} key", other: "{n} keys" },
+      "plural.note": { one: "{n} note", other: "{n} notes" },
+      "plural.staleLink": { one: "{n} stale link", other: "{n} stale links" },
+      "plural.brokenLink": { one: "{n} broken link", other: "{n} broken links" }
     };
     var ru = {
       "menu.convert": "\u041D\u0430\u0439\u0442\u0438 \u0438 \u043F\u0440\u0435\u0432\u0440\u0430\u0442\u0438\u0442\u044C \u0432 \u0441\u0441\u044B\u043B\u043A\u0443",
       "menu.convert.group": "\u041D\u0430\u0439\u0442\u0438 \u0438 \u043F\u0440\u0435\u0432\u0440\u0430\u0442\u0438\u0442\u044C \u0432 \u0441\u0441\u044B\u043B\u043A\u0443",
       "menu.open.group": "\u041D\u0430\u0439\u0442\u0438 \u0438 \u043E\u0442\u043A\u0440\u044B\u0442\u044C",
-      "notice.updateSkipped": "(\u043F\u0440\u043E\u043F\u0443\u0449\u0435\u043D\u043E \u0437\u0430\u043C\u0435\u0442\u043E\u043A \u2014 {n}: \u0438\u0437\u043C\u0435\u043D\u0438\u043B\u0438\u0441\u044C \u043F\u043E\u0441\u043B\u0435 \u043F\u0440\u0435\u0434\u043F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0430)",
       "embed.menu.refresh": "\u041E\u0431\u043D\u043E\u0432\u0438\u0442\u044C embed",
       "embed.tool.more": "\u0415\u0449\u0451 \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u044F",
       "embed.tool.open": "\u041E\u0442\u043A\u0440\u044B\u0442\u044C",
       "embed.tool.refresh": "\u041E\u0431\u043D\u043E\u0432\u0438\u0442\u044C",
       "modal.embedPlaceholder": "\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0444\u043E\u0440\u043C\u0430\u0442 embed\u2026",
-      "modal.update.summary": "\u041F\u0440\u0430\u0432\u043E\u043A \u2014 {links} \u0432 \u0437\u0430\u043C\u0435\u0442\u043A\u0430\u0445: {files}. \u0421\u043D\u0438\u043C\u0438\u0442\u0435 \u0433\u0430\u043B\u043E\u0447\u043A\u0443 \u0441 \u043F\u0440\u0430\u0432\u043A\u0438, \u0447\u0442\u043E\u0431\u044B \u043F\u0440\u043E\u043F\u0443\u0441\u0442\u0438\u0442\u044C \u0435\u0451, \u0438\u043B\u0438 \u0441 \u0437\u0430\u043C\u0435\u0442\u043A\u0438 \u2014 \u0447\u0442\u043E\u0431\u044B \u043F\u0440\u043E\u043F\u0443\u0441\u0442\u0438\u0442\u044C \u0432\u0441\u0435 \u0435\u0451 \u043F\u0440\u0430\u0432\u043A\u0438.",
-      "modal.update.upToDate": "\u0412\u0441\u0451 \u0430\u043A\u0442\u0443\u0430\u043B\u044C\u043D\u043E \u2014 \u043E\u0431\u043D\u043E\u0432\u043B\u044F\u0442\u044C \u043D\u0435\u0447\u0435\u0433\u043E.",
-      "btn.close": "\u0417\u0430\u043A\u0440\u044B\u0442\u044C",
-      "label.thisNote": "\u042D\u0442\u0430 \u0437\u0430\u043C\u0435\u0442\u043A\u0430",
       "set.heading.suggestions": "\u041F\u043E\u0434\u0441\u043A\u0430\u0437\u043A\u0438 \u0438 \u0441\u0441\u044B\u043B\u043A\u0438",
       "set.heading.hover": "\u041F\u0440\u0435\u0432\u044C\u044E \u043F\u0440\u0438 \u043D\u0430\u0432\u0435\u0434\u0435\u043D\u0438\u0438",
       "set.heading.links": "\u0421\u0441\u044B\u043B\u043A\u0438",
@@ -1135,7 +1150,11 @@ var require_sigil = __commonJS({
       "set.contextMenu.name": "\u041A\u043E\u043D\u0442\u0435\u043A\u0441\u0442\u043D\u043E\u0435 \u043C\u0435\u043D\u044E \u0440\u0435\u0434\u0430\u043A\u0442\u043E\u0440\u0430",
       "set.markStaleLinks.name": "\u041E\u0442\u043C\u0435\u0447\u0430\u0442\u044C \u0443\u0441\u0442\u0430\u0440\u0435\u0432\u0448\u0438\u0435 \u0441\u0441\u044B\u043B\u043A\u0438",
       "set.info.unknownRoot": "(\u043D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u043E)",
-      "plural.entry": { one: "{n} \u0437\u0430\u043F\u0438\u0441\u044C", few: "{n} \u0437\u0430\u043F\u0438\u0441\u0438", many: "{n} \u0437\u0430\u043F\u0438\u0441\u0435\u0439", other: "{n} \u0437\u0430\u043F\u0438\u0441\u0435\u0439" }
+      "plural.entry": { one: "{n} \u0437\u0430\u043F\u0438\u0441\u044C", few: "{n} \u0437\u0430\u043F\u0438\u0441\u0438", many: "{n} \u0437\u0430\u043F\u0438\u0441\u0435\u0439", other: "{n} \u0437\u0430\u043F\u0438\u0441\u0435\u0439" },
+      "plural.key": { one: "{n} \u043A\u043B\u044E\u0447", few: "{n} \u043A\u043B\u044E\u0447\u0430", many: "{n} \u043A\u043B\u044E\u0447\u0435\u0439", other: "{n} \u043A\u043B\u044E\u0447\u0435\u0439" },
+      "plural.note": { one: "{n} \u0437\u0430\u043C\u0435\u0442\u043A\u0435", few: "{n} \u0437\u0430\u043C\u0435\u0442\u043A\u0430\u0445", many: "{n} \u0437\u0430\u043C\u0435\u0442\u043A\u0430\u0445", other: "{n} \u0437\u0430\u043C\u0435\u0442\u043A\u0430\u0445" },
+      "plural.staleLink": { one: "{n} \u0443\u0441\u0442\u0430\u0440\u0435\u0432\u0448\u0430\u044F \u0441\u0441\u044B\u043B\u043A\u0430", few: "{n} \u0443\u0441\u0442\u0430\u0440\u0435\u0432\u0448\u0438\u0435 \u0441\u0441\u044B\u043B\u043A\u0438", many: "{n} \u0443\u0441\u0442\u0430\u0440\u0435\u0432\u0448\u0438\u0445 \u0441\u0441\u044B\u043B\u043E\u043A", other: "{n} \u0443\u0441\u0442\u0430\u0440\u0435\u0432\u0448\u0438\u0445 \u0441\u0441\u044B\u043B\u043E\u043A" },
+      "plural.brokenLink": { one: "{n} \u0431\u0438\u0442\u0430\u044F \u0441\u0441\u044B\u043B\u043A\u0430", few: "{n} \u0431\u0438\u0442\u044B\u0435 \u0441\u0441\u044B\u043B\u043A\u0438", many: "{n} \u0431\u0438\u0442\u044B\u0445 \u0441\u0441\u044B\u043B\u043E\u043A", other: "{n} \u0431\u0438\u0442\u044B\u0445 \u0441\u0441\u044B\u043B\u043E\u043A" }
     };
     module2.exports = { en, ru };
   }
@@ -1491,6 +1510,7 @@ var require_suggest = __commonJS({
           const f = this.plugin.parseQuery(ctx.query);
           const allowed = prepare(this.plugin);
           const pass = (e) => allowed(e) && this.plugin.entryPassesFilter(e, f);
+          const against = this.plugin.matchTextFor ? (e) => this.plugin.matchTextFor(e, f) : (e) => e.name;
           if (!f.name) {
             const out = [];
             for (const e of idx) {
@@ -1507,7 +1527,7 @@ var require_suggest = __commonJS({
           for (const e of idx) {
             if (!pass(e))
               continue;
-            const r = match(e.name);
+            const r = match(against(e));
             if (r)
               scored.push({ e, score: r.score });
           }
@@ -4219,6 +4239,7 @@ var require_odf_styles = __commonJS({
 var require_odf = __commonJS({
   "src/formats/odf.js"(exports2, module2) {
     "use strict";
+    var fs2 = require("fs");
     var { openZip } = require_zip();
     var { elements, elementsOf, attr, decodeEntities } = require_xml();
     var { renderLines, renderHtml, renderFrame } = require_preview();
@@ -4226,23 +4247,51 @@ var require_odf = __commonJS({
     var { sheet: cssSheet, pageCss, pt, SHEET_RULES } = require_css();
     var odfStyles = require_odf_styles();
     var MAX_LINES = 60;
-    var KIND = { ott: "odt", ots: "ods", otp: "odp", odg: "odp", otg: "odp" };
+    var KIND = {
+      ott: "odt",
+      ots: "ods",
+      otp: "odp",
+      odg: "odp",
+      otg: "odp",
+      fodt: "odt",
+      fods: "ods",
+      fodp: "odp",
+      fodg: "odp"
+    };
     var kindOf = (ext) => KIND[String(ext || "").toLowerCase()] || ext;
-    var DRAWING = /* @__PURE__ */ new Set(["odg", "otg"]);
+    var DRAWING = /* @__PURE__ */ new Set(["odg", "otg", "fodg"]);
     var named = (ext) => DRAWING.has(String(ext || "").toLowerCase());
+    var FLAT = /* @__PURE__ */ new Set(["fodt", "fods", "fodp", "fodg"]);
     var without = (xml, tag) => elements(xml, tag).reduce((acc, src) => acc.replace(src, ""), xml);
     var ASIDES = ["office:annotation", "office:annotation-end", "text:tracked-changes", "text:note"];
     var readable = (xml) => xml ? ASIDES.reduce(without, xml) : xml;
-    function contentOf(absPath) {
-      const zip = openZip(absPath);
-      return zip ? readable(zip.text("content.xml")) : null;
+    function openOdf(absPath, ext) {
+      if (!FLAT.has(String(ext || "").toLowerCase()))
+        return openZip(absPath);
+      let xml;
+      try {
+        xml = fs2.readFileSync(absPath, "utf8");
+      } catch (e) {
+        return null;
+      }
+      const parts = /* @__PURE__ */ new Set(["content.xml", "styles.xml"]);
+      return {
+        names: () => [...parts],
+        has: (name) => parts.has(name),
+        read: () => null,
+        text: (name) => parts.has(name) ? xml : null
+      };
+    }
+    function contentOf(absPath, ext) {
+      const src = openOdf(absPath, ext);
+      return src ? readable(src.text("content.xml")) : null;
     }
     var TEXT_BLOCK = /<text:(?:h|p)\b[^>]*>([\s\S]*?)<\/text:(?:h|p)>/g;
     function textLines(xml) {
       const out = [];
       let m;
       while (m = TEXT_BLOCK.exec(xml)) {
-        const line = decodeEntities(m[1].replace(/<text:tab\b[^>]*\/?>/g, " ").replace(/<text:s\b[^>]*\/?>/g, " ").replace(/<text:line-break\b[^>]*\/?>/g, " ").replace(/<[^>]*>/g, "")).replace(/\s+/g, " ").trim();
+        const line = decodeEntities(m[1].replace(/<office:binary-data\b[^>]*>[\s\S]*?<\/office:binary-data>/g, "").replace(/<text:tab\b[^>]*\/?>/g, " ").replace(/<text:s\b[^>]*\/?>/g, " ").replace(/<text:line-break\b[^>]*\/?>/g, " ").replace(/<[^>]*>/g, "")).replace(/\s+/g, " ").trim();
         if (line)
           out.push(line);
       }
@@ -4412,11 +4461,41 @@ var require_odf = __commonJS({
       const name = tag === "text:h" ? "h" + headingLevel(src) : "p";
       return openTag(name, cls) + inner + "</" + name + ">";
     }
+    var IMAGE_MAGIC = [
+      ["image/png", [137, 80, 78, 71]],
+      ["image/jpeg", [255, 216, 255]],
+      ["image/gif", [71, 73, 70]],
+      ["image/bmp", [66, 77]]
+    ];
+    var MAX_INLINE_IMAGE = 4 * 1024 * 1024;
+    function inlineImageSrc(imageXml) {
+      const held = elements(imageXml, "office:binary-data")[0];
+      if (!held)
+        return "";
+      const b64 = held.replace(/<[^>]*>/g, "").replace(/\s+/g, "");
+      if (!b64 || b64.length * 0.75 > MAX_INLINE_IMAGE)
+        return "";
+      let head;
+      try {
+        head = Buffer.from(b64.slice(0, 24), "base64");
+      } catch (e) {
+        return "";
+      }
+      const hit = IMAGE_MAGIC.find(([, magic]) => magic.every((b, i) => head[i] === b));
+      let mime = hit && hit[0];
+      if (!mime && head.slice(0, 4).toString("latin1") === "RIFF")
+        mime = "image/webp";
+      if (!mime && /<svg|<\?xml/i.test(head.toString("utf8")))
+        mime = "image/svg+xml";
+      return "data:" + (mime || "image/png") + ";base64," + b64;
+    }
+    function imageTag(imageXml) {
+      const href = attr(openingTag(imageXml), "xlink:href");
+      const src = href || inlineImageSrc(imageXml);
+      return src ? '<img src="' + escAttr(src) + '">' : "";
+    }
     function odtToHtml(xml, ctx) {
-      const body = readable(xml).replace(/<draw:image\b[^>]*\/?>/g, (m) => {
-        const href = attr(m, "xlink:href");
-        return href ? '<img src="' + escAttr(href) + '">' : "";
-      });
+      const body = readable(xml).replace(/<draw:image\b[^>]*(?:\/>|>[\s\S]*?<\/draw:image>)/g, (m) => imageTag(m));
       return blocks(body).map((b) => blockHtml(b, ctx)).join("");
     }
     function odtSectionXml(xml, position) {
@@ -4439,11 +4518,11 @@ var require_odf = __commonJS({
       return odtOutline(xml);
     }
     async function readOutline(absPath, ext) {
-      const xml = contentOf(absPath);
+      const xml = contentOf(absPath, ext);
       return xml ? outlineFor(ext, xml) : [];
     }
     async function readSection(absPath, ext, position) {
-      const xml = contentOf(absPath);
+      const xml = contentOf(absPath, ext);
       if (!xml)
         return null;
       if (kindOf(ext) === "odp") {
@@ -4475,7 +4554,7 @@ var require_odf = __commonJS({
       return { title: sec.title, body: lines.slice(0, MAX_LINES), position: sec.n, total: sec.total };
     }
     async function count(absPath, ext) {
-      const xml = contentOf(absPath);
+      const xml = contentOf(absPath, ext);
       if (!xml)
         return 0;
       if (kindOf(ext) === "odp")
@@ -4484,7 +4563,7 @@ var require_odf = __commonJS({
         return elements(xml, "table:table").length;
       return odtHeadings(xml).length || 1;
     }
-    var imageLoader = (zip) => (src) => zip ? zip.read(assetSrc(src)) : null;
+    var imageLoader = (doc) => (src) => doc ? doc.read(assetSrc(src)) : null;
     var PAGE_RULES = [
       "body{margin:0;background:transparent}",
       ".page table{border-collapse:collapse}",
@@ -4513,7 +4592,7 @@ var require_odf = __commonJS({
       if (!box)
         return "";
       const image = elements(shape, "draw:image")[0];
-      const href = image && attr(openingTag(image), "xlink:href");
+      const picture = image ? imageTag(image) : "";
       const css = Object.assign({ position: "absolute", overflow: "hidden" }, {
         left: box.left,
         top: box.top,
@@ -4521,18 +4600,18 @@ var require_odf = __commonJS({
         height: box.height || null
       }, odfStyles.styleCss(ctx.styles, ownAttr(shape, "draw:style-name")));
       const cls = ctx.sheet.cls(css);
-      const inner = href ? '<img src="' + escAttr(href) + '">' : blocks(shape).map((b) => blockHtml(b, ctx)).join("");
+      const inner = picture || blocks(shape).map((b) => blockHtml(b, ctx)).join("");
       return inner ? '<div class="' + cls + '">' + inner + "</div>" : "";
     }
-    function slidePage(zip, xml, position, width) {
+    function slidePage(doc, xml, position, width) {
       const slides = elements(xml, "draw:page");
       if (!slides.length)
         return null;
-      const page = odfStyles.pageOf(zip.text("styles.xml"));
+      const page = odfStyles.pageOf(doc.text("styles.xml"));
       if (!page)
         return null;
       const slide = slides[clampPosition(position, slides.length) - 1];
-      const ctx = { styles: odfStyles.readStyles(zip.text("content.xml"), zip.text("styles.xml")), sheet: cssSheet("o") };
+      const ctx = { styles: odfStyles.readStyles(doc.text("content.xml"), doc.text("styles.xml")), sheet: cssSheet("o") };
       const shapes = SHAPE.flatMap((tag) => elements(slide, tag)).map((s) => ({ at: slide.indexOf(s), html: shapeHtml(s, ctx) })).filter((s) => s.html).sort((a, b) => a.at - b.at).map((s) => s.html).join("");
       return {
         html: '<div class="slide">' + shapes + "</div>",
@@ -4544,11 +4623,11 @@ var require_odf = __commonJS({
         ].join("\n")
       };
     }
-    function documentPage(zip, xml, position, width, view) {
+    function documentPage(doc, xml, position, width, view) {
       const sec = odtSectionXml(xml, position);
-      const ctx = { styles: odfStyles.readStyles(zip.text("content.xml"), zip.text("styles.xml")), sheet: cssSheet("o") };
+      const ctx = { styles: odfStyles.readStyles(doc.text("content.xml"), doc.text("styles.xml")), sheet: cssSheet("o") };
       const body = odtToHtml(sec.xml, ctx);
-      const page = pageCss(odfStyles.pageOf(zip.text("styles.xml")), width, view);
+      const page = pageCss(odfStyles.pageOf(doc.text("styles.xml")), width, view);
       return {
         html: '<div class="page">' + body + "</div>",
         css: [PAGE_RULES, page.css, "html{zoom:" + page.zoom + "}", ctx.sheet.text()].filter(Boolean).join("\n")
@@ -4559,11 +4638,11 @@ var require_odf = __commonJS({
       const zoom = req.zoom || 1;
       const width = kind === "ods" ? req.width : req.width * zoom;
       if (kind === "ods") {
-        const zip = openZip(req.abs);
-        const xml = zip ? readable(zip.text("content.xml")) : null;
+        const doc = openOdf(req.abs, req.ext);
+        const xml = doc ? readable(doc.text("content.xml")) : null;
         const tables = xml ? elements(xml, "table:table") : [];
         if (req.isCurrent() && tables.length) {
-          const ctx = { styles: odfStyles.readStyles(zip.text("content.xml"), zip.text("styles.xml")), sheet: cssSheet("o") };
+          const ctx = { styles: odfStyles.readStyles(doc.text("content.xml"), doc.text("styles.xml")), sheet: cssSheet("o") };
           const html = sheetTable(tables[clampPosition(req.position, tables.length) - 1], ctx);
           if (html) {
             const css = [SHEET_RULES, ctx.sheet.text()].join("\n");
@@ -4585,11 +4664,11 @@ var require_odf = __commonJS({
         }
       }
       if (kind === "odt") {
-        const zip = openZip(req.abs);
-        const xml = zip ? readable(zip.text("content.xml")) : null;
+        const doc = openOdf(req.abs, req.ext);
+        const xml = doc ? readable(doc.text("content.xml")) : null;
         if (req.isCurrent() && xml) {
-          const page = documentPage(zip, xml, req.position, width, req.view);
-          const loadImage = imageLoader(zip);
+          const page = documentPage(doc, xml, req.position, width, req.view);
+          const loadImage = imageLoader(doc);
           const framed = renderFrame(el, {
             html: page.html,
             css: page.css,
@@ -4608,11 +4687,11 @@ var require_odf = __commonJS({
         }
       }
       if (kind === "odp") {
-        const zip = openZip(req.abs);
-        const xml = zip ? readable(zip.text("content.xml")) : null;
-        const page = xml && req.isCurrent() ? slidePage(zip, xml, req.position, width) : null;
+        const doc = openOdf(req.abs, req.ext);
+        const xml = doc ? readable(doc.text("content.xml")) : null;
+        const page = xml && req.isCurrent() ? slidePage(doc, xml, req.position, width) : null;
         if (page) {
-          const loadImage = imageLoader(zip);
+          const loadImage = imageLoader(doc);
           const flat = () => readSection(req.abs, req.ext, req.position).then((sec2) => sec2 && renderLines(el, { title: sec2.title, body: sec2.body, width: req.width, zoom }));
           const framed = renderFrame(el, {
             html: page.html,
@@ -4633,7 +4712,7 @@ var require_odf = __commonJS({
     }
     module2.exports = {
       id: "odf",
-      exts: ["odt", "ods", "odp", "odg", "ott", "ots", "otp", "otg"],
+      exts: ["odt", "ods", "odp", "odg", "ott", "ots", "otp", "otg", "fodt", "fods", "fodp", "fodg"],
       anchorKind: null,
       capabilities: (ext) => ({ paged: true, zoomable: true, scrollable: kindOf(ext) !== "odp" }),
       count,
@@ -6081,27 +6160,79 @@ var require_suggest2 = __commonJS({
   }
 });
 
-// src/filter.js
-var require_filter = __commonJS({
-  "src/filter.js"(exports2, module2) {
+// src/shared/facets.js
+var require_facets = __commonJS({
+  "src/shared/facets.js"(exports2, module2) {
     "use strict";
-    function parseQuery(raw, kinds, exts) {
-      const f = { kind: null, ext: null, name: "" };
+    var { ANCHORS } = require_binding();
+    var VALUE2 = "value";
+    var TOKEN2 = "token";
+    var byName = (facets2, name) => facets2.find((f) => f.name === name) || null;
+    function parseQuery(raw, facets2) {
+      const values = {};
+      let field = null;
       const parts = String(raw == null ? "" : raw).split(":");
       let i = 0;
       for (; i < parts.length - 1; i++) {
-        const p = parts[i];
-        if (kinds && kinds.has(p))
-          f.kind = p;
-        else if (exts && exts.has(p))
-          f.ext = p;
-        else
+        const named = facets2.find((f) => f.typed === TOKEN2 && f.name === parts[i]);
+        if (named) {
+          field = named.name;
+          i += 1;
           break;
+        }
+        let hit = null;
+        for (const f of facets2) {
+          if (f.typed !== VALUE2)
+            continue;
+          const v = f.resolve(parts[i]);
+          if (v != null) {
+            hit = { name: f.name, value: v };
+            break;
+          }
+        }
+        if (!hit)
+          break;
+        values[hit.name] = hit.value;
       }
-      f.name = parts.slice(i).join(":");
-      return f;
+      return { values, field, name: parts.slice(i).join(":") };
     }
-    module2.exports = { parseQuery };
+    function passes(entry, parsed, facets2) {
+      for (const name of Object.keys(parsed.values)) {
+        const f = byName(facets2, name);
+        if (f && f.of(entry) !== parsed.values[name])
+          return false;
+      }
+      if (parsed.field) {
+        const f = byName(facets2, parsed.field);
+        if (f && !f.of(entry))
+          return false;
+      }
+      return true;
+    }
+    function matchText(entry, parsed, facets2) {
+      const f = parsed.field ? byName(facets2, parsed.field) : null;
+      return f ? f.of(entry) : entry.name;
+    }
+    function bindingFrom(entry, facets2) {
+      const b = {};
+      for (const f of facets2) {
+        if (!f.anchor || !f.of)
+          continue;
+        const v = f.of(entry);
+        if (v)
+          b[ANCHORS[f.anchor]] = v;
+      }
+      return b;
+    }
+    function entriesFor(plugin, parsed, facets2) {
+      if (!parsed.field)
+        return plugin.entriesByName(parsed.name);
+      const want = String(parsed.name || "").toLowerCase();
+      if (!want)
+        return [];
+      return plugin.index.filter((e) => String(matchText(e, parsed, facets2) || "").toLowerCase() === want);
+    }
+    module2.exports = { VALUE: VALUE2, TOKEN: TOKEN2, parseQuery, passes, matchText, bindingFrom, entriesFor };
   }
 });
 
@@ -7077,7 +7208,7 @@ var require_embed = __commonJS({
         relPath = hit ? hit.path : norm;
       } else {
         const f = plugin.parseQuery(target);
-        const matches = plugin.entriesByName(f.name).filter((m) => plugin.entryPassesFilter(m, f));
+        const matches = plugin.entriesForQuery(f).filter((m) => plugin.entryPassesFilter(m, f));
         if (!matches.length)
           return { error: t2("embed.notFound", { query: target }) };
         const paths = new Set(matches.map((m) => m.path));
@@ -7510,7 +7641,7 @@ var require_update_preview = __commonJS({
       const c = rewrite(plugin, original, null);
       openUpdatePreview(plugin, [{ file, label: file.path, original, changes: c.changes, broken: c.broken }], rewrite, prefix);
     }
-    async function updateInVault(plugin, rewrite, prefix) {
+    async function scanVault(plugin, rewrite) {
       const entries = [];
       for (const f of plugin.app.vault.getMarkdownFiles()) {
         const original = await plugin.app.vault.read(f);
@@ -7518,9 +7649,12 @@ var require_update_preview = __commonJS({
         if (c.changes.length || c.broken.length)
           entries.push({ file: f, label: f.path, original, changes: c.changes, broken: c.broken });
       }
-      openUpdatePreview(plugin, entries, rewrite, prefix);
+      return entries;
     }
-    module2.exports = { UpdatePreviewModal, applyUpdates, openUpdatePreview, updateInActiveNote, updateInVault };
+    async function updateInVault(plugin, rewrite, prefix) {
+      openUpdatePreview(plugin, await scanVault(plugin, rewrite), rewrite, prefix);
+    }
+    module2.exports = { UpdatePreviewModal, applyUpdates, openUpdatePreview, updateInActiveNote, updateInVault, scanVault };
   }
 });
 
@@ -7877,6 +8011,21 @@ var require_folder_list = __commonJS({
   }
 });
 
+// src/shared/settings-redraw.js
+var require_settings_redraw = __commonJS({
+  "src/shared/settings-redraw.js"(exports2, module2) {
+    "use strict";
+    function redraw(tab, draw) {
+      const el = tab && tab.containerEl;
+      const top = el ? el.scrollTop || 0 : 0;
+      draw();
+      if (el && top)
+        el.scrollTop = top;
+    }
+    module2.exports = { redraw };
+  }
+});
+
 // src/shared/precedence.js
 var require_precedence = __commonJS({
   "src/shared/precedence.js"(exports2, module2) {
@@ -7993,12 +8142,13 @@ var require_precedence = __commonJS({
 var require_settings_tab = __commonJS({
   "src/settings-tab.js"(exports2, module2) {
     "use strict";
-    var { PluginSettingTab, Setting } = require("obsidian");
+    var { PluginSettingTab, Setting, setIcon } = require("obsidian");
     var { PRESETS: PRESETS2, BIB_EXTS, parseExtensions: parseExtensions2 } = require_constants();
-    var { formatGroups, knownExtensions } = require_formats();
+    var { formatGroups, knownExtensions, canOutline, hasOsAnchor } = require_formats();
     var { DiskPathSuggest, suggestAvailable } = require_disk_suggest();
     var { renderFolderList } = require_folder_list();
     var { t: t2, plural: plural2 } = require_i18n();
+    var { redraw } = require_settings_redraw();
     var { renderPrecedenceSetting: precedenceSetting } = require_precedence();
     var normFolder = (p) => p.replace(/\\/g, "/").replace(/\/+$/, "").trim();
     var normExt = (e) => {
@@ -8068,8 +8218,24 @@ var require_settings_tab = __commonJS({
             cls: "reference-linker-note",
             text: keys ? t2("set.bibFiles.stats", { keys, matched }) : t2("set.bibFiles.none")
           });
+          const unmatched = this.plugin.unmatchedCitations();
+          if (unmatched.length) {
+            statusEl.createEl("div", {
+              cls: "reference-linker-note",
+              text: t2("set.bibFiles.unmatched", { keys: unmatched.slice(0, 20).join(", ") }) + (unmatched.length > 20 ? " " + t2("modal.andMore", { n: unmatched.length - 20 }) : "")
+            });
+          }
         };
         drawStatus();
+      }
+      // What a format can do, as a mark beside its name. Whether a link lands where it points is
+      // otherwise learnable only by clicking one; the tooltip carries the sentence the icon can't.
+      // Both marks are always drawn, dimmed when the answer is no, so the column stays scannable.
+      // Previewing is not shown at all: every format previews, so the answer would never differ.
+      capIcon(row, on, icon, key) {
+        const el = row.nameEl.createSpan({ cls: "reference-linker-cap" + (on ? "" : " is-off") });
+        setIcon(el, icon);
+        el.setAttribute("aria-label", t2("set.caps." + key + (on ? "" : ".no")));
       }
       // The setting stays one string — parseExtensions reads it unchanged, the list only
       // writes it, so there is nothing to migrate.
@@ -8097,6 +8263,9 @@ var require_settings_tab = __commonJS({
           const open = this.expandedFormats.has(g.id);
           const partial = enabled.length > 0 && enabled.length < g.exts.length;
           const row = new Setting(containerEl).setName(t2("set.format." + g.id)).setDesc(partial ? t2("set.extensions.meta", { n: enabled.length, total: g.exts.length, exts: g.exts.join(" ") }) : g.exts.join(" "));
+          const ext = g.exts[0].slice(1);
+          this.capIcon(row, canOutline(ext), "list", "sections");
+          this.capIcon(row, hasOsAnchor(ext), "crosshair", "anchor");
           if (g.exts.length > 1) {
             this.foldButton(row, open, () => {
               if (open)
@@ -8109,8 +8278,8 @@ var require_settings_tab = __commonJS({
           row.addToggle((c) => c.setValue(enabled.length > 0).onChange((v) => commit(v ? [...current, ...g.exts] : current.filter((e) => !g.exts.includes(e)))));
           if (!open)
             continue;
-          for (const ext of g.exts) {
-            const sub = new Setting(containerEl).setName(ext).addToggle((c) => c.setValue(on.has(ext)).onChange((v) => commit(v ? [...current, ext] : current.filter((e) => e !== ext))));
+          for (const ext2 of g.exts) {
+            const sub = new Setting(containerEl).setName(ext2).addToggle((c) => c.setValue(on.has(ext2)).onChange((v) => commit(v ? [...current, ext2] : current.filter((e) => e !== ext2))));
             sub.settingEl.addClass("reference-linker-kind-row");
           }
         }
@@ -8126,7 +8295,11 @@ var require_settings_tab = __commonJS({
           addLabel: t2("set.folderList.addAria")
         });
       }
+      // Every fold and toggle redraws the whole pane; the reader keeps their place (shared/settings-redraw).
       display() {
+        redraw(this, () => this.draw());
+      }
+      draw() {
         const { containerEl } = this;
         containerEl.empty();
         const s = this.plugin.settings;
@@ -8618,6 +8791,96 @@ var require_citations = __commonJS({
   }
 });
 
+// src/citations-report.js
+var require_citations_report = __commonJS({
+  "src/citations-report.js"(exports2, module2) {
+    "use strict";
+    var { linkRegex: linkRegex2, splitTarget: splitTarget2 } = require_markdown();
+    var { parseBinding: parseBinding2, ownsBinding: ownsBinding2 } = require_binding();
+    var { t: t2, plural: plural2 } = require_i18n();
+    var OWNER2 = "reference";
+    function keysIn(text) {
+      const out = [];
+      const re = linkRegex2();
+      let m;
+      while (m = re.exec(String(text || ""))) {
+        const { title } = splitTarget2(m[2]);
+        if (!ownsBinding2(title, OWNER2))
+          continue;
+        const b = parseBinding2(title);
+        if (b && b.cite)
+          out.push(b.cite);
+      }
+      return out;
+    }
+    function collect(notes) {
+      const byKey = /* @__PURE__ */ new Map();
+      for (const n of notes || []) {
+        for (const key of keysIn(n.text)) {
+          const lc = key.toLowerCase();
+          const hit = byKey.get(lc) || { key, notes: [], uses: 0 };
+          if (!hit.notes.includes(n.path))
+            hit.notes.push(n.path);
+          hit.uses += 1;
+          byKey.set(lc, hit);
+        }
+      }
+      return byKey;
+    }
+    var cell = (s) => String(s == null ? "" : s).replace(/\|/g, "\\|");
+    var noteLink = (path) => {
+      const base = path.replace(/\.md$/i, "");
+      const name = base.slice(base.lastIndexOf("/") + 1);
+      return "[[" + cell(base) + "|" + cell(name) + "]]";
+    };
+    function report(byKey, citations) {
+      const rows = [...byKey.values()].sort((a, b) => a.key.localeCompare(b.key));
+      const noteCount = new Set(rows.flatMap((r) => r.notes)).size;
+      const out = [
+        "# " + t2("report.citations.title"),
+        "",
+        t2("report.citations.summary", { keys: plural2("key", rows.length), notes: plural2("note", noteCount) }),
+        "",
+        "| " + [t2("report.citations.key"), t2("report.citations.document"), t2("report.citations.citedIn")].join(" | ") + " |",
+        "|---|---|---|"
+      ];
+      for (const r of rows) {
+        const known = citations && citations.byKey && citations.byKey.get(r.key.toLowerCase());
+        let doc;
+        if (!known)
+          doc = t2("report.citations.unknownKey");
+        else if (!known.rel)
+          doc = t2("report.citations.noDocument");
+        else
+          doc = "`" + cell(known.rel) + "`";
+        out.push("| " + [cell(r.key), doc, r.notes.map(noteLink).join(", ")].join(" | ") + " |");
+      }
+      return out.join("\n") + "\n";
+    }
+    module2.exports = { keysIn, collect, report };
+  }
+});
+
+// src/shared/report-note.js
+var require_report_note = __commonJS({
+  "src/shared/report-note.js"(exports2, module2) {
+    "use strict";
+    var { normalizePath: normalizePath2 } = require("obsidian");
+    var MAX_TRIES = 50;
+    async function writeReportNote2(app, base, body) {
+      for (let n = 0; n < MAX_TRIES; n++) {
+        const name = n ? `${base} ${n + 1}.md` : `${base}.md`;
+        try {
+          return await app.vault.create(normalizePath2(name), body);
+        } catch (e) {
+        }
+      }
+      return null;
+    }
+    module2.exports = { writeReportNote: writeReportNote2 };
+  }
+});
+
 // src/api.js
 var require_api = __commonJS({
   "src/api.js"(exports2, module2) {
@@ -8740,6 +9003,19 @@ var require_en = __commonJS({
       "cmd.updateLinksVault": "Update reference links in the whole vault",
       "cmd.pinLinksNote": "Pin unpinned reference links in this note",
       "cmd.pinLinksVault": "Pin unpinned reference links in the whole vault",
+      "cmd.exportCitations": "Export citations used in the vault",
+      "notice.noCitationsUsed": "No link in the vault is pinned to a citation key.",
+      "notice.citationsExported": "Exported {n} citation key(s) to {file}",
+      "notice.reportFailed": "Could not write the report.",
+      "report.citations.file": "Citations used",
+      "report.citations.title": "Citations used in this vault",
+      "report.citations.summary": "{keys}, cited across {notes}.",
+      "report.citations.key": "Key",
+      "report.citations.document": "Document",
+      "report.citations.citedIn": "Cited in",
+      "report.citations.noDocument": "\u2014 no document matched \u2014",
+      "report.citations.unknownKey": "\u2014 not in the bibliography \u2014",
+      "set.bibFiles.unmatched": "No document matched: {keys}",
       // Editor context menu
       // Selection actions. `.solo` is the flat wording used when no sibling linker offers the
       // same verb; `.group` labels the shared submenu when one does, and `.item` names our
@@ -8827,6 +9103,10 @@ var require_en = __commonJS({
       "set.extensions.count": "Which formats are indexed \u2014 {n} of {total} extensions on.",
       "set.extensions.none": "Which formats are indexed. Nothing at all until one is on.",
       "set.extensions.meta": "{n} of {total} on: {exts}",
+      "set.caps.sections": "Has an outline: links can point at a section, not just the file",
+      "set.caps.sections.no": "No outline: a link points at the file",
+      "set.caps.anchor": "Opens at the position \u2014 the viewer honours the fragment in the link",
+      "set.caps.anchor.no": "Opens at the start \u2014 this viewer ignores the fragment, so the section name goes to the clipboard instead",
       "set.extensions.other.name": "Other extensions",
       "set.extensions.other.desc": "Anything else to index. Found by file name only \u2014 no preview, no sections.",
       "set.extensions.other.add": "Add extension\u2026",
@@ -8892,6 +9172,19 @@ var require_ru = __commonJS({
       "cmd.updateLinksVault": "\u0410\u043A\u0442\u0443\u0430\u043B\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0438 \u0432\u043E \u0432\u0441\u0451\u043C \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435",
       "cmd.pinLinksNote": "\u0417\u0430\u043A\u0440\u0435\u043F\u0438\u0442\u044C \u043D\u0435\u0437\u0430\u043A\u0440\u0435\u043F\u043B\u0451\u043D\u043D\u044B\u0435 \u0441\u0441\u044B\u043B\u043A\u0438 \u043D\u0430 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u044B \u0432 \u044D\u0442\u043E\u0439 \u0437\u0430\u043C\u0435\u0442\u043A\u0435",
       "cmd.pinLinksVault": "\u0417\u0430\u043A\u0440\u0435\u043F\u0438\u0442\u044C \u043D\u0435\u0437\u0430\u043A\u0440\u0435\u043F\u043B\u0451\u043D\u043D\u044B\u0435 \u0441\u0441\u044B\u043B\u043A\u0438 \u043D\u0430 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u044B \u0432\u043E \u0432\u0441\u0451\u043C \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435",
+      "cmd.exportCitations": "\u0412\u044B\u0433\u0440\u0443\u0437\u0438\u0442\u044C \u0446\u0438\u0442\u0438\u0440\u0443\u0435\u043C\u043E\u0435 \u0432 \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435",
+      "notice.noCitationsUsed": "\u041D\u0438 \u043E\u0434\u043D\u0430 \u0441\u0441\u044B\u043B\u043A\u0430 \u0432 \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435 \u043D\u0435 \u0437\u0430\u043A\u0440\u0435\u043F\u043B\u0435\u043D\u0430 \u0437\u0430 \u043A\u043B\u044E\u0447\u043E\u043C \u0446\u0438\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F.",
+      "notice.citationsExported": "\u041A\u043B\u044E\u0447\u0435\u0439 \u0432\u044B\u0433\u0440\u0443\u0436\u0435\u043D\u043E: {n}, \u0444\u0430\u0439\u043B: {file}",
+      "notice.reportFailed": "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0437\u0430\u043F\u0438\u0441\u0430\u0442\u044C \u043E\u0442\u0447\u0451\u0442.",
+      "report.citations.file": "\u0426\u0438\u0442\u0438\u0440\u0443\u0435\u043C\u043E\u0435",
+      "report.citations.title": "\u0427\u0442\u043E \u0446\u0438\u0442\u0438\u0440\u0443\u0435\u0442 \u044D\u0442\u043E \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435",
+      "report.citations.summary": "{keys}, \u0443\u043F\u043E\u043C\u0438\u043D\u0430\u044E\u0442\u0441\u044F \u0432 {notes}.",
+      "report.citations.key": "\u041A\u043B\u044E\u0447",
+      "report.citations.document": "\u0414\u043E\u043A\u0443\u043C\u0435\u043D\u0442",
+      "report.citations.citedIn": "\u0413\u0434\u0435 \u0446\u0438\u0442\u0438\u0440\u0443\u0435\u0442\u0441\u044F",
+      "report.citations.noDocument": "\u2014 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442 \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D \u2014",
+      "report.citations.unknownKey": "\u2014 \u043D\u0435\u0442 \u0432 \u0431\u0438\u0431\u043B\u0438\u043E\u0433\u0440\u0430\u0444\u0438\u0438 \u2014",
+      "set.bibFiles.unmatched": "\u0414\u043E\u043A\u0443\u043C\u0435\u043D\u0442 \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D \u0434\u043B\u044F: {keys}",
       // Editor context menu
       "menu.convert.solo": "\u041D\u0430\u0439\u0442\u0438 \u0438 \u043F\u0440\u0435\u0432\u0440\u0430\u0442\u0438\u0442\u044C \u0432 \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442",
       "menu.convert.item": "\u0414\u043E\u043A\u0443\u043C\u0435\u043D\u0442",
@@ -8975,6 +9268,10 @@ var require_ru = __commonJS({
       "set.extensions.count": "\u041A\u0430\u043A\u0438\u0435 \u0444\u043E\u0440\u043C\u0430\u0442\u044B \u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u0443\u044E\u0442\u0441\u044F \u2014 \u0432\u043A\u043B\u044E\u0447\u0435\u043D\u043E \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u0439: {n} \u0438\u0437 {total}.",
       "set.extensions.none": "\u041A\u0430\u043A\u0438\u0435 \u0444\u043E\u0440\u043C\u0430\u0442\u044B \u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u0443\u044E\u0442\u0441\u044F. \u041F\u043E\u043A\u0430 \u043D\u0435 \u0432\u043A\u043B\u044E\u0447\u0435\u043D\u043E \u043D\u0438 \u043E\u0434\u043D\u043E\u0433\u043E \u2014 \u0438\u043D\u0434\u0435\u043A\u0441 \u043F\u0443\u0441\u0442.",
       "set.extensions.meta": "\u0412\u043A\u043B\u044E\u0447\u0435\u043D\u043E {n} \u0438\u0437 {total}: {exts}",
+      "set.caps.sections": "\u0415\u0441\u0442\u044C \u043E\u0433\u043B\u0430\u0432\u043B\u0435\u043D\u0438\u0435: \u0441\u0441\u044B\u043B\u043A\u0430 \u043C\u043E\u0436\u0435\u0442 \u0432\u0435\u0441\u0442\u0438 \u043D\u0430 \u0440\u0430\u0437\u0434\u0435\u043B, \u0430 \u043D\u0435 \u0442\u043E\u043B\u044C\u043A\u043E \u043D\u0430 \u0444\u0430\u0439\u043B",
+      "set.caps.sections.no": "\u041E\u0433\u043B\u0430\u0432\u043B\u0435\u043D\u0438\u044F \u043D\u0435\u0442: \u0441\u0441\u044B\u043B\u043A\u0430 \u0432\u0435\u0434\u0451\u0442 \u043D\u0430 \u0444\u0430\u0439\u043B",
+      "set.caps.anchor": "\u041E\u0442\u043A\u0440\u044B\u0432\u0430\u0435\u0442\u0441\u044F \u043D\u0430 \u043D\u0443\u0436\u043D\u043E\u043C \u043C\u0435\u0441\u0442\u0435 \u2014 \u043F\u0440\u043E\u0433\u0440\u0430\u043C\u043C\u0430 \u043F\u043E\u043D\u0438\u043C\u0430\u0435\u0442 \u0444\u0440\u0430\u0433\u043C\u0435\u043D\u0442 \u0432 \u0441\u0441\u044B\u043B\u043A\u0435",
+      "set.caps.anchor.no": "\u041E\u0442\u043A\u0440\u044B\u0432\u0430\u0435\u0442\u0441\u044F \u0441 \u043D\u0430\u0447\u0430\u043B\u0430 \u2014 \u043F\u0440\u043E\u0433\u0440\u0430\u043C\u043C\u0430 \u0438\u0433\u043D\u043E\u0440\u0438\u0440\u0443\u0435\u0442 \u0444\u0440\u0430\u0433\u043C\u0435\u043D\u0442, \u043F\u043E\u044D\u0442\u043E\u043C\u0443 \u043D\u0430\u0437\u0432\u0430\u043D\u0438\u0435 \u0440\u0430\u0437\u0434\u0435\u043B\u0430 \u043A\u043B\u0430\u0434\u0451\u0442\u0441\u044F \u0432 \u0431\u0443\u0444\u0435\u0440 \u043E\u0431\u043C\u0435\u043D\u0430",
       "set.extensions.other.name": "\u0414\u0440\u0443\u0433\u0438\u0435 \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u044F",
       "set.extensions.other.desc": "\u0412\u0441\u0451 \u043E\u0441\u0442\u0430\u043B\u044C\u043D\u043E\u0435, \u0447\u0442\u043E \u043D\u0443\u0436\u043D\u043E \u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u0442\u044C. \u0418\u0449\u0435\u0442\u0441\u044F \u0442\u043E\u043B\u044C\u043A\u043E \u043F\u043E \u0438\u043C\u0435\u043D\u0438 \u0444\u0430\u0439\u043B\u0430 \u2014 \u0431\u0435\u0437 \u043F\u0440\u0435\u0432\u044C\u044E \u0438 \u0440\u0430\u0437\u0434\u0435\u043B\u043E\u0432.",
       "set.extensions.other.add": "\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u0435\u2026",
@@ -9037,7 +9334,8 @@ var { buildMenu } = require_menu_verbs();
 var { watchTree } = require_fs_watch();
 var { ownsLink } = require_link_owner();
 var { ReferenceSuggest } = require_suggest2();
-var filter = require_filter();
+var facets = require_facets();
+var { VALUE, TOKEN } = facets;
 var { HoverPreview } = require_hover();
 var { registerEmbed } = require_embed();
 var actualize = require_actualize2();
@@ -9046,6 +9344,8 @@ var { ReferenceLinkerSettingTab } = require_settings_tab();
 var formats = require_formats();
 var { parseBibliography } = require_bib();
 var { buildCitations, emptyCitations } = require_citations();
+var citationsReport = require_citations_report();
+var { writeReportNote } = require_report_note();
 var { initI18n, withFamily, t, plural } = require_i18n();
 var api = require_api();
 var indexEvents = require_index_events();
@@ -9142,6 +9442,7 @@ var ReferenceLinkerPlugin = class extends Plugin {
     this.addCommand({ id: "update-links-vault", name: t("cmd.updateLinksVault"), callback: () => this.updateLinksInVault() });
     this.addCommand({ id: "pin-links-note", name: t("cmd.pinLinksNote"), callback: () => this.pinLinksInActiveNote() });
     this.addCommand({ id: "pin-links-vault", name: t("cmd.pinLinksVault"), callback: () => this.pinLinksInVault() });
+    this.addCommand({ id: "export-citations", name: t("cmd.exportCitations"), callback: () => this.exportCitations() });
     this.registerEvent(
       this.app.workspace.on("editor-menu", (nativeMenu, editor) => buildMenu(this, nativeMenu, (menu) => {
         if (!this.settings.contextMenu)
@@ -9647,6 +9948,39 @@ var ReferenceLinkerPlugin = class extends Plugin {
   citeOf(rel) {
     return rel && this.citations.byPath.get(rel) || null;
   }
+  // Keys the bibliography carries that no indexed document answers to. Shown in settings, so a
+  // key that silently found nothing is visible rather than only counted.
+  unmatchedCitations() {
+    return [...this.citations.byKey.values()].filter((v) => !v.rel).map((v) => v.key);
+  }
+  // What the vault cites, gathered from the links themselves and written into a new note. The
+  // note is never overwritten: a report is a snapshot, and last week's may still be open.
+  async exportCitations() {
+    const notes = [];
+    try {
+      for (const f of this.app.vault.getMarkdownFiles()) {
+        notes.push({ path: f.path, text: await this.app.vault.cachedRead(f) });
+      }
+    } catch (e) {
+      new Notice(t("notice.reportFailed"));
+      return;
+    }
+    const used = citationsReport.collect(notes);
+    if (!used.size) {
+      new Notice(t("notice.noCitationsUsed"));
+      return;
+    }
+    const file = await writeReportNote(this.app, t("report.citations.file"), citationsReport.report(used, this.citations));
+    if (!file) {
+      new Notice(t("notice.reportFailed"));
+      return;
+    }
+    new Notice(t("notice.citationsExported", { n: used.size, file: file.path }));
+    const leaf = this.app.workspace.getLeaf && this.app.workspace.getLeaf(true);
+    if (leaf && leaf.openFile)
+      await leaf.openFile(file);
+    return file;
+  }
   // With no bibliography read, no cite binding is judged at all.
   hasCitations() {
     return this.citations.keys > 0;
@@ -9675,17 +10009,33 @@ var ReferenceLinkerPlugin = class extends Plugin {
   entriesByName(name) {
     return this.byName.get(String(name).toLowerCase()) || [];
   }
-  // An inline prefix filters by extension ("pdf:") or kind ("sec:", a shorthand for
-  // "section"); the rest is the name to match.
+  // Every way an entry can be addressed, built once: the suggest asks per entry over the whole
+  // index, and each of these reads live state anyway. A facet that declares an anchor is also
+  // what a link pins to — see shared/facets.
+  buildFacets() {
+    return [
+      { name: "kind", typed: VALUE, resolve: (t2) => this.kinds.has(t2) ? t2 : null, of: (e) => e.kind },
+      { name: "ext", typed: VALUE, resolve: (t2) => this.exts.has(t2) ? t2 : null, of: (e) => e.lang },
+      { name: "sec", typed: TOKEN, anchor: "sec", of: (e) => e.kind === "section" ? e.name : "" },
+      { name: "cite", typed: TOKEN, anchor: "cite", of: (e) => this.citeOf(e.path) || "" }
+    ];
+  }
+  facets() {
+    if (!this.queryFacets)
+      this.queryFacets = this.buildFacets();
+    return this.queryFacets;
+  }
   parseQuery(raw) {
-    const kinds = this.kinds && this.kinds.has("section") ? /* @__PURE__ */ new Set([...this.kinds, "sec"]) : this.kinds;
-    const f = filter.parseQuery(raw, kinds, this.exts);
-    if (f.kind === "sec")
-      f.kind = "section";
-    return f;
+    return facets.parseQuery(raw, this.facets());
   }
   entryPassesFilter(e, f) {
-    return (!f.kind || e.kind === f.kind) && (!f.ext || e.lang === f.ext);
+    return facets.passes(e, f, this.facets());
+  }
+  matchTextFor(e, f) {
+    return facets.matchText(e, f, this.facets());
+  }
+  entriesForQuery(f) {
+    return facets.entriesFor(this, f, this.facets());
   }
   // The indexed document a link target names, or null: the entry whose root-joined path the
   // target ends with. Works whatever scheme the link was built with.
@@ -9903,13 +10253,7 @@ var ReferenceLinkerPlugin = class extends Plugin {
     return inTable ? link.replace(/\|/g, "\\|") : link;
   }
   bindingFor(e) {
-    const b = {};
-    const cite = this.citeOf(e.path);
-    if (cite)
-      b.cite = cite;
-    if (e.kind === "section")
-      b.sec = e.name;
-    return b;
+    return facets.bindingFrom(e, this.facets());
   }
   pickEntry(onChoose, query) {
     new ReferenceLinkModal(this.app, this, { onChoose, query }).open();

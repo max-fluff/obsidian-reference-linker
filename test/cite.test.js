@@ -278,3 +278,33 @@ describe('retargetUrl', () => {
     assert.strictEqual(plugin.retargetUrl('zotero://open-pdf/library/items/ABCD', 'papers/new.pdf'), null);
   });
 });
+
+// The key a link pins to and the key it is found by are one projection, so the plugin gets
+// both from declaring it once (see shared/facets).
+describe('cite as a way to find a document', () => {
+  const entries = (plugin) => plugin.index.filter((e) => plugin.entryPassesFilter(e, plugin.parseQuery('cite:')));
+
+  it('offers only documents a bibliography names', async () => {
+    const plugin = await load();
+    assert.deepStrictEqual(entries(plugin).map((e) => e.path), ['papers/new.pdf', 'papers/new.pdf', 'papers/new.pdf']);
+  });
+
+  it('matches the typed text against the key rather than the document name', async () => {
+    const plugin = await load();
+    const q = plugin.parseQuery('cite:smith');
+    const hit = plugin.index.find((e) => e.kind === 'file' && plugin.entryPassesFilter(e, q));
+    assert.strictEqual(q.name, 'smith');
+    assert.strictEqual(plugin.matchTextFor(hit, q), 'smith2020');
+  });
+
+  it('offers nothing at all when no bibliography is read', async () => {
+    const plugin = await load({ noBib: true });
+    assert.deepStrictEqual(entries(plugin), []);
+  });
+
+  it('pins to the same key it is found by', async () => {
+    const plugin = await load();
+    const file = plugin.index.find((e) => e.kind === 'file' && e.path === 'papers/new.pdf');
+    assert.strictEqual(plugin.bindingFor(file).cite, 'smith2020');
+  });
+});

@@ -22,7 +22,8 @@ const { buildMenu } = require('./shared/menu-verbs');
 const { watchTree } = require('./shared/fs-watch');
 const { ownsLink } = require('./shared/link-owner');
 const { ReferenceSuggest } = require('./suggest');
-const filter = require('./filter');
+const facets = require('./shared/facets');
+const { VALUE, TOKEN } = facets;
 const { HoverPreview } = require('./hover');
 const { registerEmbed } = require('./embed');
 const actualize = require('./actualize');
@@ -31,6 +32,8 @@ const { ReferenceLinkerSettingTab } = require('./settings-tab');
 const formats = require('./formats');
 const { parseBibliography } = require('./bib');
 const { buildCitations, emptyCitations } = require('./citations');
+const citationsReport = require('./citations-report');
+const { writeReportNote } = require('./shared/report-note');
 const { initI18n, withFamily, t, plural } = require('./shared/i18n');
 const api = require('./api');
 const indexEvents = require('./shared/index-events');
@@ -166,6 +169,7 @@ class ReferenceLinkerPlugin extends Plugin {
     this.addCommand({ id: 'update-links-vault', name: t('cmd.updateLinksVault'), callback: () => this.updateLinksInVault() });
     this.addCommand({ id: 'pin-links-note', name: t('cmd.pinLinksNote'), callback: () => this.pinLinksInActiveNote() });
     this.addCommand({ id: 'pin-links-vault', name: t('cmd.pinLinksVault'), callback: () => this.pinLinksInVault() });
+    this.addCommand({ id: 'export-citations', name: t('cmd.exportCitations'), callback: () => this.exportCitations() });
 
     this.registerEvent(
       this.app.workspace.on('editor-menu', (nativeMenu, editor) => buildMenu(this, nativeMenu, (menu) => {
@@ -695,6 +699,36 @@ class ReferenceLinkerPlugin extends Plugin {
     return (rel && this.citations.byPath.get(rel)) || null;
   }
 
+  // Keys the bibliography carries that no indexed document answers to. Shown in settings, so a
+  // key that silently found nothing is visible rather than only counted.
+  unmatchedCitations() {
+    return [...this.citations.byKey.values()].filter((v) => !v.rel).map((v) => v.key);
+  }
+
+  // What the vault cites, gathered from the links themselves and written into a new note. The
+  // note is never overwritten: a report is a snapshot, and last week's may still be open.
+  async exportCitations() {
+    const notes = [];
+    // Reading every note can fail on one of them; the command that called this cannot await,
+    // so a rejection here would be a silent no-op with a console trace.
+    try {
+      for (const f of this.app.vault.getMarkdownFiles()) {
+        notes.push({ path: f.path, text: await this.app.vault.cachedRead(f) });
+      }
+    } catch {
+      new Notice(t('notice.reportFailed'));
+      return;
+    }
+    const used = citationsReport.collect(notes);
+    if (!used.size) { new Notice(t('notice.noCitationsUsed')); return; }
+    const file = await writeReportNote(this.app, t('report.citations.file'), citationsReport.report(used, this.citations));
+    if (!file) { new Notice(t('notice.reportFailed')); return; }
+    new Notice(t('notice.citationsExported', { n: used.size, file: file.path }));
+    const leaf = this.app.workspace.getLeaf && this.app.workspace.getLeaf(true);
+    if (leaf && leaf.openFile) await leaf.openFile(file);
+    return file;
+  }
+
   // With no bibliography read, no cite binding is judged at all.
   hasCitations() {
     return this.citations.keys > 0;
@@ -723,17 +757,37 @@ class ReferenceLinkerPlugin extends Plugin {
     return this.byName.get(String(name).toLowerCase()) || [];
   }
 
-  // An inline prefix filters by extension ("pdf:") or kind ("sec:", a shorthand for
-  // "section"); the rest is the name to match.
+  // Every way an entry can be addressed, built once: the suggest asks per entry over the whole
+  // index, and each of these reads live state anyway. A facet that declares an anchor is also
+  // what a link pins to — see shared/facets.
+  buildFacets() {
+    return [
+      { name: 'kind', typed: VALUE, resolve: (t) => (this.kinds.has(t) ? t : null), of: (e) => e.kind },
+      { name: 'ext', typed: VALUE, resolve: (t) => (this.exts.has(t) ? t : null), of: (e) => e.lang },
+      { name: 'sec', typed: TOKEN, anchor: 'sec', of: (e) => (e.kind === 'section' ? e.name : '') },
+      { name: 'cite', typed: TOKEN, anchor: 'cite', of: (e) => this.citeOf(e.path) || '' },
+    ];
+  }
+
+  facets() {
+    if (!this.queryFacets) this.queryFacets = this.buildFacets();
+    return this.queryFacets;
+  }
+
   parseQuery(raw) {
-    const kinds = this.kinds && this.kinds.has('section') ? new Set([...this.kinds, 'sec']) : this.kinds;
-    const f = filter.parseQuery(raw, kinds, this.exts);
-    if (f.kind === 'sec') f.kind = 'section';
-    return f;
+    return facets.parseQuery(raw, this.facets());
   }
 
   entryPassesFilter(e, f) {
-    return (!f.kind || e.kind === f.kind) && (!f.ext || e.lang === f.ext);
+    return facets.passes(e, f, this.facets());
+  }
+
+  matchTextFor(e, f) {
+    return facets.matchText(e, f, this.facets());
+  }
+
+  entriesForQuery(f) {
+    return facets.entriesFor(this, f, this.facets());
   }
 
   // The indexed document a link target names, or null: the entry whose root-joined path the
@@ -959,11 +1013,7 @@ class ReferenceLinkerPlugin extends Plugin {
   }
 
   bindingFor(e) {
-    const b = {};
-    const cite = this.citeOf(e.path);
-    if (cite) b.cite = cite;
-    if (e.kind === 'section') b.sec = e.name;
-    return b;
+    return facets.bindingFrom(e, this.facets());
   }
 
   pickEntry(onChoose, query) {
