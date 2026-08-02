@@ -721,7 +721,7 @@ class ReferenceLinkerPlugin extends Plugin {
     }
     const used = citationsReport.collect(notes);
     if (!used.size) { new Notice(t('notice.noCitationsUsed')); return; }
-    const file = await writeReportNote(this.app, t('report.citations.file'), citationsReport.report(used, this.citations));
+    const file = await writeReportNote(this.app.vault, t('report.citations.file'), citationsReport.report(used, this.citations));
     if (!file) { new Notice(t('notice.reportFailed')); return; }
     new Notice(t('notice.citationsExported', { n: used.size, file: file.path }));
     const leaf = this.app.workspace.getLeaf && this.app.workspace.getLeaf(true);

@@ -8867,11 +8867,11 @@ var require_report_note = __commonJS({
     "use strict";
     var { normalizePath: normalizePath2 } = require("obsidian");
     var MAX_TRIES = 50;
-    async function writeReportNote2(app, base, body) {
+    async function writeReportNote2(vault, base, body) {
       for (let n = 0; n < MAX_TRIES; n++) {
         const name = n ? `${base} ${n + 1}.md` : `${base}.md`;
         try {
-          return await app.vault.create(normalizePath2(name), body);
+          return await vault.create(normalizePath2(name), body);
         } catch (e) {
         }
       }
@@ -9970,7 +9970,7 @@ var ReferenceLinkerPlugin = class extends Plugin {
       new Notice(t("notice.noCitationsUsed"));
       return;
     }
-    const file = await writeReportNote(this.app, t("report.citations.file"), citationsReport.report(used, this.citations));
+    const file = await writeReportNote(this.app.vault, t("report.citations.file"), citationsReport.report(used, this.citations));
     if (!file) {
       new Notice(t("notice.reportFailed"));
       return;
