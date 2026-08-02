@@ -1,7 +1,7 @@
 {
   "id": "reference-linker",
   "name": "Reference Linker",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "minAppVersion": "1.4.0",
   "description": "Autocomplete links to documents outside your vault — PDF, Office, EPUB, images, recordings — that open at the exact page, and read them in the note itself: hover a link for the page, or embed it as a viewer you can page, zoom and play.",
   "author": "max-fluff",
