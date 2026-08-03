@@ -740,10 +740,10 @@ var require_prose = __commonJS({
       // The shared submenu the exclusion items collect into, and their wording inside it, where
       // the parent already names the word.
       "exclude.group": "Exclude \u201C{value}\u201D",
-      // Inside the group the parent already says "Exclude …", so an item names its reach and
-      // leaves the state to its tick — "Exclude ▸ Add" read as two verbs fighting.
-      "exclude.shortForm": "This spelling",
-      "exclude.shortStem": "Every form",
+      "silence.group": "Stop linking \u201C{value}\u201D",
+      // The group already carries the verb, so an item only says how far it reaches.
+      "exclude.shortForm": "this spelling",
+      "exclude.shortStem": "every form of it",
       "label.selection": "Selection",
       "modal.leftAsText": "(left as text)",
       "modal.skipOption": "skip",
@@ -773,6 +773,11 @@ var require_prose = __commonJS({
       "set.statusBarIncludeLinks.name": "Count existing links too",
       "set.folderList.add": "Add path\u2026",
       "set.folderList.addAria": "Add",
+      "set.exclusionList.add": "Add\u2026",
+      "set.exclusionList.addAria": "Add",
+      "set.exclusionList.remove": "Remove",
+      "set.exclusionList.show": "Show the list",
+      "set.exclusionList.hide": "Hide the list",
       "plural.alias": { one: "{n} alias", other: "{n} aliases" }
     };
     var ru = {
@@ -807,8 +812,9 @@ var require_prose = __commonJS({
       "set.suggestPlainText.desc": "\u041F\u043E\u0434\u0441\u043A\u0430\u0437\u043A\u0430 \u0434\u043E\u043F\u0438\u0441\u044B\u0432\u0430\u0435\u0442 \u0441\u043B\u043E\u0432\u043E, \u043D\u0435 \u043F\u0440\u0435\u0432\u0440\u0430\u0449\u0430\u044F \u0435\u0433\u043E \u0432 \u0441\u0441\u044B\u043B\u043A\u0443.",
       "set.heading.contextMenu": "\u041A\u043E\u043D\u0442\u0435\u043A\u0441\u0442\u043D\u043E\u0435 \u043C\u0435\u043D\u044E",
       "exclude.group": "\u0418\u0441\u043A\u043B\u044E\u0447\u0438\u0442\u044C \xAB{value}\xBB",
-      "exclude.shortForm": "\u042D\u0442\u043E \u043D\u0430\u043F\u0438\u0441\u0430\u043D\u0438\u0435",
-      "exclude.shortStem": "\u0412\u0441\u0435 \u0444\u043E\u0440\u043C\u044B",
+      "silence.group": "\u041D\u0435 \u0441\u0432\u044F\u0437\u044B\u0432\u0430\u0442\u044C \xAB{value}\xBB",
+      "exclude.shortForm": "\u044D\u0442\u043E \u043D\u0430\u043F\u0438\u0441\u0430\u043D\u0438\u0435",
+      "exclude.shortStem": "\u043B\u044E\u0431\u0443\u044E \u0435\u0433\u043E \u0444\u043E\u0440\u043C\u0443",
       "label.selection": "\u0412\u044B\u0434\u0435\u043B\u0435\u043D\u0438\u0435",
       "modal.leftAsText": "(\u043E\u0441\u0442\u0430\u0432\u043B\u0435\u043D\u043E \u0442\u0435\u043A\u0441\u0442\u043E\u043C)",
       "modal.skipOption": "\u043F\u0440\u043E\u043F\u0443\u0441\u0442\u0438\u0442\u044C",
@@ -838,6 +844,11 @@ var require_prose = __commonJS({
       "set.statusBarIncludeLinks.name": "\u0421\u0447\u0438\u0442\u0430\u0442\u044C \u0438 \u0443\u0436\u0435 \u0441\u0432\u044F\u0437\u0430\u043D\u043D\u044B\u0435",
       "set.folderList.add": "\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u043F\u0443\u0442\u044C\u2026",
       "set.folderList.addAria": "\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C",
+      "set.exclusionList.add": "\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C\u2026",
+      "set.exclusionList.addAria": "\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C",
+      "set.exclusionList.remove": "\u0423\u0431\u0440\u0430\u0442\u044C",
+      "set.exclusionList.show": "\u041F\u043E\u043A\u0430\u0437\u0430\u0442\u044C \u0441\u043F\u0438\u0441\u043E\u043A",
+      "set.exclusionList.hide": "\u0421\u043A\u0440\u044B\u0442\u044C \u0441\u043F\u0438\u0441\u043E\u043A",
       "plural.alias": { one: "{n} \u043F\u0441\u0435\u0432\u0434\u043E\u043D\u0438\u043C", few: "{n} \u043F\u0441\u0435\u0432\u0434\u043E\u043D\u0438\u043C\u0430", many: "{n} \u043F\u0441\u0435\u0432\u0434\u043E\u043D\u0438\u043C\u043E\u0432", other: "{n} \u043F\u0441\u0435\u0432\u0434\u043E\u043D\u0438\u043C\u043E\u0432" }
     };
     var de = {
@@ -1234,7 +1245,10 @@ var require_menu_verbs = __commonJS({
     var VERBS = {
       convert: { label: "menu.convert.group", icon: "link" },
       open: { label: "menu.open.group", icon: "file-search" },
-      exclude: { label: "exclude.group", icon: "ban" }
+      // Two verbs, because stopping a word and dropping the term it reached are different acts:
+      // one leaves the term in the index, the other takes it out.
+      silence: { label: "silence.group", icon: "ban" },
+      exclude: { label: "exclude.group", icon: "trash-2" }
     };
     var verbKey = (verb, value) => verb + " " + (value == null ? "" : String(value));
     var MenuBuilder = class {
@@ -7962,14 +7976,25 @@ var require_disk_suggest = __commonJS({
 var require_folder_list = __commonJS({
   "src/shared/folder-list.js"(exports2, module2) {
     "use strict";
-    var { Setting, setIcon } = require("obsidian");
+    var openLists = /* @__PURE__ */ new WeakMap();
     function renderFolderList(containerEl, opts) {
+      const { Setting, setIcon } = require("obsidian");
       const cls = opts.cls;
       const norm = opts.normalize || ((x) => x.trim());
       const read = () => (opts.get() || "").split("\n").map((x) => x.trim()).filter(Boolean);
-      new Setting(containerEl).setName(opts.name).setDesc(opts.desc);
-      const rowsEl = containerEl.createDiv({ cls: `${cls}-folder-rows` });
-      const addEl = containerEl.createDiv({ cls: `${cls}-folder-add` });
+      const fold = opts.fold;
+      const maxRows = opts.maxRows || 10;
+      const opened = () => {
+        let set = openLists.get(fold.owner);
+        if (!set) {
+          set = /* @__PURE__ */ new Set();
+          openLists.set(fold.owner, set);
+        }
+        return set;
+      };
+      const isOpen = () => !fold || opened().has(fold.key);
+      const host = containerEl.createDiv({ cls: `${cls}-list` });
+      let refocus = false;
       const commit = async (next) => {
         const seen = /* @__PURE__ */ new Set();
         const clean = [];
@@ -7983,36 +8008,81 @@ var require_folder_list = __commonJS({
         await opts.set(clean.join("\n"));
         draw();
       };
-      const draw = () => {
-        rowsEl.empty();
-        read().forEach((path, i) => {
-          const row = new Setting(rowsEl).setName(path);
-          row.settingEl.addClass(`${cls}-folder-row`);
-          row.addExtraButton((b) => b.setIcon("x").setTooltip(opts.removeLabel || "").onClick(() => {
+      const drawRow = (rowsEl, entry, i) => {
+        if (!opts.editable) {
+          const row2 = new Setting(rowsEl).setName(entry);
+          row2.settingEl.addClass(`${cls}-folder-row`);
+          row2.addExtraButton((b) => b.setIcon("x").setTooltip(opts.removeLabel || "").onClick(() => {
             const next = read();
             next.splice(i, 1);
             commit(next);
           }));
+          return;
+        }
+        const row = rowsEl.createDiv({ cls: `${cls}-folder-row ${cls}-list-row` });
+        const box = row.createEl("input", { type: "text", cls: `${cls}-list-input` });
+        box.value = entry;
+        box.addEventListener("change", () => {
+          const next = read();
+          next[i] = box.value;
+          commit(next);
+        });
+        const del = row.createEl("button", { cls: `${cls}-list-del`, attr: { "aria-label": opts.removeLabel || "" } });
+        setIcon(del, "x");
+        del.addEventListener("click", () => {
+          const next = read();
+          next.splice(i, 1);
+          commit(next);
         });
       };
-      const input = addEl.createEl("input", { type: "text", cls: `${cls}-folder-input`, attr: { placeholder: opts.placeholder || "" } });
-      const addBtn = addEl.createEl("button", { cls: `${cls}-folder-addbtn`, attr: { "aria-label": opts.addLabel || "" } });
-      setIcon(addBtn, "plus");
-      const add = (raw) => {
-        if (norm(raw))
-          commit([...read(), raw]);
-        input.value = "";
-        input.focus();
-      };
-      if (opts.attachSuggest)
-        opts.attachSuggest(input, add);
-      addBtn.addEventListener("click", () => add(input.value));
-      input.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          add(input.value);
+      const draw = () => {
+        host.empty();
+        const entries = read();
+        const open = isOpen();
+        const head = new Setting(host).setName(entries.length ? `${opts.name} (${entries.length})` : opts.name).setDesc(opts.desc);
+        if (fold) {
+          head.addExtraButton((b) => b.setIcon(open ? "chevron-up" : "chevron-down").setTooltip((open ? opts.hideLabel : opts.showLabel) || "").onClick(() => {
+            const s = opened();
+            if (open)
+              s.delete(fold.key);
+            else
+              s.add(fold.key);
+            draw();
+          }));
+          if (!open)
+            return;
         }
-      });
+        const rowsEl = host.createDiv({ cls: `${cls}-folder-rows` });
+        if (entries.length > maxRows)
+          rowsEl.addClass(`${cls}-list-scroll`);
+        entries.forEach((entry, i) => drawRow(rowsEl, entry, i));
+        const addEl = host.createDiv({ cls: `${cls}-folder-add` });
+        const input = addEl.createEl("input", { type: "text", cls: `${cls}-folder-input`, attr: { placeholder: opts.placeholder || "" } });
+        const addBtn = addEl.createEl("button", { cls: `${cls}-folder-addbtn`, attr: { "aria-label": opts.addLabel || "" } });
+        setIcon(addBtn, "plus");
+        const add = (raw) => {
+          input.value = "";
+          if (!norm(raw)) {
+            input.focus();
+            return;
+          }
+          refocus = true;
+          commit([...read(), raw]);
+        };
+        if (opts.attachSuggest)
+          opts.attachSuggest(input, add);
+        addBtn.addEventListener("click", () => add(input.value));
+        input.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            add(input.value);
+          }
+        });
+        if (refocus) {
+          refocus = false;
+          input.focus();
+        }
+      };
       draw();
     }
     module2.exports = { renderFolderList };
