@@ -5,6 +5,7 @@
 module.exports = {
   // Commands
   'cmd.rebuildIndex': 'Перестроить индекс ссылок',
+  'cmd.pinLink': 'Закрепить эту ссылку',
   'cmd.insertLink': 'Вставить ссылку на документ',
   'cmd.insertLinkAs': 'Вставить ссылку на документ как…',
   'cmd.openFile': 'Открыть документ',

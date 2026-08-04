@@ -1368,6 +1368,138 @@ var require_menu_verbs = __commonJS({
   }
 });
 
+// src/shared/actions.js
+var require_actions = __commonJS({
+  "src/shared/actions.js"(exports2, module2) {
+    "use strict";
+    var { t: t2 } = require_i18n();
+    var drawn = (plugin, a) => typeof a.inMenu !== "function" || !!a.inMenu(plugin);
+    function check(a) {
+      if (!a.id || !a.name || !a.title || !a.run || !a.resolve) {
+        throw new Error("menu action needs id, name, title, resolve and run: " + (a.id || "(no id)"));
+      }
+      return a;
+    }
+    function registerActions2(plugin, actions) {
+      for (const a of actions.map(check)) {
+        const act = (checking, target) => {
+          if (!target)
+            return false;
+          const ctx = a.resolve(plugin, target);
+          if (!ctx)
+            return false;
+          if (!checking)
+            a.run(plugin, ctx);
+          return true;
+        };
+        if (a.surface === "editor") {
+          plugin.addCommand({ id: a.id, name: t2(a.name), editorCheckCallback: (checking, editor) => act(checking, editor) });
+        } else {
+          plugin.addCommand({ id: a.id, name: t2(a.name), checkCallback: (checking) => act(checking, plugin.app.workspace.getActiveFile()) });
+        }
+      }
+    }
+    function menuActions2(plugin, menu, actions, surface, target) {
+      const sections = /* @__PURE__ */ new Map();
+      for (const a of actions.map(check)) {
+        if (a.surface !== surface || !drawn(plugin, a))
+          continue;
+        const ctx = a.resolve(plugin, target);
+        if (!ctx)
+          continue;
+        const write = (i, grouped) => i.setTitle(a.title(ctx, grouped)).setIcon(grouped && a.verb ? null : a.icon || null).onClick(() => a.run(plugin, ctx));
+        if (a.section && menu.section) {
+          const label = typeof a.section === "function" ? a.section(ctx) : t2(a.section);
+          if (!sections.has(label))
+            sections.set(label, menu.section(label, a.icon));
+          sections.get(label).addItem((i) => write(i, true));
+        } else if (a.verb) {
+          menu.tagged(a.verb, { value: a.value ? a.value(ctx) : void 0 }, write);
+        } else {
+          menu.addItem((i) => write(i, false));
+        }
+      }
+    }
+    function cursorReader(compute, stamp = (plugin) => plugin.indexVersion) {
+      let last = { editor: null, key: null, value: null };
+      return (plugin, editor) => {
+        if (!editor)
+          return null;
+        const head = editor.getCursor("head");
+        const sel = editor.getSelection ? editor.getSelection() : "";
+        const key = `${head.line}:${head.ch}:${editor.getLine(head.line)}:${sel}:${stamp(plugin)}`;
+        if (last.editor !== editor || last.key !== key)
+          last = { editor, key, value: compute(plugin, editor) };
+        return last.value;
+      };
+    }
+    module2.exports = { registerActions: registerActions2, menuActions: menuActions2, cursorReader };
+  }
+});
+
+// src/link-actions.js
+var require_link_actions = __commonJS({
+  "src/link-actions.js"(exports2, module2) {
+    "use strict";
+    var { t: t2 } = require_i18n();
+    var { withTitle: withTitle2 } = require_markdown();
+    var { parseBinding: parseBinding2 } = require_binding();
+    var linkAt = (plugin, editor) => {
+      const link = editor && plugin.linkAtCursor(editor);
+      return link && plugin.ownsLinkAtCursor(link) ? { editor, link } : null;
+    };
+    var linkAction = ({ id, name, can, run, icon }) => ({
+      id,
+      name,
+      surface: "editor",
+      icon,
+      title: () => t2(name),
+      resolve: (plugin, editor) => {
+        const ctx = linkAt(plugin, editor);
+        return ctx && (!can || can(plugin, ctx.link)) ? ctx : null;
+      },
+      run
+    });
+    var LINK_ACTIONS2 = [
+      linkAction({
+        id: "copy-reference-link-at-cursor",
+        name: "menu.copyLink",
+        icon: "copy",
+        run: (plugin, ctx) => plugin.copyLinkAtCursor(ctx.link)
+      }),
+      linkAction({
+        id: "fix-reference-link",
+        name: "menu.fixLink",
+        icon: "wrench",
+        can: (plugin, link) => plugin.isLinkStale(withTitle2(link.target, link.title)),
+        run: (plugin, ctx) => plugin.fixLinkAtCursor(ctx.editor, ctx.link)
+      }),
+      {
+        // One item, worded for what it would pin to — a section or a citation key.
+        id: "pin-reference-link",
+        name: "cmd.pinLink",
+        surface: "editor",
+        icon: "pin",
+        title: (ctx) => ctx.option.kind === "cite" ? t2("menu.pinCite", { cite: ctx.option.value }) : t2("menu.pin", { sec: ctx.option.value }),
+        resolve: (plugin, editor) => {
+          const ctx = linkAt(plugin, editor);
+          const option = ctx && plugin.linkPinOption(ctx.link);
+          return option ? Object.assign(ctx, { option }) : null;
+        },
+        run: (plugin, ctx) => plugin.pinLinkAtCursor(ctx.editor, ctx.link)
+      },
+      linkAction({
+        id: "unpin-reference-link",
+        name: "menu.unpin",
+        icon: "pin-off",
+        can: (plugin, link) => !!parseBinding2(link.title),
+        run: (plugin, ctx) => plugin.unpinLinkAtCursor(ctx.editor, ctx.link)
+      })
+    ];
+    module2.exports = { LINK_ACTIONS: LINK_ACTIONS2 };
+  }
+});
+
 // src/shared/fs-watch.js
 var require_fs_watch = __commonJS({
   "src/shared/fs-watch.js"(exports2, module2) {
@@ -9070,6 +9202,7 @@ var require_en = __commonJS({
     module2.exports = {
       // Commands
       "cmd.rebuildIndex": "Rebuild reference index",
+      "cmd.pinLink": "Pin this reference link",
       "cmd.insertLink": "Insert reference link",
       "cmd.insertLinkAs": "Insert reference link as\u2026",
       "cmd.openFile": "Open referenced document",
@@ -9239,6 +9372,7 @@ var require_ru = __commonJS({
     module2.exports = {
       // Commands
       "cmd.rebuildIndex": "\u041F\u0435\u0440\u0435\u0441\u0442\u0440\u043E\u0438\u0442\u044C \u0438\u043D\u0434\u0435\u043A\u0441 \u0441\u0441\u044B\u043B\u043E\u043A",
+      "cmd.pinLink": "\u0417\u0430\u043A\u0440\u0435\u043F\u0438\u0442\u044C \u044D\u0442\u0443 \u0441\u0441\u044B\u043B\u043A\u0443",
       "cmd.insertLink": "\u0412\u0441\u0442\u0430\u0432\u0438\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442",
       "cmd.insertLinkAs": "\u0412\u0441\u0442\u0430\u0432\u0438\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442 \u043A\u0430\u043A\u2026",
       "cmd.openFile": "\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442",
@@ -9409,6 +9543,8 @@ var { splitLines, inTableCell, inCode, inLink, linkRegex, splitTarget, withTitle
 var { parseBinding, formatBinding, bindStateFrom, bindingOwner, ownsBinding } = require_binding();
 var { fillRoot: fillRootToken, ownsRootToken, namespaceRoot } = require_root_token();
 var { buildMenu } = require_menu_verbs();
+var { registerActions, menuActions } = require_actions();
+var { LINK_ACTIONS } = require_link_actions();
 var { watchTree } = require_fs_watch();
 var { ownsLink } = require_link_owner();
 var { ReferenceSuggest } = require_suggest2();
@@ -9520,6 +9656,7 @@ var ReferenceLinkerPlugin = class extends Plugin {
     this.addCommand({ id: "update-links-vault", name: t("cmd.updateLinksVault"), callback: () => this.updateLinksInVault() });
     this.addCommand({ id: "pin-links-note", name: t("cmd.pinLinksNote"), callback: () => this.pinLinksInActiveNote() });
     this.addCommand({ id: "pin-links-vault", name: t("cmd.pinLinksVault"), callback: () => this.pinLinksInVault() });
+    registerActions(this, LINK_ACTIONS);
     this.addCommand({ id: "export-citations", name: t("cmd.exportCitations"), callback: () => this.exportCitations() });
     this.registerEvent(
       this.app.workspace.on("editor-menu", (nativeMenu, editor) => buildMenu(this, nativeMenu, (menu) => {
@@ -9531,21 +9668,7 @@ var ReferenceLinkerPlugin = class extends Plugin {
         if (this.selectionTarget(editor, false)) {
           this.selectionItem(menu, "open", "file-search", () => this.openSelection(editor));
         }
-        const link = this.linkAtCursor(editor);
-        if (link && this.ownsLinkAtCursor(link)) {
-          menu.addItem((item) => item.setTitle(t("menu.copyLink")).setIcon("copy").onClick(() => this.copyLinkAtCursor(link)));
-          if (this.isLinkStale(withTitle(link.target, link.title))) {
-            menu.addItem((item) => item.setTitle(t("menu.fixLink")).setIcon("wrench").onClick(() => this.fixLinkAtCursor(editor, link)));
-          }
-          const pin = this.linkPinOption(link);
-          if (pin) {
-            const label = pin.kind === "cite" ? t("menu.pinCite", { cite: pin.value }) : t("menu.pin", { sec: pin.value });
-            menu.addItem((item) => item.setTitle(label).setIcon("pin").onClick(() => this.pinLinkAtCursor(editor, link)));
-          }
-          if (parseBinding(link.title)) {
-            menu.addItem((item) => item.setTitle(t("menu.unpin")).setIcon("pin-off").onClick(() => this.unpinLinkAtCursor(editor, link)));
-          }
-        }
+        menuActions(this, menu, LINK_ACTIONS, "editor", editor);
       }))
     );
     this.app.workspace.onLayoutReady(() => this.rebuildIndex(false));

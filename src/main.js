@@ -19,6 +19,8 @@ const { splitLines, inTableCell, inCode, inLink, linkRegex, splitTarget, withTit
 const { parseBinding, formatBinding, bindStateFrom, bindingOwner, ownsBinding } = require('./shared/binding');
 const { fillRoot: fillRootToken, ownsRootToken, namespaceRoot } = require('./shared/root-token');
 const { buildMenu } = require('./shared/menu-verbs');
+const { registerActions, menuActions } = require('./shared/actions');
+const { LINK_ACTIONS } = require('./link-actions');
 const { watchTree } = require('./shared/fs-watch');
 const { ownsLink } = require('./shared/link-owner');
 const { ReferenceSuggest } = require('./suggest');
@@ -169,6 +171,9 @@ class ReferenceLinkerPlugin extends Plugin {
     this.addCommand({ id: 'update-links-vault', name: t('cmd.updateLinksVault'), callback: () => this.updateLinksInVault() });
     this.addCommand({ id: 'pin-links-note', name: t('cmd.pinLinksNote'), callback: () => this.pinLinksInActiveNote() });
     this.addCommand({ id: 'pin-links-vault', name: t('cmd.pinLinksVault'), callback: () => this.pinLinksInVault() });
+    // The right-click items on a reference link and their palette twins are one list —
+    // see shared/actions.js.
+    registerActions(this, LINK_ACTIONS);
     this.addCommand({ id: 'export-citations', name: t('cmd.exportCitations'), callback: () => this.exportCitations() });
 
     this.registerEvent(
@@ -191,21 +196,7 @@ class ReferenceLinkerPlugin extends Plugin {
         // Right-clicking one of our reference links: copy its target; fix a drifted pinned
         // section; pin an unpinned link or unpin a pinned one. Ownership is checked so a link
         // the code linker recognises too gets one set of actions, not two.
-        const link = this.linkAtCursor(editor);
-        if (link && this.ownsLinkAtCursor(link)) {
-          menu.addItem((item) => item.setTitle(t('menu.copyLink')).setIcon('copy').onClick(() => this.copyLinkAtCursor(link)));
-          if (this.isLinkStale(withTitle(link.target, link.title))) {
-            menu.addItem((item) => item.setTitle(t('menu.fixLink')).setIcon('wrench').onClick(() => this.fixLinkAtCursor(editor, link)));
-          }
-          const pin = this.linkPinOption(link);
-          if (pin) {
-            const label = pin.kind === 'cite' ? t('menu.pinCite', { cite: pin.value }) : t('menu.pin', { sec: pin.value });
-            menu.addItem((item) => item.setTitle(label).setIcon('pin').onClick(() => this.pinLinkAtCursor(editor, link)));
-          }
-          if (parseBinding(link.title)) {
-            menu.addItem((item) => item.setTitle(t('menu.unpin')).setIcon('pin-off').onClick(() => this.unpinLinkAtCursor(editor, link)));
-          }
-        }
+        menuActions(this, menu, LINK_ACTIONS, 'editor', editor);
       }))
     );
 

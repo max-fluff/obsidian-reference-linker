@@ -5,6 +5,7 @@
 module.exports = {
   // Commands
   'cmd.rebuildIndex': 'Rebuild reference index',
+  'cmd.pinLink': 'Pin this reference link',
   'cmd.insertLink': 'Insert reference link',
   'cmd.insertLinkAs': 'Insert reference link as…',
   'cmd.openFile': 'Open referenced document',
