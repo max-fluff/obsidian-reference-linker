@@ -37,6 +37,7 @@ const { buildCitations, emptyCitations } = require('./citations');
 const citationsReport = require('./citations-report');
 const { writeReportNote } = require('./shared/report-note');
 const { initI18n, withFamily, t, plural } = require('./shared/i18n');
+const { announceStyleSettings } = require('./shared/style-settings');
 const api = require('./api');
 const indexEvents = require('./shared/index-events');
 
@@ -158,6 +159,7 @@ class ReferenceLinkerPlugin extends Plugin {
     this.registerDomEvent(document, 'click', (evt) => this.onAnchorClick(evt), { capture: true });
     this.registerDomEvent(document, 'auxclick', (evt) => this.onAnchorClick(evt), { capture: true });
     this.addSettingTab(new ReferenceLinkerSettingTab(this.app, this));
+    announceStyleSettings(this);
     this.statusEl = this.addStatusBarItem();
     this.addCommand({ id: 'rebuild-reference-index', name: t('cmd.rebuildIndex'), callback: () => this.rebuildIndex(true) });
     this.addCommand({ id: 'insert-reference-link', name: t('cmd.insertLink'), editorCallback: (editor) => this.pickEntry((e) => this.withFormat(this.settings.askOnInsert, (tpl) => this.insertLink(editor, e, tpl))) });
