@@ -1,4 +1,4 @@
-/* Reference Linker 1.3.0 — bundled from src/ by esbuild. Do not edit directly; edit src/ and run "npm run build". */
+/* Reference Linker 1.3.1 — bundled from src/ by esbuild. Do not edit directly; edit src/ and run "npm run build". */
 "use strict";
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __commonJS = (cb, mod) => function __require() {
@@ -520,6 +520,16 @@ var require_discover = __commonJS({
         return matches;
       return matches.filter((m) => !overlaps(foreign, m.start, m.end));
     }
+    function spanMeanings(m) {
+      const out = [{ label: m.label || m.target || "", target: m.target }];
+      if (!Array.isArray(m.alts))
+        return out;
+      for (const a of m.alts) {
+        if (a && a.target !== void 0 && a.target !== null)
+          out.push({ label: a.label || a.target, target: a.target });
+      }
+      return out;
+    }
     function yieldedCandidates(app, self, text, where) {
       const out = [];
       for (const peer of discoverLinkers(app)) {
@@ -536,35 +546,38 @@ var require_discover = __commonJS({
         for (const m of matches) {
           if (!m || typeof m.start !== "number" || typeof m.end !== "number")
             continue;
-          out.push({
-            start: m.start,
-            end: m.end,
-            label: m.label || m.target || "",
-            target: m.target,
-            // The id survives a round trip through a DOM attribute; the opener is looked up
-            // again at click time.
-            id: peer.id,
-            source: peer.displayName || peer.id,
-            // How this row reads in an ambiguity list, asked of its owner and only when a list is
-            // actually drawn — every span on screen produces candidates, few are ever looked at.
-            describe: (display) => {
-              if (typeof peer.describe !== "function")
-                return null;
-              try {
-                return peer.describe(m.target, display);
-              } catch (e) {
-                return null;
+          for (const meta of spanMeanings(m)) {
+            out.push({
+              start: m.start,
+              end: m.end,
+              label: meta.label,
+              target: meta.target,
+              // The id survives a round trip through a DOM attribute; the opener is looked up
+              // again at click time.
+              id: peer.id,
+              source: peer.displayName || peer.id,
+              // How this row reads in an ambiguity list, asked of its owner and only when a list
+              // is actually drawn — every span on screen produces candidates, few are ever
+              // looked at.
+              describe: (display) => {
+                if (typeof peer.describe !== "function")
+                  return null;
+                try {
+                  return peer.describe(meta.target, display);
+                } catch (e) {
+                  return null;
+                }
+              },
+              open: (sourcePath, newTab) => {
+                if (typeof peer.open === "function")
+                  peer.open(meta.target, sourcePath, newTab);
+              },
+              hover: (event, targetEl, sourcePath, hoverParent) => {
+                if (typeof peer.hover === "function")
+                  peer.hover(meta.target, event, targetEl, sourcePath, hoverParent);
               }
-            },
-            open: (sourcePath, newTab) => {
-              if (typeof peer.open === "function")
-                peer.open(m.target, sourcePath, newTab);
-            },
-            hover: (event, targetEl, sourcePath, hoverParent) => {
-              if (typeof peer.hover === "function")
-                peer.hover(m.target, event, targetEl, sourcePath, hoverParent);
-            }
-          });
+            });
+          }
         }
       }
       return out;
@@ -9091,6 +9104,17 @@ var require_report_note = __commonJS({
   }
 });
 
+// src/shared/style-settings.js
+var require_style_settings = __commonJS({
+  "src/shared/style-settings.js"(exports2, module2) {
+    "use strict";
+    function announceStyleSettings2(plugin) {
+      plugin.app.workspace.onLayoutReady(() => plugin.app.workspace.trigger("parse-style-settings"));
+    }
+    module2.exports = { announceStyleSettings: announceStyleSettings2 };
+  }
+});
+
 // src/api.js
 var require_api = __commonJS({
   "src/api.js"(exports2, module2) {
@@ -9561,6 +9585,7 @@ var { buildCitations, emptyCitations } = require_citations();
 var citationsReport = require_citations_report();
 var { writeReportNote } = require_report_note();
 var { initI18n, withFamily, t, plural } = require_i18n();
+var { announceStyleSettings } = require_style_settings();
 var api = require_api();
 var indexEvents = require_index_events();
 function openExternal(uri) {
@@ -9643,6 +9668,7 @@ var ReferenceLinkerPlugin = class extends Plugin {
     this.registerDomEvent(document, "click", (evt) => this.onAnchorClick(evt), { capture: true });
     this.registerDomEvent(document, "auxclick", (evt) => this.onAnchorClick(evt), { capture: true });
     this.addSettingTab(new ReferenceLinkerSettingTab(this.app, this));
+    announceStyleSettings(this);
     this.statusEl = this.addStatusBarItem();
     this.addCommand({ id: "rebuild-reference-index", name: t("cmd.rebuildIndex"), callback: () => this.rebuildIndex(true) });
     this.addCommand({ id: "insert-reference-link", name: t("cmd.insertLink"), editorCallback: (editor) => this.pickEntry((e) => this.withFormat(this.settings.askOnInsert, (tpl) => this.insertLink(editor, e, tpl))) });
