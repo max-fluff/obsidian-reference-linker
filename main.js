@@ -6849,17 +6849,21 @@ var require_viewer_state = __commonJS({
     }
     function parseZoom(raw) {
       const s = String(raw == null ? "" : raw).trim().toLowerCase();
-      if (!s)
+      if (!s || s === FIT)
         return null;
-      if (s === FIT)
-        return FIT;
       const m = /^(\d+(?:\.\d+)?)\s*%?$/.exec(s);
       if (!m)
         return null;
       return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round(parseFloat(m[1]))));
     }
-    var formatZoom = (zoom) => zoom === FIT ? FIT : zoom + "%";
-    var same = (a, b) => a.position === b.position && a.zoom === b.zoom && a.count === b.count && a.paged === b.paged && a.zoomable === b.zoomable;
+    function parseFit(raw, zoomRaw) {
+      const s = String(raw == null ? "" : raw).trim().toLowerCase();
+      if (s)
+        return s !== "no" && s !== "false" && s !== "0";
+      return String(zoomRaw == null ? "" : zoomRaw).trim().toLowerCase() === FIT;
+    }
+    var formatZoom = (zoom) => zoom + "%";
+    var same = (a, b) => a.position === b.position && a.zoom === b.zoom && a.fit === b.fit && a.count === b.count && a.paged === b.paged && a.zoomable === b.zoomable;
     function set(state, patch) {
       const next = Object.assign({}, state, patch);
       return same(state, next) ? state : next;
@@ -6871,16 +6875,16 @@ var require_viewer_state = __commonJS({
       return {
         position: clampPosition(o.position, count),
         zoom: zoom === null ? 100 : zoom,
+        fit: parseFit(o.fit, o.zoom),
         count,
         paged: !!o.paged,
         zoomable: !!o.zoomable
       };
     }
     function stepZoom(zoom, dir) {
-      const base = zoom === FIT ? 100 : zoom;
       const steps = dir > 0 ? ZOOM_STEPS : ZOOM_STEPS.slice().reverse();
-      const next = steps.find((z) => dir > 0 ? z > base : z < base);
-      return next === void 0 ? base : next;
+      const next = steps.find((z) => dir > 0 ? z > zoom : z < zoom);
+      return next === void 0 ? zoom : next;
     }
     function reduce(state, action) {
       if (!action)
@@ -6913,7 +6917,7 @@ var require_viewer_state = __commonJS({
           return state.zoomable && z !== null ? set(state, { zoom: z }) : state;
         }
         case "fit":
-          return state.zoomable ? set(state, { zoom: state.zoom === FIT ? 100 : FIT }) : state;
+          return state.zoomable ? set(state, { fit: !state.fit }) : state;
         default:
           return state;
       }
@@ -6951,8 +6955,8 @@ var require_viewer_state = __commonJS({
       }
     }
     function renderSize(state, width, containerWidth) {
-      const box = state.zoom === FIT && containerWidth > 0 ? containerWidth : width;
-      const zoom = state.zoom === FIT ? 1 : state.zoom / 100;
+      const box = state.fit && containerWidth > 0 ? containerWidth : width;
+      const zoom = state.zoom / 100;
       return { width: Math.round(box), zoom: Math.min(zoom, MAX_WIDTH / Math.max(1, box)) };
     }
     module2.exports = {
@@ -6960,6 +6964,7 @@ var require_viewer_state = __commonJS({
       FIT,
       MAX_WIDTH,
       parseZoom,
+      parseFit,
       formatZoom,
       initialState,
       reduce,
@@ -7005,6 +7010,7 @@ var require_viewer = __commonJS({
           this.st = vs.initialState({
             position: res.position,
             zoom: this.opts.spec.zoom,
+            fit: this.opts.spec.fit,
             count: 0,
             paged: caps.paged && !this.ranged,
             zoomable: caps.zoomable
@@ -7122,9 +7128,9 @@ var require_viewer = __commonJS({
           this.nextBtn.disabled = st.count > 0 && st.position >= st.count;
         }
         if (st.zoomable) {
-          this.zoomEl.setText((st.zoom === vs.FIT ? Math.round(this.size().width / this.opts.width * 100) : st.zoom) + "%");
-          this.fitBtn.toggleClass("is-active", st.zoom === vs.FIT);
-          this.body.toggleClass("is-zoomed", st.zoom !== vs.FIT && st.zoom > 100);
+          this.zoomEl.setText(st.zoom + "%");
+          this.fitBtn.toggleClass("is-active", st.fit);
+          this.body.toggleClass("is-zoomed", st.zoom > 100);
         }
       }
       apply(action) {
@@ -7353,7 +7359,7 @@ var require_embed = __commonJS({
         return null;
       return parseInt(m[1] || "0", 10) * 3600 + parseInt(m[2], 10) * 60 + parseInt(m[3], 10);
     }
-    var SPEC_KEYS = ["page", "time", "width", "title", "zoom", "volume"];
+    var SPEC_KEYS = ["page", "time", "width", "title", "zoom", "fit", "volume"];
     var parseSpec = (source) => frame.parseSpec(source, SPEC_KEYS);
     function splitTarget2(target) {
       const h = target.indexOf("#");
@@ -7520,8 +7526,10 @@ var require_embed = __commonJS({
           let out = body;
           if (st.paged)
             out = frame.setSpecLine(out, "page", String(st.position));
-          if (st.zoomable)
+          if (st.zoomable) {
             out = frame.setSpecLine(out, "zoom", formatZoom(st.zoom));
+            out = frame.setSpecLine(out, "fit", st.fit ? "yes" : "");
+          }
           if (sound) {
             out = frame.setSpecLine(out, "time", sound.time);
             out = frame.setSpecLine(out, "volume", sound.volume);

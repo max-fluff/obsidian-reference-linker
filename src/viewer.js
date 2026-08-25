@@ -37,6 +37,7 @@ class EmbedViewer {
       this.st = vs.initialState({
         position: res.position,
         zoom: this.opts.spec.zoom,
+        fit: this.opts.spec.fit,
         count: 0,
         paged: caps.paged && !this.ranged,
         zoomable: caps.zoomable,
@@ -152,10 +153,11 @@ class EmbedViewer {
       this.nextBtn.disabled = st.count > 0 && st.position >= st.count;
     }
     if (st.zoomable) {
-      // "fit" has no percentage of its own, so the label shows the one it currently works out to.
-      this.zoomEl.setText((st.zoom === vs.FIT ? Math.round((this.size().width / this.opts.width) * 100) : st.zoom) + '%');
-      this.fitBtn.toggleClass('is-active', st.zoom === vs.FIT);
-      this.body.toggleClass('is-zoomed', st.zoom !== vs.FIT && st.zoom > 100);
+      this.zoomEl.setText(st.zoom + '%');
+      this.fitBtn.toggleClass('is-active', st.fit);
+      // Content drawn past its box is what has to escape the max-width a rendered note puts on
+      // an image, whichever width the box itself ended up with.
+      this.body.toggleClass('is-zoomed', st.zoom > 100);
     }
   }
 

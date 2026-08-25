@@ -179,7 +179,9 @@ papers/paper-with-outline.pdf#page=3
 - An image path shows the image; a `.pptx` path shows the slide drawn; a spreadsheet shows the sheet as a table.
 - A **range** stacks several pages or sections: `report.pdf#page=3-5`, or a `page: 3-5` line. Paged and sectioned formats range; images and media render once. Up to 20 at a time, and each one is drawn as you scroll to it rather than all at once.
 - A recording is positioned **in time, not in pages**: `time: 1:30` (or `1:02:05`, or plain seconds), or `clip.mp4#t=1:30` in the target — the same timecode the header shows. Each format takes only its own unit: `page:` on a recording, or `time:` on a paged document, is an error that names the right key rather than quietly starting from the top.
-- Optional `key: value` lines after the target tune it, and they are the whole set: `page: N` (or `N-M`) for paged formats, `time: mm:ss` for recordings, `width: N` (CSS px, 600 by default), `zoom: 150%` or `zoom: fit` for the formats that zoom, `volume: 40%` or `volume: off` for a recording, and `title: …`, which replaces the header text — by default the section or document name and its position.
+- Optional `key: value` lines after the target tune it, and they are the whole set: `page: N` (or `N-M`) for paged formats, `time: mm:ss` for recordings, `width: N` (CSS px, 600 by default), `zoom: 150%` and `fit: yes` for the formats that zoom, `volume: 40%` or `volume: off` for a recording, and `title: …`, which replaces the header text — by default the section or document name and its position.
+
+`fit` and `zoom` answer different questions and combine freely: `fit: yes` widens the block to whatever it sits in, ignoring `width:`, while `zoom:` draws the content larger inside whichever box it got — so `fit: yes` with `zoom: 150%` is a full-width block whose page is drawn half again as large and scrolls sideways. A block written before these were separate says `zoom: fit`, which still means a fitted box at 100%.
 
 <p align="center">
   <img src="docs/images/embed.png" alt="Two rendered reference-link embeds: a PDF page with a title, and an image, each with the viewer toolbar in its header" width="640">
@@ -201,7 +203,7 @@ A recording has no positions to page through, so it gets a transport under the h
   <img src="docs/images/player.png" alt="A recording embedded in a note, with the plugin's own transport under the header: play, a filled bar, the clock, and the sound level" width="560">
 </p>
 
-Where you left an embed is yours rather than the block's: it survives an index rebuild, but not closing the note. **Remember this view** writes it into the block — `page:` and `zoom:` for a document, `time:` and `volume:` for a recording — so it opens there next time. A range like `#page=3-5` stacks its positions and draws each as you scroll to it, so it takes the contents list but not the arrows; a Markdown or text file is positioned by line rather than by section, so it takes neither.
+Where you left an embed is yours rather than the block's: it survives an index rebuild, but not closing the note. **Remember this view** writes it into the block — `page:`, `zoom:` and `fit:` for a document, `time:` and `volume:` for a recording — so it opens there next time. A range like `#page=3-5` stacks its positions and draws each as you scroll to it, so it takes the contents list but not the arrows; a Markdown or text file is positioned by line rather than by section, so it takes neither.
 
 Embeds re-render when the index rebuilds, so an open embed follows changes on disk. The command **Insert reference embed** picks an entry and inserts the block.
 

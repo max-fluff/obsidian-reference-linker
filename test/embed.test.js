@@ -200,3 +200,31 @@ describe('embed resolve', () => {
     assert.ok((await res('Twin')).error);
   });
 });
+
+// A key missing from SPEC_KEYS is read as part of the target instead of as a setting, and the
+// block silently loses it. Nothing else in the suite touches the set.
+describe('block spec keys', () => {
+  it('reads every setting a block can carry', () => {
+    const spec = parseSpec([
+      'Spec.pdf#page=3',
+      'page: 3',
+      'time: 1:20',
+      'width: 700',
+      'title: The spec',
+      'zoom: 150%',
+      'fit: yes',
+      'volume: 40%',
+    ].join('\n'));
+    assert.strictEqual(spec.target, 'Spec.pdf#page=3');
+    assert.strictEqual(spec.zoom, '150%');
+    assert.strictEqual(spec.fit, 'yes');
+    assert.strictEqual(spec.volume, '40%');
+    assert.strictEqual(spec.title, 'The spec');
+  });
+
+  it('leaves an unknown key to the target, which is how a dropped key would look', () => {
+    const spec = parseSpec('Spec.pdf\nstretch: yes');
+    assert.strictEqual(spec.target, 'Spec.pdf');
+    assert.strictEqual(spec.stretch, undefined);
+  });
+});

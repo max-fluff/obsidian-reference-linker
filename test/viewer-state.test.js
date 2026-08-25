@@ -69,7 +69,6 @@ describe('viewer state: zoom', () => {
   it('reads what the block declared', () => {
     assert.strictEqual(paged({ zoom: '150%' }).zoom, 150);
     assert.strictEqual(paged({ zoom: '150' }).zoom, 150);
-    assert.strictEqual(paged({ zoom: 'fit' }).zoom, vs.FIT);
     assert.strictEqual(paged({ zoom: 'wide' }).zoom, 100);
   });
 
@@ -85,16 +84,6 @@ describe('viewer state: zoom', () => {
     assert.strictEqual(vs.reduce(top, { type: 'zoomIn' }), top);
   });
 
-  it('walks the ladder from 100% when the zoom is “fit”', () => {
-    assert.strictEqual(vs.reduce(paged({ zoom: 'fit' }), { type: 'zoomIn' }).zoom, 125);
-  });
-
-  it('toggles fit against 100%', () => {
-    const fitted = vs.reduce(paged(), { type: 'fit' });
-    assert.strictEqual(fitted.zoom, vs.FIT);
-    assert.strictEqual(vs.reduce(fitted, { type: 'fit' }).zoom, 100);
-  });
-
   it('leaves a format that does not zoom alone', () => {
     const st = vs.initialState({ position: 1, paged: true, zoomable: false });
     assert.strictEqual(vs.reduce(st, { type: 'zoomIn' }), st);
@@ -103,9 +92,45 @@ describe('viewer state: zoom', () => {
 
   it('writes back the way it reads', () => {
     assert.strictEqual(vs.formatZoom(150), '150%');
-    assert.strictEqual(vs.formatZoom(vs.FIT), 'fit');
     assert.strictEqual(vs.parseZoom(vs.formatZoom(150)), 150);
-    assert.strictEqual(vs.parseZoom(vs.formatZoom(vs.FIT)), vs.FIT);
+  });
+});
+
+// The box and the factor answer different questions, and folding them into one field made
+// choosing either throw the other away.
+describe('viewer state: fit', () => {
+  it('is off until the block asks for it', () => {
+    assert.strictEqual(paged().fit, false);
+    assert.strictEqual(paged({ fit: 'yes' }).fit, true);
+    assert.strictEqual(paged({ fit: 'no' }).fit, false);
+  });
+
+  it('still reads a block written before fit was a key of its own', () => {
+    const legacy = paged({ zoom: 'fit' });
+    assert.strictEqual(legacy.fit, true);
+    assert.strictEqual(legacy.zoom, 100);
+  });
+
+  it('lets the block declare a wide box and a large factor at once', () => {
+    const both = paged({ fit: 'yes', zoom: '150%' });
+    assert.strictEqual(both.fit, true);
+    assert.strictEqual(both.zoom, 150);
+  });
+
+  it('toggles without disturbing the zoom', () => {
+    const zoomed = paged({ zoom: '150%' });
+    const fitted = vs.reduce(zoomed, { type: 'fit' });
+    assert.strictEqual(fitted.fit, true);
+    assert.strictEqual(fitted.zoom, 150);
+    assert.strictEqual(vs.reduce(fitted, { type: 'fit' }).fit, false);
+    assert.strictEqual(vs.reduce(fitted, { type: 'fit' }).zoom, 150);
+  });
+
+  it('survives walking the zoom ladder', () => {
+    const fitted = paged({ fit: 'yes' });
+    const inned = vs.reduce(fitted, { type: 'zoomIn' });
+    assert.strictEqual(inned.zoom, 125);
+    assert.strictEqual(inned.fit, true);
   });
 });
 
@@ -147,13 +172,22 @@ describe('viewer state: render size', () => {
     assert.deepStrictEqual(vs.renderSize(st('50%'), 600, 900), { width: 600, zoom: 0.5 });
   });
 
-  it('fills the container at natural size when fitted, and falls back to the declared width', () => {
-    assert.deepStrictEqual(vs.renderSize(st('fit'), 600, 820), { width: 820, zoom: 1 });
-    assert.deepStrictEqual(vs.renderSize(st('fit'), 600, 0), { width: 600, zoom: 1 });
+  it('fills the container when fitted, and falls back to the declared width', () => {
+    assert.deepStrictEqual(vs.renderSize(paged({ fit: 'yes' }), 600, 820), { width: 820, zoom: 1 });
+    assert.deepStrictEqual(vs.renderSize(paged({ fit: 'yes' }), 600, 0), { width: 600, zoom: 1 });
+  });
+
+  it('widens the box and raises the factor together', () => {
+    assert.deepStrictEqual(vs.renderSize(paged({ fit: 'yes', zoom: '150%' }), 600, 820), { width: 820, zoom: 1.5 });
   });
 
   it('never asks for a canvas wider than a machine can raster', () => {
     const size = vs.renderSize(st('300%'), 3000, 0);
+    assert.strictEqual(size.width * size.zoom, vs.MAX_WIDTH);
+  });
+
+  it('holds the raster cap against the fitted box, not the declared one', () => {
+    const size = vs.renderSize(paged({ fit: 'yes', zoom: '300%' }), 600, 3000);
     assert.strictEqual(size.width * size.zoom, vs.MAX_WIDTH);
   });
 });

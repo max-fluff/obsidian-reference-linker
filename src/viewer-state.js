@@ -16,20 +16,28 @@ function clampPosition(n, count) {
   return count > 0 ? Math.min(p, count) : p;
 }
 
-// "fit", "150" or "150%" — anything else is not a zoom.
+// "150" or "150%" — anything else is not a zoom. `fit` is still read here because that is what
+// the single `zoom:` key meant before the box and the factor became two settings; it says
+// nothing about the factor, so it leaves the zoom unset.
 function parseZoom(raw) {
   const s = String(raw == null ? '' : raw).trim().toLowerCase();
-  if (!s) return null;
-  if (s === FIT) return FIT;
+  if (!s || s === FIT) return null;
   const m = /^(\d+(?:\.\d+)?)\s*%?$/.exec(s);
   if (!m) return null;
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round(parseFloat(m[1]))));
 }
 
-const formatZoom = (zoom) => (zoom === FIT ? FIT : zoom + '%');
+// `fit: yes` is the key of its own; a legacy `zoom: fit` still asks for the same box.
+function parseFit(raw, zoomRaw) {
+  const s = String(raw == null ? '' : raw).trim().toLowerCase();
+  if (s) return s !== 'no' && s !== 'false' && s !== '0';
+  return String(zoomRaw == null ? '' : zoomRaw).trim().toLowerCase() === FIT;
+}
 
-const same = (a, b) => a.position === b.position && a.zoom === b.zoom && a.count === b.count
-  && a.paged === b.paged && a.zoomable === b.zoomable;
+const formatZoom = (zoom) => zoom + '%';
+
+const same = (a, b) => a.position === b.position && a.zoom === b.zoom && a.fit === b.fit
+  && a.count === b.count && a.paged === b.paged && a.zoomable === b.zoomable;
 
 // Returning the old object when nothing moved is what tells the viewer not to redraw.
 function set(state, patch) {
@@ -44,18 +52,17 @@ function initialState(opts) {
   return {
     position: clampPosition(o.position, count),
     zoom: zoom === null ? 100 : zoom,
+    fit: parseFit(o.fit, o.zoom),
     count,
     paged: !!o.paged,
     zoomable: !!o.zoomable,
   };
 }
 
-// Zooming out of "fit" has no percentage to start from, so the ladder is walked from 100%.
 function stepZoom(zoom, dir) {
-  const base = zoom === FIT ? 100 : zoom;
   const steps = dir > 0 ? ZOOM_STEPS : ZOOM_STEPS.slice().reverse();
-  const next = steps.find((z) => (dir > 0 ? z > base : z < base));
-  return next === undefined ? base : next;
+  const next = steps.find((z) => (dir > 0 ? z > zoom : z < zoom));
+  return next === undefined ? zoom : next;
 }
 
 function reduce(state, action) {
@@ -82,7 +89,7 @@ function reduce(state, action) {
       const z = parseZoom(action.value);
       return state.zoomable && z !== null ? set(state, { zoom: z }) : state;
     }
-    case 'fit': return state.zoomable ? set(state, { zoom: state.zoom === FIT ? 100 : FIT }) : state;
+    case 'fit': return state.zoomable ? set(state, { fit: !state.fit }) : state;
     default: return state;
   }
 }
@@ -107,15 +114,16 @@ function keyAction(ev) {
   }
 }
 
-// What the format is asked to draw: the box it lays out into, and the factor it draws at.
-// "fit" is a wider box at natural size; a percentage is that box drawn larger.
+// What the format is asked to draw: the box it lays out into, and the factor it draws at. The
+// two answer different questions — fit widens the box to the container, zoom draws the content
+// larger inside whatever box it got — so they compose rather than replace each other.
 function renderSize(state, width, containerWidth) {
-  const box = state.zoom === FIT && containerWidth > 0 ? containerWidth : width;
-  const zoom = state.zoom === FIT ? 1 : state.zoom / 100;
+  const box = state.fit && containerWidth > 0 ? containerWidth : width;
+  const zoom = state.zoom / 100;
   return { width: Math.round(box), zoom: Math.min(zoom, MAX_WIDTH / Math.max(1, box)) };
 }
 
 module.exports = {
   ZOOM_STEPS, FIT, MAX_WIDTH,
-  parseZoom, formatZoom, initialState, reduce, keyAction, renderSize,
+  parseZoom, parseFit, formatZoom, initialState, reduce, keyAction, renderSize,
 };

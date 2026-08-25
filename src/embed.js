@@ -41,7 +41,7 @@ function parseTimecode(s) {
 
 // `time:` is `page:` for a recording — the same position, written the way a recording's
 // position reads.
-const SPEC_KEYS = ['page', 'time', 'width', 'title', 'zoom', 'volume'];
+const SPEC_KEYS = ['page', 'time', 'width', 'title', 'zoom', 'fit', 'volume'];
 const parseSpec = (source) => frame.parseSpec(source, SPEC_KEYS);
 
 // Split a trailing position off a path target: the fragment after '#' (a "page=3", "page=3-5",
@@ -210,7 +210,12 @@ class ReferenceEmbed extends frame.EmbedFrame {
     const ok = await this.writeBody((body) => {
       let out = body;
       if (st.paged) out = frame.setSpecLine(out, 'page', String(st.position));
-      if (st.zoomable) out = frame.setSpecLine(out, 'zoom', formatZoom(st.zoom));
+      if (st.zoomable) {
+        out = frame.setSpecLine(out, 'zoom', formatZoom(st.zoom));
+        // An empty value drops the line, so a box back at the block's own width says so by
+        // saying nothing.
+        out = frame.setSpecLine(out, 'fit', st.fit ? 'yes' : '');
+      }
       // Where a recording was left is a time and a level, as a document's is a page and a zoom.
       if (sound) {
         out = frame.setSpecLine(out, 'time', sound.time);
