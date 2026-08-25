@@ -167,8 +167,9 @@ class EmbedViewer {
     if (next === prev) return;
     this.st = next;
     this.sync();
-    if (next.zoom !== prev.zoom) this.schedule();
-    else if (next.position !== prev.position) this.draw();
+    const what = vs.redrawFor(prev, next);
+    if (what === 'size') this.schedule();
+    else if (what === 'position') this.draw();
   }
 
   schedule() {

@@ -6959,6 +6959,15 @@ var require_viewer_state = __commonJS({
       const zoom = state.zoom / 100;
       return { width: Math.round(box), zoom: Math.min(zoom, MAX_WIDTH / Math.max(1, box)) };
     }
+    function redrawFor(prev, next) {
+      if (next === prev)
+        return null;
+      if (next.zoom !== prev.zoom || next.fit !== prev.fit)
+        return "size";
+      if (next.position !== prev.position)
+        return "position";
+      return null;
+    }
     module2.exports = {
       ZOOM_STEPS,
       FIT,
@@ -6969,7 +6978,8 @@ var require_viewer_state = __commonJS({
       initialState,
       reduce,
       keyAction,
-      renderSize
+      renderSize,
+      redrawFor
     };
   }
 });
@@ -7140,9 +7150,10 @@ var require_viewer = __commonJS({
           return;
         this.st = next;
         this.sync();
-        if (next.zoom !== prev.zoom)
+        const what = vs.redrawFor(prev, next);
+        if (what === "size")
           this.schedule();
-        else if (next.position !== prev.position)
+        else if (what === "position")
           this.draw();
       }
       schedule() {

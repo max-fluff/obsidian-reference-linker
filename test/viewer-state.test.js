@@ -191,3 +191,35 @@ describe('viewer state: render size', () => {
     assert.strictEqual(size.width * size.zoom, vs.MAX_WIDTH);
   });
 });
+
+// The viewer asked which fields changed to decide whether to redraw, and it asked in the one
+// module nothing tests. Splitting fit out of zoom silently stopped the fit button redrawing.
+describe('viewer state: what a change asks for', () => {
+  const act = (over, action) => {
+    const prev = paged(over);
+    return vs.redrawFor(prev, vs.reduce(prev, action));
+  };
+
+  it('asks for nothing when nothing moved', () => {
+    const st = paged();
+    assert.strictEqual(vs.redrawFor(st, st), null);
+  });
+
+  it('asks to re-rasterise when the factor changes', () => {
+    assert.strictEqual(act({}, { type: 'zoomIn' }), 'size');
+  });
+
+  it('asks to re-rasterise when the box changes, though the factor did not', () => {
+    assert.strictEqual(act({}, { type: 'fit' }), 'size');
+    assert.strictEqual(act({ fit: 'yes' }, { type: 'fit' }), 'size');
+  });
+
+  it('asks only for a redraw when the position changes', () => {
+    assert.strictEqual(act({}, { type: 'next' }), 'position');
+  });
+
+  it('asks for nothing from a format that cannot zoom', () => {
+    const st = vs.initialState({ position: 1, paged: true, zoomable: false });
+    assert.strictEqual(vs.redrawFor(st, vs.reduce(st, { type: 'fit' })), null);
+  });
+});

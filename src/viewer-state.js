@@ -123,7 +123,18 @@ function renderSize(state, width, containerWidth) {
   return { width: Math.round(box), zoom: Math.min(zoom, MAX_WIDTH / Math.max(1, box)) };
 }
 
+// What a change asks the viewer for: 'size' has to be re-rasterised, 'position' only redrawn.
+// It lives here rather than in the viewer because it is a question about the state, and it was
+// wrong the moment fit stopped being a kind of zoom — a fit toggle changes neither of the two
+// fields the viewer used to watch, so nothing happened at all.
+function redrawFor(prev, next) {
+  if (next === prev) return null;
+  if (next.zoom !== prev.zoom || next.fit !== prev.fit) return 'size';
+  if (next.position !== prev.position) return 'position';
+  return null;
+}
+
 module.exports = {
   ZOOM_STEPS, FIT, MAX_WIDTH,
-  parseZoom, parseFit, formatZoom, initialState, reduce, keyAction, renderSize,
+  parseZoom, parseFit, formatZoom, initialState, reduce, keyAction, renderSize, redrawFor,
 };
