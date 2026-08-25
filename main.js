@@ -4019,7 +4019,9 @@ var require_player = __commonJS({
     }
     function slider(row, cls, label, max, value) {
       const el = row.createEl("input", {
-        cls: "reference-linker-player-" + cls,
+        // Two classes: one names the control, one is what every rule below the transport hangs on
+        // so a theme's own `input[type=range]` rules do not outrank them. See styles.css.
+        cls: "reference-linker-player-range reference-linker-player-" + cls,
         type: "range",
         attr: { min: "0", max: String(max), value: String(value), "aria-label": label }
       });

@@ -215,7 +215,10 @@ input[type="text"].%p%-embed-position:focus {
 }
 
 /* Obsidian styles `input[type="range"]` itself, and element plus attribute outweighs a class:
-   every rule below carries them too, or the transport is half its look and half ours. */
+   every rule below carries them too, or the transport is half its look and half ours.
+   .%p%-player-range is on both controls for the same reason: without it the track rules tie
+   with a theme's own `input[type=range]::-webkit-slider-runnable-track` and lose on order,
+   which showed as a bar with no progress in it until the pointer arrived. */
 .%p%-player input[type="range"] {
   flex: 1 1 auto;
   min-width: 60px;
@@ -235,21 +238,23 @@ input[type="text"].%p%-embed-position:focus {
 }
 
 /* The bar is the whole control. There is no knob: placing one takes a browser's word for where
-   it lays the track and what margin it cuts for a thumb, and the two disagree. */
-.%p%-player input[type="range"]::-webkit-slider-runnable-track {
-  height: 4px;
+   it lays the track and what margin it cuts for a thumb, and the two disagree.
+   Metrics and the unspent part come from the variables Obsidian gives a slider, so a theme
+   that restyles its own sliders restyles this transport with them. */
+.%p%-player input[type="range"].%p%-player-range::-webkit-slider-runnable-track {
+  height: var(--slider-track-height, 4px);
   margin: 0;
   border: 0;
-  border-radius: 2px;
+  border-radius: 999px;
   cursor: pointer;
   background: linear-gradient(
     to right,
     var(--interactive-accent) 0 var(--rl-player-fill, 0%),
-    var(--background-modifier-border) var(--rl-player-fill, 0%) 100%);
+    var(--slider-track-background, var(--background-modifier-border)) var(--rl-player-fill, 0%) 100%);
 }
 
 /* The thumb stays — it is what a drag holds on to — but it is not drawn. */
-.%p%-player input[type="range"]::-webkit-slider-thumb {
+.%p%-player input[type="range"].%p%-player-range::-webkit-slider-thumb {
   appearance: none;
   -webkit-appearance: none;
   width: var(--slider-thumb-width, 14px);
@@ -262,12 +267,12 @@ input[type="text"].%p%-embed-position:focus {
 }
 
 /* The pointer state is a class the player sets, not :hover — see player.js. */
-.%p%-player input[type="range"].is-hot::-webkit-slider-runnable-track,
-.%p%-player input[type="range"]:focus-visible::-webkit-slider-runnable-track {
+.%p%-player input[type="range"].%p%-player-range.is-hot::-webkit-slider-runnable-track,
+.%p%-player input[type="range"].%p%-player-range:focus-visible::-webkit-slider-runnable-track {
   background: linear-gradient(
     to right,
     var(--interactive-accent-hover, var(--interactive-accent)) 0 var(--rl-player-fill, 0%),
-    var(--background-modifier-border-hover, var(--text-faint)) var(--rl-player-fill, 0%) 100%);
+    var(--slider-track-background, var(--background-modifier-border-hover, var(--text-faint))) var(--rl-player-fill, 0%) 100%);
 }
 
 .%p%-player-time {
