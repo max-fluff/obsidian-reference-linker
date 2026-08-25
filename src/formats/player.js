@@ -54,7 +54,7 @@ function slider(row, cls, label, max, value) {
 }
 
 // A range input paints one track, so what is behind the thumb is drawn from this.
-const fill = (el, part) => el.style.setProperty('--reference-linker-player-fill',
+const fill = (el, part) => el.style.setProperty('--rl-player-fill',
   Math.max(0, Math.min(100, part * 100)) + '%');
 
 // False where the app's DOM helpers aren't there, so the caller keeps the browser's controls.

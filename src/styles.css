@@ -3,43 +3,7 @@
 name: Reference Linker
 id: %p%
 settings:
-  -
-    id: %p%-stale-color
-    title: Stale-link underline colour
-    description: Reference links whose target document has moved or is missing. Default follows the theme's warning colour.
-    type: variable-themed-color
-    format: hex
-    opacity: false
-    default-light: '#c1810b'
-    default-dark: '#e0a526'
-  -
-    id: %p%-broken-color
-    title: Broken-link underline colour
-    description: Reference links whose target document is gone. Default follows the theme's error colour.
-    type: variable-themed-color
-    format: hex
-    opacity: false
-    default-light: '#c4302b'
-    default-dark: '#e35555'
-  -
-    id: %p%-mark-underline-style
-    title: Stale / broken underline style
-    type: variable-select
-    default: dotted
-    options:
-      - dotted
-      - dashed
-      - solid
-      - double
-  -
-    id: %p%-embed-height
-    title: Inline embed height
-    description: How tall an inline embed grows before it scrolls, in percent of the window.
-    type: variable-number-slider
-    default: 60
-    min: 20
-    max: 100
-    step: 5
+%rows:sigil%
   -
     id: %p%-hover-height
     title: Hover preview height
@@ -50,14 +14,24 @@ settings:
     max: 100
     step: 5
   -
-    id: %p%-embed-tools-idle
-    title: Inline embed toolbar when idle
-    description: How visible the embed's toolbar is while the pointer is elsewhere. 0 keeps it out of the way until you hover the embed or focus it.
+    id: %p%-rendered-line-height
+    title: Preview text line height
+    description: How tightly a rendered markdown or HTML preview is set. Leave at default to follow the theme.
+    type: variable-number-slider
+    default: 1.5
+    min: 1
+    max: 2.2
+    step: 0.05
+  -
+    id: %p%-rendered-heading-scale
+    title: Preview heading scale
+    description: How far a heading in a rendered preview outranks the text under it. 0 sets every heading at text size.
     type: variable-number-slider
     default: 1
     min: 0
-    max: 1
+    max: 2
     step: 0.25
+%rows:pickers%
 
 */
 
@@ -270,8 +244,8 @@ input[type="text"].%p%-embed-position:focus {
   cursor: pointer;
   background: linear-gradient(
     to right,
-    var(--interactive-accent) 0 var(--%p%-player-fill, 0%),
-    var(--background-modifier-border) var(--%p%-player-fill, 0%) 100%);
+    var(--interactive-accent) 0 var(--rl-player-fill, 0%),
+    var(--background-modifier-border) var(--rl-player-fill, 0%) 100%);
 }
 
 /* The thumb stays — it is what a drag holds on to — but it is not drawn. */
@@ -292,8 +266,8 @@ input[type="text"].%p%-embed-position:focus {
 .%p%-player input[type="range"]:focus-visible::-webkit-slider-runnable-track {
   background: linear-gradient(
     to right,
-    var(--interactive-accent-hover, var(--interactive-accent)) 0 var(--%p%-player-fill, 0%),
-    var(--background-modifier-border-hover, var(--text-faint)) var(--%p%-player-fill, 0%) 100%);
+    var(--interactive-accent-hover, var(--interactive-accent)) 0 var(--rl-player-fill, 0%),
+    var(--background-modifier-border-hover, var(--text-faint)) var(--rl-player-fill, 0%) 100%);
 }
 
 .%p%-player-time {
@@ -323,6 +297,7 @@ input[type="text"].%p%-embed-position:focus {
    padding is what keeps rendered content off the popover border. */
 .%p%-rendered {
   padding: 10px 14px;
+  line-height: var(--%p%-rendered-line-height, inherit);
 }
 
 .%p%-rendered > :first-child {
@@ -351,9 +326,9 @@ input[type="text"].%p%-embed-position:focus {
   margin: 0.8em 0 0.35em;
 }
 
-.%p%-rendered h1 { font-size: 1.35em; }
-.%p%-rendered h2 { font-size: 1.2em; }
-.%p%-rendered h3 { font-size: 1.08em; }
+.%p%-rendered h1 { font-size: calc(1em + 0.35em * var(--%p%-rendered-heading-scale, 1)); }
+.%p%-rendered h2 { font-size: calc(1em + 0.2em * var(--%p%-rendered-heading-scale, 1)); }
+.%p%-rendered h3 { font-size: calc(1em + 0.08em * var(--%p%-rendered-heading-scale, 1)); }
 .%p%-rendered h4,
 .%p%-rendered h5,
 .%p%-rendered h6 { font-size: 1em; }

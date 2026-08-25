@@ -137,15 +137,15 @@ describe('the player row', () => {
     const p = player(200);
     p.media.currentTime = 50;
     p.media.fire('timeupdate');
-    assert.strictEqual(p.seek.style['--reference-linker-player-fill'], '25%');
+    assert.strictEqual(p.seek.style['--rl-player-fill'], '25%');
   });
 
   it('empties the volume bar when muted, and fills it again when it speaks', () => {
     const p = player();
     p.sound.click();
-    assert.strictEqual(p.volume.style['--reference-linker-player-fill'], '0%');
+    assert.strictEqual(p.volume.style['--rl-player-fill'], '0%');
     p.sound.click();
-    assert.strictEqual(p.volume.style['--reference-linker-player-fill'], '100%');
+    assert.strictEqual(p.volume.style['--rl-player-fill'], '100%');
   });
 
   it('follows a volume it did not set itself', () => {

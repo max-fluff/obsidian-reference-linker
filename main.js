@@ -326,7 +326,7 @@ var require_root_token = __commonJS({
     var OWNER_TOKENS = { code: "code-root", reference: "ref-root" };
     var LEGACY_TOKEN = "root";
     var tokenRe = (name) => new RegExp("\\{" + name + "\\}|%7B" + name + "%7D", "gi");
-    function rootTokenIn(url) {
+    function rootTokenIn2(url) {
       const s = String(url == null ? "" : url);
       for (const owner of Object.keys(OWNER_TOKENS)) {
         if (tokenRe(OWNER_TOKENS[owner]).test(s))
@@ -335,7 +335,7 @@ var require_root_token = __commonJS({
       return tokenRe(LEGACY_TOKEN).test(s) ? "legacy" : null;
     }
     function ownsRootToken2(url, owner, claimLegacy) {
-      const found = rootTokenIn(url);
+      const found = rootTokenIn2(url);
       if (found === owner)
         return true;
       return found === "legacy" && !!claimLegacy;
@@ -353,11 +353,11 @@ var require_root_token = __commonJS({
       const s = String(url == null ? "" : url);
       if (!owner || !OWNER_TOKENS[owner])
         return s;
-      if (rootTokenIn(s) !== "legacy")
+      if (rootTokenIn2(s) !== "legacy")
         return s;
       return s.replace(tokenRe(LEGACY_TOKEN), "{" + OWNER_TOKENS[owner] + "}");
     }
-    module2.exports = { OWNER_TOKENS, LEGACY_TOKEN, rootTokenIn, ownsRootToken: ownsRootToken2, fillRoot, namespaceRoot: namespaceRoot2 };
+    module2.exports = { OWNER_TOKENS, LEGACY_TOKEN, rootTokenIn: rootTokenIn2, ownsRootToken: ownsRootToken2, fillRoot, namespaceRoot: namespaceRoot2 };
   }
 });
 
@@ -4028,7 +4028,7 @@ var require_player = __commonJS({
       return el;
     }
     var fill = (el, part) => el.style.setProperty(
-      "--reference-linker-player-fill",
+      "--rl-player-fill",
       Math.max(0, Math.min(100, part * 100)) + "%"
     );
     function mountPlayer(el, media, { video, width }) {
@@ -7565,29 +7565,29 @@ var require_actualize = __commonJS({
     }
     function staleLinksExtension(plugin, classes) {
       const marks = {
-        stale: Decoration.mark({ class: classes.stale }),
-        broken: Decoration.mark({ class: classes.broken })
+        "": Decoration.mark({ class: classes.link }),
+        stale: Decoration.mark({ class: classes.link + " " + classes.stale }),
+        broken: Decoration.mark({ class: classes.link + " " + classes.broken })
       };
       const build = (view) => {
         const builder = new RangeSetBuilder();
-        if (plugin.settings.markStaleLinks) {
-          const tree = syntaxTree(view.state);
-          for (const { from, to } of view.visibleRanges) {
-            const text = view.state.doc.sliceString(from, to);
-            const re = linkRegex2();
-            let m;
-            while (m = re.exec(text)) {
-              const start = from + m.index;
-              const end = start + m[0].length;
-              let inCodeNode = false;
-              tree.iterate({ from: start, to: end, enter: (n) => {
-                if (SKIP_NODE.test(n.type.name))
-                  inCodeNode = true;
-              } });
-              const state = inCodeNode ? null : plugin.linkState(m[2]);
-              if (state)
-                builder.add(start, end, marks[state]);
-            }
+        const tree = syntaxTree(view.state);
+        for (const { from, to } of view.visibleRanges) {
+          const text = view.state.doc.sliceString(from, to);
+          const re = linkRegex2();
+          let m;
+          while (m = re.exec(text)) {
+            const start = from + m.index;
+            const end = start + m[0].length;
+            let inCodeNode = false;
+            tree.iterate({ from: start, to: end, enter: (n) => {
+              if (SKIP_NODE.test(n.type.name))
+                inCodeNode = true;
+            } });
+            if (inCodeNode || !plugin.ownsLink(m[2]))
+              continue;
+            const state = plugin.settings.markStaleLinks ? plugin.linkState(m[2]) : null;
+            builder.add(start, end, marks[state || ""]);
           }
         }
         return builder.finish();
@@ -7889,7 +7889,7 @@ var require_actualize2 = __commonJS({
       return opt ? "[" + name + "](" + withTitle2(url, opt.title) + ")" : null;
     });
     var { refreshStaleLinks } = shared;
-    var staleLinksExtension = (plugin) => shared.staleLinksExtension(plugin, { stale: "reference-linker-stale", broken: "reference-linker-broken" });
+    var staleLinksExtension = (plugin) => shared.staleLinksExtension(plugin, { link: "reference-linker-link", stale: "reference-linker-stale", broken: "reference-linker-broken" });
     function bindStateOf(plugin, target) {
       const { url, title } = splitTarget2(target);
       if (!url || !/^file:\/\//i.test(url))
@@ -9115,6 +9115,70 @@ var require_style_settings = __commonJS({
   }
 });
 
+// src/shared/theme-colors.js
+var require_theme_colors = __commonJS({
+  "src/shared/theme-colors.js"(exports2, module2) {
+    "use strict";
+    var PROSE_COLORS = {
+      "link-color": "var(--link-color, var(--text-accent))",
+      "link-color-hover": "var(--link-color-hover, var(--text-accent-hover, var(--link-color, var(--text-accent))))"
+    };
+    var SIGIL_COLORS2 = {
+      "link-color": "var(--link-external-color, var(--link-color, var(--text-accent)))",
+      "stale-color": "var(--text-warning, var(--color-orange))",
+      "broken-color": "var(--text-error, var(--color-red))"
+    };
+    function capAlpha(value, max) {
+      const m = /^rgba?\(([^)]*)\)$/.exec(value);
+      if (!m)
+        return value;
+      const parts = m[1].split(",").map((s) => s.trim());
+      if (parts.length < 3)
+        return value;
+      const alpha = parts.length > 3 ? parseFloat(parts[3]) : 1;
+      if (!(alpha > max))
+        return value;
+      return `rgba(${parts[0]}, ${parts[1]}, ${parts[2]}, ${max})`;
+    }
+    function themeColorSheet(prefix, colors, resolve) {
+      const rows = [];
+      for (const name of Object.keys(colors)) {
+        const spec = colors[name];
+        const from = typeof spec === "string" ? spec : spec.from;
+        let value = resolve(from);
+        if (value && typeof spec !== "string" && spec.maxAlpha != null)
+          value = capAlpha(value, spec.maxAlpha);
+        if (value)
+          rows.push(`--${prefix}-${name}: ${value};`);
+      }
+      return rows.length ? `body { ${rows.join(" ")} }` : "";
+    }
+    function trackThemeColors2(plugin, prefix, colors) {
+      if (typeof document === "undefined" || !document.head || !document.body)
+        return;
+      const sheet = document.createElement("style");
+      document.head.appendChild(sheet);
+      plugin.register(() => sheet.remove());
+      const paint = () => {
+        const probe = document.createElement("span");
+        probe.style.position = "absolute";
+        probe.style.visibility = "hidden";
+        document.body.appendChild(probe);
+        const resolve = (expr) => {
+          probe.style.color = "";
+          probe.style.color = expr;
+          return getComputedStyle(probe).color;
+        };
+        sheet.textContent = themeColorSheet(prefix, colors, resolve);
+        probe.remove();
+      };
+      plugin.app.workspace.onLayoutReady(paint);
+      plugin.registerEvent(plugin.app.workspace.on("css-change", paint));
+    }
+    module2.exports = { trackThemeColors: trackThemeColors2, themeColorSheet, capAlpha, PROSE_COLORS, SIGIL_COLORS: SIGIL_COLORS2 };
+  }
+});
+
 // src/api.js
 var require_api = __commonJS({
   "src/api.js"(exports2, module2) {
@@ -9565,7 +9629,7 @@ var nodePath = require("path");
 var { PRESETS, DEFAULT_SETTINGS, parseExtensions, parseSkip, underSkip } = require_constants();
 var { splitLines, inTableCell, inCode, inLink, linkRegex, splitTarget, withTitle } = require_markdown();
 var { parseBinding, formatBinding, bindStateFrom, bindingOwner, ownsBinding } = require_binding();
-var { fillRoot: fillRootToken, ownsRootToken, namespaceRoot } = require_root_token();
+var { fillRoot: fillRootToken, ownsRootToken, rootTokenIn, namespaceRoot } = require_root_token();
 var { buildMenu } = require_menu_verbs();
 var { registerActions, menuActions } = require_actions();
 var { LINK_ACTIONS } = require_link_actions();
@@ -9586,6 +9650,7 @@ var citationsReport = require_citations_report();
 var { writeReportNote } = require_report_note();
 var { initI18n, withFamily, t, plural } = require_i18n();
 var { announceStyleSettings } = require_style_settings();
+var { trackThemeColors, SIGIL_COLORS } = require_theme_colors();
 var api = require_api();
 var indexEvents = require_index_events();
 function openExternal(uri) {
@@ -9669,6 +9734,7 @@ var ReferenceLinkerPlugin = class extends Plugin {
     this.registerDomEvent(document, "auxclick", (evt) => this.onAnchorClick(evt), { capture: true });
     this.addSettingTab(new ReferenceLinkerSettingTab(this.app, this));
     announceStyleSettings(this);
+    trackThemeColors(this, "reference-linker", SIGIL_COLORS);
     this.statusEl = this.addStatusBarItem();
     this.addCommand({ id: "rebuild-reference-index", name: t("cmd.rebuildIndex"), callback: () => this.rebuildIndex(true) });
     this.addCommand({ id: "insert-reference-link", name: t("cmd.insertLink"), editorCallback: (editor) => this.pickEntry((e) => this.withFormat(this.settings.askOnInsert, (tpl) => this.insertLink(editor, e, tpl))) });
@@ -9743,6 +9809,20 @@ var ReferenceLinkerPlugin = class extends Plugin {
       return true;
     return !!this.targetIndexedFile(this.decodeTarget(url));
   }
+  // Whether a raw link target is one of ours. linkState() can't answer this — it returns
+  // null both for another plugin's link and for ours with no page to judge. A binding of ours
+  // settles it on its own, which is what a link written against a template without the root
+  // token has to go on. The legacy verdict is asked for last, since it can reach the index and
+  // every ordinary link in the note goes past here.
+  ownsLink(target) {
+    const { url, title } = splitTarget(target);
+    if (ownsBinding(title, OWNER))
+      return true;
+    const owner = rootTokenIn(url);
+    if (owner === OWNER)
+      return true;
+    return owner === "legacy" && this.legacyRootIsOurs(url, title);
+  }
   resolveRootLinks(el) {
     const links = el.querySelectorAll ? el.querySelectorAll("a") : [];
     for (const a of links) {
@@ -9760,6 +9840,8 @@ var ReferenceLinkerPlugin = class extends Plugin {
       }
       if (ours)
         a.setAttribute(ROOT_ATTR, "");
+      if (ours || ownsBinding(title, OWNER))
+        a.classList.add("reference-linker-link");
       this.stashTitle(a);
     }
     this.markStaleAnchors(el);

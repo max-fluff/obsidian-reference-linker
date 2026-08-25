@@ -17,7 +17,7 @@ const nodePath = require('path');
 const { PRESETS, DEFAULT_SETTINGS, parseExtensions, parseSkip, underSkip } = require('./constants');
 const { splitLines, inTableCell, inCode, inLink, linkRegex, splitTarget, withTitle } = require('./shared/markdown');
 const { parseBinding, formatBinding, bindStateFrom, bindingOwner, ownsBinding } = require('./shared/binding');
-const { fillRoot: fillRootToken, ownsRootToken, namespaceRoot } = require('./shared/root-token');
+const { fillRoot: fillRootToken, ownsRootToken, rootTokenIn, namespaceRoot } = require('./shared/root-token');
 const { buildMenu } = require('./shared/menu-verbs');
 const { registerActions, menuActions } = require('./shared/actions');
 const { LINK_ACTIONS } = require('./link-actions');
@@ -38,6 +38,7 @@ const citationsReport = require('./citations-report');
 const { writeReportNote } = require('./shared/report-note');
 const { initI18n, withFamily, t, plural } = require('./shared/i18n');
 const { announceStyleSettings } = require('./shared/style-settings');
+const { trackThemeColors, SIGIL_COLORS } = require('./shared/theme-colors');
 const api = require('./api');
 const indexEvents = require('./shared/index-events');
 
@@ -160,6 +161,7 @@ class ReferenceLinkerPlugin extends Plugin {
     this.registerDomEvent(document, 'auxclick', (evt) => this.onAnchorClick(evt), { capture: true });
     this.addSettingTab(new ReferenceLinkerSettingTab(this.app, this));
     announceStyleSettings(this);
+    trackThemeColors(this, 'reference-linker', SIGIL_COLORS);
     this.statusEl = this.addStatusBarItem();
     this.addCommand({ id: 'rebuild-reference-index', name: t('cmd.rebuildIndex'), callback: () => this.rebuildIndex(true) });
     this.addCommand({ id: 'insert-reference-link', name: t('cmd.insertLink'), editorCallback: (editor) => this.pickEntry((e) => this.withFormat(this.settings.askOnInsert, (tpl) => this.insertLink(editor, e, tpl))) });
@@ -264,6 +266,19 @@ class ReferenceLinkerPlugin extends Plugin {
     return !!this.targetIndexedFile(this.decodeTarget(url));
   }
 
+  // Whether a raw link target is one of ours. linkState() can't answer this — it returns
+  // null both for another plugin's link and for ours with no page to judge. A binding of ours
+  // settles it on its own, which is what a link written against a template without the root
+  // token has to go on. The legacy verdict is asked for last, since it can reach the index and
+  // every ordinary link in the note goes past here.
+  ownsLink(target) {
+    const { url, title } = splitTarget(target);
+    if (ownsBinding(title, OWNER)) return true;
+    const owner = rootTokenIn(url);
+    if (owner === OWNER) return true;
+    return owner === 'legacy' && this.legacyRootIsOurs(url, title);
+  }
+
   resolveRootLinks(el) {
     const links = el.querySelectorAll ? el.querySelectorAll('a') : [];
     for (const a of links) {
@@ -279,6 +294,9 @@ class ReferenceLinkerPlugin extends Plugin {
       // plugin's links now go past untouched instead of being claimed by whoever rendered
       // first.
       if (ours) a.setAttribute(ROOT_ATTR, '');
+      // Styling is the wider question: a binding of ours marks the link as ours to paint even
+      // where there was no token to fill.
+      if (ours || ownsBinding(title, OWNER)) a.classList.add('reference-linker-link');
       this.stashTitle(a);
     }
     this.markStaleAnchors(el);

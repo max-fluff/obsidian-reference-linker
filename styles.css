@@ -3,6 +3,12 @@
 /* Styles every linker plugin uses. The token below stands for the plugin class prefix;
    build.mjs substitutes it when it assembles styles.css. See CONTRIBUTING.md. */
 
+/* The second column of a suggestion row — the note in one pair, the path in the other. */
+body.reference-linker-hide-suggestion-path .reference-linker-path,
+body.reference-linker-hide-suggestion-path .reference-linker-suggestion-note {
+  display: none;
+}
+
 .reference-linker-preview-table {
   width: 100%;
   border-collapse: collapse;
@@ -168,7 +174,7 @@
 .reference-linker-hover {
   position: fixed;
   z-index: var(--layer-popover);
-  max-width: min(720px, 90vw);
+  max-width: min(var(--reference-linker-hover-width, 720px), 90vw);
   box-shadow: var(--shadow-s);
   user-select: text;
   -webkit-user-select: text;
@@ -268,21 +274,83 @@
   color: var(--text-error);
 }
 
+/* Colours are declared, not merely read with a fallback. Style Settings shows a colour row's
+   live computed value when the row carries no default, and an undeclared variable reads as
+   empty and renders a blank swatch. Its own rule is `body.css-settings-manager`, so a colour
+   chosen there still outranks this. See CONTRIBUTING.md. */
+body {
+  --reference-linker-link-color: var(--link-external-color, var(--link-color));
+  --reference-linker-stale-color: var(--text-warning);
+  --reference-linker-broken-color: var(--text-error);
+}
+
+/* Our own links, marked in both render modes whether or not they have drifted. The defaults
+   are the theme's own, so a link the plugin inserted goes on looking like any other link
+   until a value is chosen.
+   What it looks like is decided in --sl-* below, where no theme competes; only the rule that
+   spends them meets the theme's own link rules. See CONTRIBUTING.md. */
+.reference-linker-link,
+.cm-reference-linker-link {
+  --sl-ink: var(--reference-linker-link-color);
+  --sl-decoration: var(--reference-linker-underline, var(--link-external-decoration, underline));
+}
+
+/* An editor line carries no underline of its own, so nothing chosen means nothing drawn. */
+.cm-reference-linker-link {
+  --sl-decoration: var(--reference-linker-underline, none);
+}
+
+/* The one rule that meets the theme's own, and it sits no higher than the plugin's rules ever
+   have: a theme that paints its own links still wins, as it did before any of this was
+   configurable. */
+.reference-linker-link,
+.cm-reference-linker-link {
+  color: var(--sl-ink);
+  text-decoration: var(--sl-decoration);
+}
+
 /* Drifted line (stale) and renamed/removed symbol (broken), in both render modes.
    A border-bottom rather than text-decoration: wavy/offset underlines render
-   inconsistently across platforms, so a plain border is the reliable choice. */
+   inconsistently across platforms, so a plain border is the reliable choice — and it stacks
+   with the link's own underline above instead of fighting it. */
 .reference-linker-stale,
 .reference-linker-broken {
-  border-bottom-width: 1px;
+  border-bottom-width: var(--reference-linker-mark-underline-width, 1px);
   border-bottom-style: var(--reference-linker-mark-underline-style, dotted);
 }
 
 .reference-linker-stale {
-  border-bottom-color: var(--reference-linker-stale-color, var(--text-warning));
+  border-bottom-color: var(--reference-linker-stale-color);
 }
 
 .reference-linker-broken {
-  border-bottom-color: var(--reference-linker-broken-color, var(--text-error));
+  border-bottom-color: var(--reference-linker-broken-color);
+}
+
+/* The same underline is invisible in some themes, so the state can also be spelled out.
+   `none` rather than an empty string: with no symbol chosen there is no pseudo-element at
+   all. The symbol is not part of the link text, so it carries none of its underline. */
+.reference-linker-stale::before,
+body.reference-linker-mark-after .reference-linker-stale::after {
+  content: var(--reference-linker-stale-symbol, none);
+  color: var(--reference-linker-stale-color);
+  border-bottom: none;
+  font-size: 0.8em;
+  vertical-align: super;
+}
+
+.reference-linker-broken::before,
+body.reference-linker-mark-after .reference-linker-broken::after {
+  content: var(--reference-linker-broken-symbol, none);
+  color: var(--reference-linker-broken-color);
+  border-bottom: none;
+  font-size: 0.8em;
+  vertical-align: super;
+}
+
+body.reference-linker-mark-after .reference-linker-stale::before,
+body.reference-linker-mark-after .reference-linker-broken::before {
+  content: none;
 }
 
 /* Nested sub-rows — searchable kinds under a language, and chosen folders under a
@@ -341,7 +409,7 @@
 /* A guessed move (file matched by symbol or basename), not a plain line drift — tinted so
    it stands out for a closer look before applying. */
 .reference-linker-preview-moved .reference-linker-preview-move {
-  color: var(--reference-linker-stale-color, var(--text-warning));
+  color: var(--reference-linker-stale-color);
   white-space: normal;
 }
 
@@ -352,12 +420,12 @@
 }
 
 .reference-linker-preview-attention {
-  color: var(--reference-linker-broken-color, var(--text-error));
+  color: var(--reference-linker-broken-color);
 }
 
 .reference-linker-preview-broken {
   font-size: var(--font-ui-small);
-  color: var(--reference-linker-broken-color, var(--text-error));
+  color: var(--reference-linker-broken-color);
   padding: 2px 8px;
   overflow-wrap: anywhere;
 }
@@ -368,23 +436,61 @@ name: Reference Linker
 id: reference-linker
 settings:
   -
-    id: reference-linker-stale-color
-    title: Stale-link underline colour
-    description: Reference links whose target document has moved or is missing. Default follows the theme's warning colour.
-    type: variable-themed-color
+    id: reference-linker-links
+    title: Links
+    type: heading
+    level: 1
+  -
+    id: reference-linker-link-color
+    title: Link colour
+    description: Follows the theme's colour for external links until you pick one.
+    type: variable-color
     format: hex
     opacity: false
-    default-light: '#c1810b'
-    default-dark: '#e0a526'
+  -
+    id: reference-linker-underline
+    title: Underline
+    description: How a link the plugin inserted is underlined in Reading view.
+    type: variable-select
+    default: var(--link-external-decoration, underline)
+    options:
+      -
+        label: Theme default
+        value: var(--link-external-decoration, underline)
+      -
+        label: Underline
+        value: underline
+      -
+        label: Dotted
+        value: underline dotted
+      -
+        label: Dashed
+        value: underline dashed
+      -
+        label: Double
+        value: underline double
+      -
+        label: None
+        value: none
+  -
+    id: reference-linker-marks
+    title: Stale and broken links
+    type: heading
+    level: 1
+  -
+    id: reference-linker-stale-color
+    title: Stale-link underline colour
+    description: Links and embeds whose target has moved — the update commands can fix them. Follows the theme's warning colour until you pick one.
+    type: variable-color
+    format: hex
+    opacity: false
   -
     id: reference-linker-broken-color
     title: Broken-link underline colour
-    description: Reference links whose target document is gone. Default follows the theme's error colour.
-    type: variable-themed-color
+    description: Links and embeds whose pin no longer matches anything — renamed, removed, or rewritten. Follows the theme's error colour until you pick one.
+    type: variable-color
     format: hex
     opacity: false
-    default-light: '#c4302b'
-    default-dark: '#e35555'
   -
     id: reference-linker-mark-underline-style
     title: Stale / broken underline style
@@ -396,18 +502,43 @@ settings:
       - solid
       - double
   -
+    id: reference-linker-mark-underline-width
+    title: Stale / broken underline thickness
+    type: variable-number-slider
+    default: 1
+    min: 1
+    max: 4
+    step: 1
+    format: px
+  -
+    id: reference-linker-stale-symbol
+    title: Stale-link symbol
+    description: Any character or emoji, shown beside a link whose target has moved. Leave empty for none.
+    type: variable-text
+    quotes: true
+    default: ''
+  -
+    id: reference-linker-broken-symbol
+    title: Broken-link symbol
+    description: Any character or emoji, shown beside a link whose pin no longer matches. Leave empty for none.
+    type: variable-text
+    quotes: true
+    default: ''
+  -
+    id: reference-linker-mark-after
+    title: Put the symbol after the link
+    description: Off shows it before the link.
+    type: class-toggle
+    default: false
+  -
+    id: reference-linker-previews
+    title: Previews and embeds
+    type: heading
+    level: 1
+  -
     id: reference-linker-embed-height
     title: Inline embed height
     description: How tall an inline embed grows before it scrolls, in percent of the window.
-    type: variable-number-slider
-    default: 60
-    min: 20
-    max: 100
-    step: 5
-  -
-    id: reference-linker-hover-height
-    title: Hover preview height
-    description: How tall a hover preview grows before it scrolls, in percent of the window.
     type: variable-number-slider
     default: 60
     min: 20
@@ -422,6 +553,54 @@ settings:
     min: 0
     max: 1
     step: 0.25
+  -
+    id: reference-linker-hover-width
+    title: Hover preview width
+    description: How wide a hover preview grows, capped at 90% of the window.
+    type: variable-number-slider
+    default: 720
+    min: 320
+    max: 1200
+    step: 20
+    format: px
+  -
+    id: reference-linker-hover-height
+    title: Hover preview height
+    description: How tall a hover preview grows before it scrolls, in percent of the window.
+    type: variable-number-slider
+    default: 60
+    min: 20
+    max: 100
+    step: 5
+  -
+    id: reference-linker-rendered-line-height
+    title: Preview text line height
+    description: How tightly a rendered markdown or HTML preview is set. Leave at default to follow the theme.
+    type: variable-number-slider
+    default: 1.5
+    min: 1
+    max: 2.2
+    step: 0.05
+  -
+    id: reference-linker-rendered-heading-scale
+    title: Preview heading scale
+    description: How far a heading in a rendered preview outranks the text under it. 0 sets every heading at text size.
+    type: variable-number-slider
+    default: 1
+    min: 0
+    max: 2
+    step: 0.25
+  -
+    id: reference-linker-autocomplete
+    title: Autocomplete
+    type: heading
+    level: 1
+  -
+    id: reference-linker-hide-suggestion-path
+    title: Hide the second column
+    description: Drop the note or path shown beside a suggestion, leaving the name alone.
+    type: class-toggle
+    default: false
 
 */
 
@@ -634,8 +813,8 @@ input[type="text"].reference-linker-embed-position:focus {
   cursor: pointer;
   background: linear-gradient(
     to right,
-    var(--interactive-accent) 0 var(--reference-linker-player-fill, 0%),
-    var(--background-modifier-border) var(--reference-linker-player-fill, 0%) 100%);
+    var(--interactive-accent) 0 var(--rl-player-fill, 0%),
+    var(--background-modifier-border) var(--rl-player-fill, 0%) 100%);
 }
 
 /* The thumb stays — it is what a drag holds on to — but it is not drawn. */
@@ -656,8 +835,8 @@ input[type="text"].reference-linker-embed-position:focus {
 .reference-linker-player input[type="range"]:focus-visible::-webkit-slider-runnable-track {
   background: linear-gradient(
     to right,
-    var(--interactive-accent-hover, var(--interactive-accent)) 0 var(--reference-linker-player-fill, 0%),
-    var(--background-modifier-border-hover, var(--text-faint)) var(--reference-linker-player-fill, 0%) 100%);
+    var(--interactive-accent-hover, var(--interactive-accent)) 0 var(--rl-player-fill, 0%),
+    var(--background-modifier-border-hover, var(--text-faint)) var(--rl-player-fill, 0%) 100%);
 }
 
 .reference-linker-player-time {
@@ -687,6 +866,7 @@ input[type="text"].reference-linker-embed-position:focus {
    padding is what keeps rendered content off the popover border. */
 .reference-linker-rendered {
   padding: 10px 14px;
+  line-height: var(--reference-linker-rendered-line-height, inherit);
 }
 
 .reference-linker-rendered > :first-child {
@@ -715,9 +895,9 @@ input[type="text"].reference-linker-embed-position:focus {
   margin: 0.8em 0 0.35em;
 }
 
-.reference-linker-rendered h1 { font-size: 1.35em; }
-.reference-linker-rendered h2 { font-size: 1.2em; }
-.reference-linker-rendered h3 { font-size: 1.08em; }
+.reference-linker-rendered h1 { font-size: calc(1em + 0.35em * var(--reference-linker-rendered-heading-scale, 1)); }
+.reference-linker-rendered h2 { font-size: calc(1em + 0.2em * var(--reference-linker-rendered-heading-scale, 1)); }
+.reference-linker-rendered h3 { font-size: calc(1em + 0.08em * var(--reference-linker-rendered-heading-scale, 1)); }
 .reference-linker-rendered h4,
 .reference-linker-rendered h5,
 .reference-linker-rendered h6 { font-size: 1em; }

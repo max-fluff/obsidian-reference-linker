@@ -86,7 +86,7 @@ const pinLinksInText = (plugin, text) => rewriteLinks(text, (name, target) => {
 });
 
 const { refreshStaleLinks } = shared;
-const staleLinksExtension = (plugin) => shared.staleLinksExtension(plugin, { stale: 'reference-linker-stale', broken: 'reference-linker-broken' });
+const staleLinksExtension = (plugin) => shared.staleLinksExtension(plugin, { link: 'reference-linker-link', stale: 'reference-linker-stale', broken: 'reference-linker-broken' });
 
 // A link's binding against the live index, or null when there's nothing to judge: not a
 // file link, or no binding of ours.

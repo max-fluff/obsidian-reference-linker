@@ -312,7 +312,23 @@ The selection commands are also in the editor's right-click menu, as **Find and 
 
 ### Styling
 
-Everything the plugin draws around a document is exposed to the [Style Settings](https://github.com/mgmeyers/obsidian-style-settings) plugin under a *Reference Linker* section: the stale/broken underline colours and style, how tall an embed and a hover preview grow before they scroll, and how visible an embed's toolbar is when the pointer is elsewhere. They're plain CSS variables, so a snippet does just as well — `--reference-linker-stale-color`, `--reference-linker-broken-color`, `--reference-linker-mark-underline-style`, `--reference-linker-embed-height`, `--reference-linker-hover-height`, `--reference-linker-embed-tools-idle` (set that last one to `0` and the toolbar stays out of the way until you hover the embed).
+Everything the plugin draws around a document is exposed to the [Style Settings](https://github.com/mgmeyers/obsidian-style-settings) plugin under a *Reference Linker* section. Without Style Settings, or left at default, it follows your theme's colours.
+
+| Section | What you can set |
+|---|---|
+| **Links** | colour and underline for the links the plugin inserts — both follow your theme's own until you change them |
+| **Stale and broken links** | the two underline colours, their style and thickness, and an optional symbol beside the link for themes where a thin underline is hard to see |
+| **Previews and embeds** | how tall and wide a hover preview grows, how tall an embed grows, how visible its toolbar is when idle, and the line height and heading scale of a rendered markdown or HTML preview |
+| **Autocomplete** | hide the path column in suggestions |
+
+Every colour picker opens on the colour actually in use and follows your theme until you pick one; every option is a plain CSS variable or a class on `body`, so a snippet in `.obsidian/snippets/` does just as well:
+
+- **Links** — `--reference-linker-link-color`, `--reference-linker-underline`
+- **Stale and broken** — `--reference-linker-stale-color`, `--reference-linker-broken-color`, `--reference-linker-mark-underline-style`, `--reference-linker-mark-underline-width`, `--reference-linker-stale-symbol`, `--reference-linker-broken-symbol`; `body.reference-linker-mark-after`
+- **Previews and embeds** — `--reference-linker-hover-height`, `--reference-linker-hover-width`, `--reference-linker-embed-height`, `--reference-linker-embed-tools-idle`, `--reference-linker-rendered-line-height`, `--reference-linker-rendered-heading-scale`
+- **Autocomplete** — `body.reference-linker-hide-suggestion-path`
+
+Set `--reference-linker-embed-tools-idle` to `0` and an embed's toolbar stays out of the way until you hover it. A stale or broken link can also say so in words: type a character or an emoji into *Stale-link symbol* or *Broken-link symbol*, shown before the link unless you turn on *Put the symbol after the link*.
 
 One thing is deliberately not yours to restyle: the paper a document is drawn on. A rendered page, slide or sheet keeps its own white sheet and its own colours in a dark vault, because that is what the document looks like — and it is drawn in an isolated frame your vault's CSS cannot reach into, which is the same thing that stops the document's own stylesheet reaching out.
 
@@ -417,7 +433,7 @@ Requires Obsidian 1.4.0 or newer. Desktop-only: the index is built by reading th
 
 None of these are required, the plugin runs on its own, but it cooperates with them if you have them installed:
 
-- **[Style Settings](https://github.com/mgmeyers/obsidian-style-settings)** — a UI for the stale/broken underline colours and style, and for the height of an embed and a hover preview and how visible an embed's toolbar is.
+- **[Style Settings](https://github.com/mgmeyers/obsidian-style-settings)** — a UI for everything the plugin draws: the stale/broken marks, the size of an embed and a hover preview, and how a rendered document reads inside them.
 - **[Dataview](https://github.com/blacksmithgu/obsidian-dataview)** — query the index from DataviewJS through the [public API](#public-api).
 
 ## Related plugins
