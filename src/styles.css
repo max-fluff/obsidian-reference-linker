@@ -266,13 +266,13 @@ input[type="text"].%p%-embed-position:focus {
   background: transparent;
 }
 
-/* The pointer state is a class the player sets, not :hover — see player.js. */
+/* The pointer state is a class the player sets, not :hover — see player.js. It thickens the
+   bar rather than recolouring it: --interactive-accent-hover is Obsidian's own, derived from
+   the default accent, so a theme that recolours --interactive-accent alone leaves it stale and
+   the bar answered a yellow theme in purple. Height owes nothing to a colour. */
 .%p%-player input[type="range"].%p%-player-range.is-hot::-webkit-slider-runnable-track,
 .%p%-player input[type="range"].%p%-player-range:focus-visible::-webkit-slider-runnable-track {
-  background: linear-gradient(
-    to right,
-    var(--interactive-accent-hover, var(--interactive-accent)) 0 var(--rl-player-fill, 0%),
-    var(--slider-track-background, var(--background-modifier-border-hover, var(--text-faint))) var(--rl-player-fill, 0%) 100%);
+  height: calc(var(--slider-track-height, 4px) + 2px);
 }
 
 .%p%-player-time {
