@@ -108,6 +108,13 @@ body.reference-linker-hide-suggestion-path .reference-linker-suggestion-note {
   font-weight: var(--font-semibold);
 }
 
+/* The hidden span trackThemeColors settles a colour through, and the canvas it paints one the
+   swatch cannot take on. Off-flow so measuring never moves the page. */
+.reference-linker-probe {
+  position: absolute;
+  visibility: hidden;
+}
+
 /* Styles both sigil linkers use. The plugin class prefix is substituted by build.mjs. */
 
 .reference-linker-suggestion {
@@ -276,9 +283,10 @@ body.reference-linker-hide-suggestion-path .reference-linker-suggestion-note {
 
 /* Colours are declared, not merely read with a fallback. Style Settings shows a colour row's
    live computed value when the row carries no default, and an undeclared variable reads as
-   empty and renders a blank swatch. Its own rule is `body.css-settings-manager`, so a colour
-   chosen there still outranks this. See CONTRIBUTING.md. */
-body {
+   empty and renders a blank swatch. On `:root` rather than `body`, so a value set on `body` —
+   Style Settings' own rule, or a snippet's — reaches the mark before this does.
+   See CONTRIBUTING.md. */
+:root {
   --reference-linker-link-color: var(--link-external-color, var(--link-color));
   --reference-linker-stale-color: var(--text-warning);
   --reference-linker-broken-color: var(--text-error);
@@ -291,7 +299,7 @@ body {
    spends them meets the theme's own link rules. See CONTRIBUTING.md. */
 .reference-linker-link,
 .cm-reference-linker-link {
-  --sl-ink: var(--reference-linker-link-color);
+  --sl-ink: var(--link-external-color, var(--link-color));
   --sl-decoration: var(--reference-linker-underline, var(--link-external-decoration, underline));
 }
 
@@ -307,6 +315,32 @@ body {
 .cm-reference-linker-link {
   color: var(--sl-ink);
   text-decoration: var(--sl-decoration);
+}
+
+/* A colour picked in Style Settings is the reader's own: the class comes from
+   trackPickedColors(), and this and the modes below are the only places a theme is answered
+   rather than left to win. See CONTRIBUTING.md. */
+body.reference-linker-link-color-picked .reference-linker-link,
+body.reference-linker-link-color-picked .cm-reference-linker-link {
+  --sl-ink: var(--reference-linker-link-color);
+  color: var(--sl-ink) !important;
+}
+
+/* Relative colours: an installer without them drops the block whole and the colour above
+   stands. The source is read where the link sits, so the hue follows the link colour of the
+   note it is in. After the picked rule, so a mode outranks a picked colour. */
+@supports (color: oklch(from red l c h)) {
+  body.reference-linker-hue-turned .reference-linker-link,
+  body.reference-linker-hue-turned .cm-reference-linker-link {
+    --sl-ink: oklch(from var(--link-external-color, var(--link-color)) l c calc(h + var(--reference-linker-hue-shift, 0)));
+    color: var(--sl-ink) !important;
+  }
+
+  body.reference-linker-hue-fixed .reference-linker-link,
+  body.reference-linker-hue-fixed .cm-reference-linker-link {
+    --sl-ink: oklch(from var(--link-external-color, var(--link-color)) l c var(--reference-linker-hue, 210));
+    color: var(--sl-ink) !important;
+  }
 }
 
 /* Drifted line (stale) and renamed/removed symbol (broken), in both render modes.
@@ -447,6 +481,37 @@ settings:
     type: variable-color
     format: hex
     opacity: false
+  -
+    id: reference-linker-hue-mode
+    title: Follow the link colour
+    description: Paints a link the plugin inserted from the link colour where it sits — including one a cssclass gives a single note — with a hue of your own, so it keeps that relationship when the theme changes. Leave empty to use the colour above. Relative colours need a recent Obsidian installer; without them the colour above is used.
+    type: class-select
+    allowEmpty: true
+    options:
+      -
+        label: Shift its hue
+        value: reference-linker-hue-turned
+      -
+        label: Replace its hue
+        value: reference-linker-hue-fixed
+  -
+    id: reference-linker-hue-shift
+    title: Hue shift
+    description: How far round the colour wheel such a link sits from the link colour, in degrees. Read by "Shift its hue".
+    type: variable-number-slider
+    default: 0
+    min: -180
+    max: 180
+    step: 5
+  -
+    id: reference-linker-hue
+    title: Hue
+    description: The hue such a link takes, in degrees, keeping the lightness and saturation of the link colour beside it. Read by "Replace its hue".
+    type: variable-number-slider
+    default: 210
+    min: 0
+    max: 360
+    step: 5
   -
     id: reference-linker-underline
     title: Underline

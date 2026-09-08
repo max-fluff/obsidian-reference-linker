@@ -38,7 +38,7 @@ const citationsReport = require('./citations-report');
 const { writeReportNote } = require('./shared/report-note');
 const { initI18n, withFamily, t, plural } = require('./shared/i18n');
 const { announceStyleSettings } = require('./shared/style-settings');
-const { trackThemeColors, SIGIL_COLORS } = require('./shared/theme-colors');
+const { trackThemeColors, SIGIL_COLORS, SIGIL_PICKS } = require('./shared/theme-colors');
 const api = require('./api');
 const indexEvents = require('./shared/index-events');
 
@@ -161,7 +161,7 @@ class ReferenceLinkerPlugin extends Plugin {
     this.registerDomEvent(document, 'auxclick', (evt) => this.onAnchorClick(evt), { capture: true });
     this.addSettingTab(new ReferenceLinkerSettingTab(this.app, this));
     announceStyleSettings(this);
-    trackThemeColors(this, 'reference-linker', SIGIL_COLORS);
+    trackThemeColors(this, 'reference-linker', SIGIL_COLORS, SIGIL_PICKS);
     this.statusEl = this.addStatusBarItem();
     this.addCommand({ id: 'rebuild-reference-index', name: t('cmd.rebuildIndex'), callback: () => this.rebuildIndex(true) });
     this.addCommand({ id: 'insert-reference-link', name: t('cmd.insertLink'), editorCallback: (editor) => this.pickEntry((e) => this.withFormat(this.settings.askOnInsert, (tpl) => this.insertLink(editor, e, tpl))) });

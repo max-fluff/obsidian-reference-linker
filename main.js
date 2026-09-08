@@ -9149,6 +9149,23 @@ var require_theme_colors = __commonJS({
       "stale-color": "var(--text-warning, var(--color-orange))",
       "broken-color": "var(--text-error, var(--color-red))"
     };
+    var PROSE_PICKS = {
+      "link-color": PROSE_COLORS["link-color"],
+      "link-color-hover": PROSE_COLORS["link-color-hover"],
+      "ambiguous-color": "var(--%p%-link-color)"
+    };
+    var SIGIL_PICKS2 = { "link-color": SIGIL_COLORS2["link-color"] };
+    function asSrgb(value, readPixel) {
+      if (!value || /^(#|rgb|hsl)/.test(value))
+        return value;
+      const px = readPixel(value);
+      if (!px)
+        return value;
+      const [r, g, b, a] = px;
+      if (a === 255)
+        return `rgb(${r}, ${g}, ${b})`;
+      return `rgba(${r}, ${g}, ${b}, ${Math.round(a / 255 * 1e3) / 1e3})`;
+    }
     function capAlpha(value, max) {
       const m = /^rgba?\(([^)]*)\)$/.exec(value);
       if (!m)
@@ -9172,31 +9189,64 @@ var require_theme_colors = __commonJS({
         if (value)
           rows.push(`--${prefix}-${name}: ${value};`);
       }
-      return rows.length ? `body { ${rows.join(" ")} }` : "";
+      return rows.length ? `:root { ${rows.join(" ")} }` : "";
     }
-    function trackThemeColors2(plugin, prefix, colors) {
+    function pickedIn(prefix, picks, resolve) {
+      return Object.keys(picks).filter((name) => {
+        const inUse = resolve(`var(--${prefix}-${name})`);
+        const declared = resolve(picks[name].split("%p%").join(prefix));
+        return Boolean(inUse) && Boolean(declared) && inUse !== declared;
+      });
+    }
+    function trackThemeColors2(plugin, prefix, colors, picks) {
       if (typeof document === "undefined" || !document.head || !document.body)
         return;
-      const sheet = document.createElement("style");
-      document.head.appendChild(sheet);
+      const sheet = document.head.createEl("style");
       plugin.register(() => sheet.remove());
+      const names = picks ? Object.keys(picks) : [];
+      const classOf = (name) => `${prefix}-${name}-picked`;
+      plugin.register(() => {
+        for (const name of names)
+          document.body.classList.remove(classOf(name));
+      });
       const paint = () => {
-        const probe = document.createElement("span");
-        probe.style.position = "absolute";
-        probe.style.visibility = "hidden";
-        document.body.appendChild(probe);
+        const probe = document.body.createEl("span", { cls: `${prefix}-probe` });
+        let canvas = null;
+        const readPixel = (value) => {
+          canvas = canvas || probe.createEl("canvas", { attr: { width: 1, height: 1 } });
+          const ctx = canvas.getContext("2d", { willReadFrequently: true });
+          if (!ctx)
+            return null;
+          ctx.clearRect(0, 0, 1, 1);
+          ctx.fillStyle = value;
+          ctx.fillRect(0, 0, 1, 1);
+          return ctx.getImageData(0, 0, 1, 1).data;
+        };
         const resolve = (expr) => {
           probe.style.color = "";
           probe.style.color = expr;
-          return getComputedStyle(probe).color;
+          return asSrgb(getComputedStyle(probe).color, readPixel);
         };
         sheet.textContent = themeColorSheet(prefix, colors, resolve);
+        const set = new Set(names.length ? pickedIn(prefix, picks, resolve) : []);
+        for (const name of names)
+          document.body.classList.toggle(classOf(name), set.has(name));
         probe.remove();
       };
       plugin.app.workspace.onLayoutReady(paint);
       plugin.registerEvent(plugin.app.workspace.on("css-change", paint));
     }
-    module2.exports = { trackThemeColors: trackThemeColors2, themeColorSheet, capAlpha, PROSE_COLORS, SIGIL_COLORS: SIGIL_COLORS2 };
+    module2.exports = {
+      trackThemeColors: trackThemeColors2,
+      themeColorSheet,
+      capAlpha,
+      asSrgb,
+      pickedIn,
+      PROSE_COLORS,
+      SIGIL_COLORS: SIGIL_COLORS2,
+      PROSE_PICKS,
+      SIGIL_PICKS: SIGIL_PICKS2
+    };
   }
 });
 
@@ -9671,7 +9721,7 @@ var citationsReport = require_citations_report();
 var { writeReportNote } = require_report_note();
 var { initI18n, withFamily, t, plural } = require_i18n();
 var { announceStyleSettings } = require_style_settings();
-var { trackThemeColors, SIGIL_COLORS } = require_theme_colors();
+var { trackThemeColors, SIGIL_COLORS, SIGIL_PICKS } = require_theme_colors();
 var api = require_api();
 var indexEvents = require_index_events();
 function openExternal(uri) {
@@ -9755,7 +9805,7 @@ var ReferenceLinkerPlugin = class extends Plugin {
     this.registerDomEvent(document, "auxclick", (evt) => this.onAnchorClick(evt), { capture: true });
     this.addSettingTab(new ReferenceLinkerSettingTab(this.app, this));
     announceStyleSettings(this);
-    trackThemeColors(this, "reference-linker", SIGIL_COLORS);
+    trackThemeColors(this, "reference-linker", SIGIL_COLORS, SIGIL_PICKS);
     this.statusEl = this.addStatusBarItem();
     this.addCommand({ id: "rebuild-reference-index", name: t("cmd.rebuildIndex"), callback: () => this.rebuildIndex(true) });
     this.addCommand({ id: "insert-reference-link", name: t("cmd.insertLink"), editorCallback: (editor) => this.pickEntry((e) => this.withFormat(this.settings.askOnInsert, (tpl) => this.insertLink(editor, e, tpl))) });

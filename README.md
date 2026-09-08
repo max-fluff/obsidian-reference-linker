@@ -318,17 +318,19 @@ Everything the plugin draws around a document is exposed to the [Style Settings]
 
 | Section | What you can set |
 |---|---|
-| **Links** | colour and underline for the links the plugin inserts — both follow your theme's own until you change them |
+| **Links** | colour and underline for the links the plugin inserts — both follow your theme's own until you change them — and *Follow the link colour*, a hue of your own kept in step with the colour your theme gives links there |
 | **Stale and broken links** | the two underline colours, their style and thickness, and an optional symbol beside the link for themes where a thin underline is hard to see |
 | **Previews and embeds** | how tall and wide a hover preview grows, how tall an embed grows, how visible its toolbar is when idle, and the line height and heading scale of a rendered markdown or HTML preview |
 | **Autocomplete** | hide the path column in suggestions |
 
 Every colour picker opens on the colour actually in use and follows your theme until you pick one; every option is a plain CSS variable or a class on `body`, so a snippet in `.obsidian/snippets/` does just as well:
 
-- **Links** — `--reference-linker-link-color`, `--reference-linker-underline`
+- **Links** — `--reference-linker-link-color`, `--reference-linker-hue-shift`, `--reference-linker-hue`, `--reference-linker-underline`; `body.reference-linker-hue-turned`, `body.reference-linker-hue-fixed`
 - **Stale and broken** — `--reference-linker-stale-color`, `--reference-linker-broken-color`, `--reference-linker-mark-underline-style`, `--reference-linker-mark-underline-width`, `--reference-linker-stale-symbol`, `--reference-linker-broken-symbol`; `body.reference-linker-mark-after`
 - **Previews and embeds** — `--reference-linker-hover-height`, `--reference-linker-hover-width`, `--reference-linker-embed-height`, `--reference-linker-embed-tools-idle`, `--reference-linker-rendered-line-height`, `--reference-linker-rendered-heading-scale`
 - **Autocomplete** — `body.reference-linker-hide-suggestion-path`
+
+*Follow the link colour* derives such a link from the link colour of the note it sits in — the one your theme paints there, including a colour a `cssclass` gives a single note — and either turns its hue by *Hue shift* or replaces it with *Hue*. Lightness and saturation stay the theme's, so the link keeps its relationship to your other links when the theme, the accent colour or the note changes. It needs an Obsidian installer new enough for relative colours; without them the colour above is used.
 
 Set `--reference-linker-embed-tools-idle` to `0` and an embed's toolbar stays out of the way until you hover it. A stale or broken link can also say so in words: type a character or an emoji into *Stale-link symbol* or *Broken-link symbol*, shown before the link unless you turn on *Put the symbol after the link*.
 
