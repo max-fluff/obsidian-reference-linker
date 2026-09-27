@@ -191,6 +191,8 @@ var require_constants = __commonJS({
       // underline links whose target document moved or is gone
       minChars: 1,
       maxResults: 12,
+      showSuggestionThumbnails: false,
+      // optional image previews for files inside the vault
       contextMenu: true,
       // the "Convert"/"Find and open" items in the editor right-click menu
       // Breaks a tie when a link lands in both our index and the code linker's and carries no
@@ -6309,6 +6311,41 @@ var require_formats = __commonJS({
   }
 });
 
+// src/suggestion-thumbnail.js
+var require_suggestion_thumbnail = __commonJS({
+  "src/suggestion-thumbnail.js"(exports2, module2) {
+    "use strict";
+    var nodePath2 = require("path");
+    var { normalizePath: normalizePath2, TFile } = require("obsidian");
+    var formats2 = require_formats();
+    function suggestionThumbnailSrc(plugin, entry) {
+      if (entry.kind !== "file")
+        return null;
+      const handler = formats2.handlerFor(entry.lang);
+      if (!handler || handler.id !== "image")
+        return null;
+      const vault = plugin.app.vault;
+      const adapter = vault && vault.adapter;
+      if (!adapter || typeof adapter.getBasePath !== "function")
+        return null;
+      try {
+        const vaultBase = adapter.getBasePath();
+        const absolutePath = plugin.entryPath(entry);
+        if (!nodePath2.isAbsolute(vaultBase) || !nodePath2.isAbsolute(absolutePath))
+          return null;
+        const relativePath = nodePath2.relative(vaultBase, absolutePath);
+        if (!relativePath || relativePath === ".." || relativePath.startsWith(".." + nodePath2.sep) || nodePath2.isAbsolute(relativePath))
+          return null;
+        const file = vault.getAbstractFileByPath(normalizePath2(relativePath));
+        return file instanceof TFile ? vault.getResourcePath(file) : null;
+      } catch (e) {
+        return null;
+      }
+    }
+    module2.exports = { suggestionThumbnailSrc };
+  }
+});
+
 // src/suggest.js
 var require_suggest2 = __commonJS({
   "src/suggest.js"(exports2, module2) {
@@ -6316,8 +6353,9 @@ var require_suggest2 = __commonJS({
     var nodePath2 = require("path");
     var { createSigilSuggest } = require_suggest();
     var formats2 = require_formats();
+    var { suggestionThumbnailSrc } = require_suggestion_thumbnail();
     var baseName = (p) => nodePath2.basename(p).replace(/\.[^.]+$/, "");
-    var ReferenceSuggest2 = createSigilSuggest({
+    var BaseReferenceSuggest = createSigilSuggest({
       cls: "reference-linker",
       kindText: (e) => {
         if (e.kind !== "section")
@@ -6325,6 +6363,23 @@ var require_suggest2 = __commonJS({
         return formats2.anchorKind(e.lang) === "page" ? "p." + e.position : baseName(e.path);
       }
     });
+    var ReferenceSuggest2 = class extends BaseReferenceSuggest {
+      renderSuggestion(entry, el) {
+        if (this.plugin.settings.showSuggestionThumbnails) {
+          const src = suggestionThumbnailSrc(this.plugin, entry);
+          if (src) {
+            el.addClass("reference-linker-suggestion-with-thumbnail");
+            const img = el.createEl("img", {
+              cls: "reference-linker-thumb",
+              attr: { src, alt: "" }
+            });
+            img.loading = "lazy";
+            img.addEventListener("error", () => img.remove(), { once: true });
+          }
+        }
+        super.renderSuggestion(entry, el);
+      }
+    };
     module2.exports = { ReferenceSuggest: ReferenceSuggest2 };
   }
 });
@@ -8625,6 +8680,10 @@ var require_settings_tab = __commonJS({
             await save(false);
           });
         });
+        new Setting(containerEl).setName(t2("set.suggestionThumbnails.name")).setDesc(t2("set.suggestionThumbnails.desc")).addToggle((c) => c.setValue(s.showSuggestionThumbnails).onChange(async (v) => {
+          s.showSuggestionThumbnails = v;
+          await save(false);
+        }));
         let presetDropdown;
         new Setting(containerEl).setName(t2("set.editorPreset.name")).setDesc(t2("set.editorPreset.desc")).addDropdown((d) => {
           presetDropdown = d;
@@ -9505,6 +9564,8 @@ var require_en = __commonJS({
       "set.rebuild.desc": "Re-scan the document folders now.",
       // Settings — suggestions & links
       "set.trigger.desc": "Type this to start a reference suggestion. Default @! (Code Linker uses @@).",
+      "set.suggestionThumbnails.name": "Image thumbnails in suggestions",
+      "set.suggestionThumbnails.desc": "Show thumbnails for indexed images inside this vault. Images outside the vault keep the usual suggestion row.",
       "set.editorPreset.name": "Viewer link preset",
       "set.editorPreset.desc": "How inserted links open. file:// uses the OS default app. Add your own under \u201CYour viewers\u201D.",
       "set.editors.name": "Your viewers",
@@ -9671,6 +9732,8 @@ var require_ru = __commonJS({
       "set.rebuild.desc": "\u041F\u0435\u0440\u0435\u0441\u043A\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u043F\u0430\u043F\u043A\u0438 \u0441 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430\u043C\u0438 \u0441\u0435\u0439\u0447\u0430\u0441.",
       // Settings — suggestions & links
       "set.trigger.desc": "\u0412\u0432\u0435\u0434\u0438\u0442\u0435 \u044D\u0442\u043E, \u0447\u0442\u043E\u0431\u044B \u043D\u0430\u0447\u0430\u0442\u044C \u043F\u043E\u0434\u0441\u043A\u0430\u0437\u043A\u0443. \u041F\u043E \u0443\u043C\u043E\u043B\u0447\u0430\u043D\u0438\u044E @! (Code Linker \u0437\u0430\u043D\u0438\u043C\u0430\u0435\u0442 @@).",
+      "set.suggestionThumbnails.name": "\u041C\u0438\u043D\u0438\u0430\u0442\u044E\u0440\u044B \u0438\u0437\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u0439 \u0432 \u043F\u043E\u0434\u0441\u043A\u0430\u0437\u043A\u0430\u0445",
+      "set.suggestionThumbnails.desc": "\u041F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0442\u044C \u043C\u0438\u043D\u0438\u0430\u0442\u044E\u0440\u044B \u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u0443\u0435\u043C\u044B\u0445 \u0438\u0437\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u0439 \u0432\u043D\u0443\u0442\u0440\u0438 \u044D\u0442\u043E\u0433\u043E \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0430. \u0414\u043B\u044F \u0444\u0430\u0439\u043B\u043E\u0432 \u0432\u043D\u0435 \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0430 \u0441\u0442\u0440\u043E\u043A\u0430 \u043E\u0441\u0442\u0430\u0451\u0442\u0441\u044F \u043E\u0431\u044B\u0447\u043D\u043E\u0439.",
       "set.editorPreset.name": "\u041F\u0440\u0435\u0441\u0435\u0442 \u043E\u0442\u043A\u0440\u044B\u0442\u0438\u044F",
       "set.editorPreset.desc": "\u041A\u0430\u043A \u043E\u0442\u043A\u0440\u044B\u0432\u0430\u044E\u0442\u0441\u044F \u0432\u0441\u0442\u0430\u0432\u043B\u0435\u043D\u043D\u044B\u0435 \u0441\u0441\u044B\u043B\u043A\u0438. file:// \u2014 \u043F\u0440\u0438\u043B\u043E\u0436\u0435\u043D\u0438\u0435 \u041E\u0421 \u043F\u043E \u0443\u043C\u043E\u043B\u0447\u0430\u043D\u0438\u044E. \u0421\u0432\u043E\u0438 \u2014 \u0432 \xAB\u0412\u0430\u0448\u0438 \u043F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0449\u0438\u043A\u0438\xBB.",
       "set.editors.name": "\u0412\u0430\u0448\u0438 \u043F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0449\u0438\u043A\u0438",
