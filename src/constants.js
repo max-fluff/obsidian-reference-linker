@@ -33,6 +33,7 @@ const DEFAULT_SETTINGS = {
   markStaleLinks: true, // underline links whose target document moved or is gone
   minChars: 1,
   maxResults: 12,
+  showSuggestionThumbnails: false, // optional image previews for files inside the vault
   contextMenu: true, // the "Convert"/"Find and open" items in the editor right-click menu
   // Breaks a tie when a link lands in both our index and the code linker's and carries no
   // binding to say whose it is. A binding always decides on its own, so this only ever

@@ -60,6 +60,8 @@ It's the document counterpart to [Code Linker](https://community.obsidian.md/plu
 
 Type a trigger (default `@!`) followed by a document name and pick a match. The plugin indexes the files under your **Reference root** by name, with fuzzy matching. Suggestions are suppressed inside code blocks, inline code, frontmatter and existing links (see [Skipped contexts](#skipped-contexts)).
 
+Turn on **Image thumbnails in suggestions** to show small previews for indexed PNG, JPEG, WebP, GIF, BMP, SVG, and AVIF files inside the current vault. Images outside the vault keep the usual text-only row. This setting is off by default; thumbnail size defaults to 48 px and can be changed in Style Settings or with `--reference-linker-thumbnail-size` in a CSS snippet.
+
 <p align="center">
   <img src="docs/images/suggest.png" alt="The autocomplete dropdown after typing the trigger and a document name" width="560">
 </p>
@@ -297,6 +299,7 @@ The selection commands are also in the editor's right-click menu, as **Find and 
 | --- | --- | --- |
 | **Trigger** | `@!` | Text that starts a suggestion. (`@@` is Code Linker's default; `@!` avoids a clash when both are installed.) |
 | **Min characters / Max results** | `1` / `12` | When suggestions appear, and how many. |
+| **Image thumbnails in suggestions** | off | Show thumbnails for indexed images inside this vault. |
 | **Viewer link preset** | file:// | The link format. With **ask-on-insert** you pick per link; add your own named URL templates under **Your viewers**. |
 | **Editor context menu** | on | Add the convert/open items to the editor right-click menu. |
 
@@ -323,14 +326,14 @@ Everything the plugin draws around a document is exposed to the [Style Settings]
 | **Links** | colour and underline for the links the plugin inserts — both follow your theme's own until you change them — and *Hue shift*, which shifts the hue of that colour |
 | **Stale and broken links** | the two underline colours, their style and thickness, and an optional symbol beside the link for themes where a thin underline is hard to see |
 | **Previews and embeds** | how tall and wide a hover preview grows, how tall an embed grows, how visible its toolbar is when idle, and the line height and heading scale of a rendered markdown or HTML preview |
-| **Autocomplete** | hide the path column in suggestions |
+| **Autocomplete** | hide the path column in suggestions and set the image thumbnail size |
 
 Every colour picker opens on the colour actually in use and follows your theme until you pick one; every option is a plain CSS variable or a class on `body`, so a snippet in `.obsidian/snippets/` does just as well:
 
 - **Links** — `--reference-linker-link-color`, `--reference-linker-hue-shift`, `--reference-linker-underline`; `body.reference-linker-hue-shifted`
 - **Stale and broken** — `--reference-linker-stale-color`, `--reference-linker-broken-color`, `--reference-linker-mark-underline-style`, `--reference-linker-mark-underline-width`, `--reference-linker-stale-symbol`, `--reference-linker-broken-symbol`; `body.reference-linker-mark-after`
 - **Previews and embeds** — `--reference-linker-hover-height`, `--reference-linker-hover-width`, `--reference-linker-embed-height`, `--reference-linker-embed-tools-idle`, `--reference-linker-rendered-line-height`, `--reference-linker-rendered-heading-scale`
-- **Autocomplete** — `body.reference-linker-hide-suggestion-path`
+- **Autocomplete** — `body.reference-linker-hide-suggestion-path`, `--reference-linker-thumbnail-size`
 
 *Hue shift* shifts the hue of the link colour by the angle you set. Lightness and saturation stay the same. It shifts the colour you picked. If you picked none, it shifts the link colour of the note the link is in, including a colour set by a `cssclass`. So the link follows the theme, the accent colour and the note. 0 turns it off. It needs an Obsidian installer with relative colour support; on older installers the colour is not shifted.
 

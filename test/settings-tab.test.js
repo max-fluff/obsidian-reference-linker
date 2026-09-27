@@ -27,6 +27,7 @@ function fakePlugin(over) {
     settings: {
       codeRoot: '/lib', scanRoots: '', extensions: '.pdf', skipDirs: '', bibFiles: '',
       autoRefresh: true, trigger: '@!', minChars: 1, maxResults: 12,
+      showSuggestionThumbnails: false,
       uriTemplate: PRESETS.file, editors: [], askOnInsert: true,
       hoverPreview: true, documentView: 'column', markStaleLinks: true,
       contextMenu: true, linkPrecedence: 10,
@@ -71,6 +72,7 @@ describe('the reference settings tab', () => {
     assert.ok(names.includes(t('set.codeRoot.name')), 'reference root missing');
     assert.ok(names.includes(t('set.bibFiles.name')), 'bibliographies missing');
     assert.ok(names.includes(t('set.documentView.name')), 'document view missing');
+    assert.ok(names.includes(t('set.suggestionThumbnails.name')), 'suggestion thumbnails missing');
   });
 
   it('keeps the reader’s place when a fold redraws the pane', () => {
