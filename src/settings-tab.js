@@ -263,6 +263,11 @@ class ReferenceLinkerSettingTab extends PluginSettingTab {
       c.setValue(String(s.maxResults)).onChange(async (v) => { const n = parseInt(v, 10); s.maxResults = Number.isFinite(n) && n > 0 ? n : 12; await save(false); });
     });
 
+    new Setting(containerEl)
+      .setName(t('set.suggestionThumbnails.name'))
+      .setDesc(t('set.suggestionThumbnails.desc'))
+      .addToggle((c) => c.setValue(s.showSuggestionThumbnails).onChange(async (v) => { s.showSuggestionThumbnails = v; await save(false); }));
+
     let presetDropdown; // so a rename below can refresh its label without a re-render
 
     new Setting(containerEl)

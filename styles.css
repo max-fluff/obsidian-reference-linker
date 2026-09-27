@@ -666,8 +666,32 @@ settings:
     description: Drop the note or path shown beside a suggestion, leaving the name alone.
     type: class-toggle
     default: false
+  -
+    id: reference-linker-thumbnail-size
+    title: Image thumbnail size
+    description: Size of image thumbnails in autocomplete suggestions, when enabled in the plugin settings.
+    type: variable-number-slider
+    default: 48
+    min: 32
+    max: 96
+    step: 8
+    format: px
 
 */
+
+/* Thumbnail size is a Style Settings variable and can also be set in a CSS snippet. */
+.reference-linker-suggestion-with-thumbnail {
+  align-items: center;
+}
+
+.reference-linker-thumb {
+  width: var(--reference-linker-thumbnail-size, 48px);
+  height: var(--reference-linker-thumbnail-size, 48px);
+  flex: 0 0 var(--reference-linker-thumbnail-size, 48px);
+  object-fit: contain;
+  border-radius: var(--radius-s);
+  background: var(--background-secondary);
+}
 
 /* Chrome shared by the hover popover and the inline embed: a header above a body that holds
    the rendered PDF page (canvas) or image. The popover is a fixed overlay; the embed flows
