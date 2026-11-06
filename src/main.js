@@ -28,6 +28,7 @@ const facets = require('./shared/facets');
 const { VALUE, TOKEN } = facets;
 const { HoverPreview } = require('./hover');
 const { registerEmbed } = require('./embed');
+const { containedPath } = require('./shared/contained-path');
 const actualize = require('./actualize');
 const { ReferenceLinkModal, PresetPickerModal } = require('./modal');
 const { ReferenceLinkerSettingTab } = require('./settings-tab');
@@ -638,6 +639,13 @@ class ReferenceLinkerPlugin extends Plugin {
     const adapter = this.app.vault.adapter;
     const base = adapter && typeof adapter.getBasePath === 'function' ? adapter.getBasePath() : '';
     return base ? nodePath.dirname(base) : '';
+  }
+
+  // Absolute path of a root-relative path taken from a note, or null when the note is
+  // pointing outside the reference root — see shared/contained-path. Every read a note can
+  // steer goes through here.
+  codePath(rel) {
+    return containedPath(this.codeRoot(), rel, this.fileCache.has(rel));
   }
 
   cacheFilePath() {

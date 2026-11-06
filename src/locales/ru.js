@@ -77,6 +77,7 @@ module.exports = {
   'embed.notFound': 'Reference Linker: нет документа для «{query}»',
   'embed.ambiguous': 'Reference Linker: под «{query}» подходит документов: {n} — уточните путём',
   'embed.unreadable': 'Reference Linker: не удалось прочитать {path}',
+  'embed.outsideRoot': 'Reference Linker: {path} вне корня документов — embed читает только файлы внутри него',
   'embed.truncated': 'Reference Linker: показаны первые {max} строк',
   'embed.menu.remember': 'Запомнить этот вид',
   'embed.tool.contents': 'Содержание',

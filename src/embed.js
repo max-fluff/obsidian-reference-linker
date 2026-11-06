@@ -141,9 +141,10 @@ function resolve(plugin, spec) {
     name = sec ? sec.name : baseName(relPath);
   }
 
-  const root = plugin.codeRoot();
-  const absPath = root ? nodePath.join(root, relPath) : relPath;
-  const kind = position > 1 || to > position ? 'section' : 'file';
+  // The path came from note text: codePath refuses one that reaches outside the root.
+  const absPath = plugin.codePath(relPath);
+  if (!absPath) return { error: t('embed.outsideRoot', { path: relPath }) };
+  const kind =position > 1 || to > position ? 'section' : 'file';
   return { absPath, relPath, ext, position, to, name, entry: { name, kind, path: relPath, line: position, position } };
 }
 

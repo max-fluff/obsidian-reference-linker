@@ -7468,8 +7468,9 @@ var require_embed = __commonJS({
         const sec = position === to && plugin.entriesIn(relPath).find((x) => x.kind === "section" && x.position === position);
         name = sec ? sec.name : baseName(relPath);
       }
-      const root = plugin.codeRoot();
-      const absPath = root ? nodePath2.join(root, relPath) : relPath;
+      const absPath = plugin.codePath(relPath);
+      if (!absPath)
+        return { error: t2("embed.outsideRoot", { path: relPath }) };
       const kind = position > 1 || to > position ? "section" : "file";
       return { absPath, relPath, ext, position, to, name, entry: { name, kind, path: relPath, line: position, position } };
     }
@@ -7562,6 +7563,40 @@ var require_embed = __commonJS({
       });
     }
     module2.exports = { registerEmbed: registerEmbed2, resolve, splitTarget: splitTarget2, parseSpan, parseSpec, parseTimecode };
+  }
+});
+
+// src/shared/contained-path.js
+var require_contained_path = __commonJS({
+  "src/shared/contained-path.js"(exports2, module2) {
+    "use strict";
+    var fs2 = require("fs");
+    var nodePath2 = require("path");
+    function containedPath2(root, rel, indexed) {
+      if (!root || typeof rel !== "string" || !rel)
+        return null;
+      const abs = nodePath2.resolve(root, rel);
+      if (indexed)
+        return abs;
+      let realRoot;
+      try {
+        realRoot = fs2.realpathSync(root);
+      } catch (e) {
+        return null;
+      }
+      let real;
+      try {
+        real = fs2.realpathSync(abs);
+      } catch (e) {
+        real = nodePath2.resolve(realRoot, rel);
+      }
+      return isInside(realRoot, real) ? abs : null;
+    }
+    function isInside(base, abs) {
+      const back = nodePath2.relative(base, abs);
+      return back !== "" && !nodePath2.isAbsolute(back) && back !== ".." && !back.startsWith(".." + nodePath2.sep);
+    }
+    module2.exports = { containedPath: containedPath2, isInside };
   }
 });
 
@@ -9434,6 +9469,7 @@ var require_en = __commonJS({
       "embed.notFound": "Reference Linker: no document matches \u201C{query}\u201D",
       "embed.ambiguous": "Reference Linker: {n} documents match \u201C{query}\u201D \u2014 add a path to pick one",
       "embed.unreadable": "Reference Linker: can\u2019t read {path}",
+      "embed.outsideRoot": "Reference Linker: {path} is outside the reference root \u2014 an embed only reads files under it",
       "embed.truncated": "Reference Linker: showing the first {max} lines",
       "embed.menu.remember": "Remember this view",
       "embed.tool.contents": "Contents",
@@ -9600,6 +9636,7 @@ var require_ru = __commonJS({
       "embed.notFound": "Reference Linker: \u043D\u0435\u0442 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430 \u0434\u043B\u044F \xAB{query}\xBB",
       "embed.ambiguous": "Reference Linker: \u043F\u043E\u0434 \xAB{query}\xBB \u043F\u043E\u0434\u0445\u043E\u0434\u0438\u0442 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u043E\u0432: {n} \u2014 \u0443\u0442\u043E\u0447\u043D\u0438\u0442\u0435 \u043F\u0443\u0442\u0451\u043C",
       "embed.unreadable": "Reference Linker: \u043D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u0440\u043E\u0447\u0438\u0442\u0430\u0442\u044C {path}",
+      "embed.outsideRoot": "Reference Linker: {path} \u0432\u043D\u0435 \u043A\u043E\u0440\u043D\u044F \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u043E\u0432 \u2014 embed \u0447\u0438\u0442\u0430\u0435\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u0444\u0430\u0439\u043B\u044B \u0432\u043D\u0443\u0442\u0440\u0438 \u043D\u0435\u0433\u043E",
       "embed.truncated": "Reference Linker: \u043F\u043E\u043A\u0430\u0437\u0430\u043D\u044B \u043F\u0435\u0440\u0432\u044B\u0435 {max} \u0441\u0442\u0440\u043E\u043A",
       "embed.menu.remember": "\u0417\u0430\u043F\u043E\u043C\u043D\u0438\u0442\u044C \u044D\u0442\u043E\u0442 \u0432\u0438\u0434",
       "embed.tool.contents": "\u0421\u043E\u0434\u0435\u0440\u0436\u0430\u043D\u0438\u0435",
@@ -9711,6 +9748,7 @@ var facets = require_facets();
 var { VALUE, TOKEN } = facets;
 var { HoverPreview } = require_hover();
 var { registerEmbed } = require_embed();
+var { containedPath } = require_contained_path();
 var actualize = require_actualize2();
 var { ReferenceLinkModal, PresetPickerModal } = require_modal();
 var { ReferenceLinkerSettingTab } = require_settings_tab();
@@ -10266,6 +10304,12 @@ var ReferenceLinkerPlugin = class extends Plugin {
     const adapter = this.app.vault.adapter;
     const base = adapter && typeof adapter.getBasePath === "function" ? adapter.getBasePath() : "";
     return base ? nodePath.dirname(base) : "";
+  }
+  // Absolute path of a root-relative path taken from a note, or null when the note is
+  // pointing outside the reference root — see shared/contained-path. Every read a note can
+  // steer goes through here.
+  codePath(rel) {
+    return containedPath(this.codeRoot(), rel, this.fileCache.has(rel));
   }
   cacheFilePath() {
     return normalizePath(`${this.manifest.dir}/index-cache.json`);

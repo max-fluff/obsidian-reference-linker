@@ -81,6 +81,7 @@ module.exports = {
   'embed.notFound': 'Reference Linker: no document matches “{query}”',
   'embed.ambiguous': 'Reference Linker: {n} documents match “{query}” — add a path to pick one',
   'embed.unreadable': 'Reference Linker: can’t read {path}',
+  'embed.outsideRoot': 'Reference Linker: {path} is outside the reference root — an embed only reads files under it',
   'embed.truncated': 'Reference Linker: showing the first {max} lines',
   'embed.menu.remember': 'Remember this view',
   'embed.tool.contents': 'Contents',
