@@ -7594,7 +7594,9 @@ var require_contained_path = __commonJS({
     }
     function isInside(base, abs) {
       const back = nodePath2.relative(base, abs);
-      return back !== "" && !nodePath2.isAbsolute(back) && back !== ".." && !back.startsWith(".." + nodePath2.sep);
+      if (back === "" || nodePath2.isAbsolute(back))
+        return false;
+      return back !== ".." && !back.startsWith(".." + nodePath2.sep);
     }
     module2.exports = { containedPath: containedPath2, isInside };
   }
@@ -9175,9 +9177,12 @@ var require_style_settings = __commonJS({
 var require_theme_colors = __commonJS({
   "src/shared/theme-colors.js"(exports2, module2) {
     "use strict";
+    var PROSE_LINK = "var(--link-color, var(--text-accent))";
     var PROSE_COLORS = {
-      "link-color": "var(--link-color, var(--text-accent))",
-      "link-color-hover": "var(--link-color-hover, var(--text-accent-hover, var(--link-color, var(--text-accent))))"
+      "link-color": PROSE_LINK,
+      "link-color-hover": "var(--link-color-hover, var(--text-accent-hover, var(--link-color, var(--text-accent))))",
+      // The theme's link colour, not the highlight's: a collision keeps its own colour.
+      "ambiguous-color": PROSE_LINK
     };
     var SIGIL_COLORS2 = {
       "link-color": "var(--link-external-color, var(--link-color, var(--text-accent)))",
@@ -9187,9 +9192,15 @@ var require_theme_colors = __commonJS({
     var PROSE_PICKS = {
       "link-color": PROSE_COLORS["link-color"],
       "link-color-hover": PROSE_COLORS["link-color-hover"],
-      "ambiguous-color": "var(--%p%-link-color)"
+      "ambiguous-color": PROSE_COLORS["ambiguous-color"]
     };
+    function hueShifted(value) {
+      const deg = parseFloat(value);
+      return Number.isFinite(deg) && deg % 360 !== 0;
+    }
     var SIGIL_PICKS2 = { "link-color": SIGIL_COLORS2["link-color"] };
+    var PROSE_SHIFTS = ["hue-shift", "ambiguous-hue-shift"];
+    var SIGIL_SHIFTS = ["hue-shift"];
     function asSrgb(value, readPixel) {
       if (!value || /^(#|rgb|hsl)/.test(value))
         return value;
@@ -9233,16 +9244,19 @@ var require_theme_colors = __commonJS({
         return Boolean(inUse) && Boolean(declared) && inUse !== declared;
       });
     }
-    function trackThemeColors2(plugin, prefix, colors, picks) {
+    function trackThemeColors2(plugin, prefix, colors, picks, shifts = SIGIL_SHIFTS) {
       if (typeof document === "undefined" || !document.head || !document.body)
         return;
       const sheet = document.head.createEl("style");
       plugin.register(() => sheet.remove());
       const names = picks ? Object.keys(picks) : [];
       const classOf = (name) => `${prefix}-${name}-picked`;
+      const shiftedOf = (name) => `${prefix}-${name}ed`;
       plugin.register(() => {
         for (const name of names)
           document.body.classList.remove(classOf(name));
+        for (const name of shifts)
+          document.body.classList.remove(shiftedOf(name));
       });
       const paint = () => {
         const probe = document.body.createEl("span", { cls: `${prefix}-probe` });
@@ -9266,6 +9280,11 @@ var require_theme_colors = __commonJS({
         const set = new Set(names.length ? pickedIn(prefix, picks, resolve) : []);
         for (const name of names)
           document.body.classList.toggle(classOf(name), set.has(name));
+        const page = getComputedStyle(document.body);
+        for (const name of shifts) {
+          const deg = page.getPropertyValue(`--${prefix}-${name}`);
+          document.body.classList.toggle(shiftedOf(name), hueShifted(deg));
+        }
         probe.remove();
       };
       plugin.app.workspace.onLayoutReady(paint);
@@ -9277,10 +9296,13 @@ var require_theme_colors = __commonJS({
       capAlpha,
       asSrgb,
       pickedIn,
+      hueShifted,
       PROSE_COLORS,
       SIGIL_COLORS: SIGIL_COLORS2,
       PROSE_PICKS,
-      SIGIL_PICKS: SIGIL_PICKS2
+      SIGIL_PICKS: SIGIL_PICKS2,
+      PROSE_SHIFTS,
+      SIGIL_SHIFTS
     };
   }
 });

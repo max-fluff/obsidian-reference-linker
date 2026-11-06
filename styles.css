@@ -115,6 +115,14 @@ body.reference-linker-hide-suggestion-path .reference-linker-suggestion-note {
   visibility: hidden;
 }
 
+/* Our sliders in the Style Settings panel. Obsidian sizes the value label to its text, so
+   moving from 5 to -5 or 180 widened it and reflowed the description beside it. Four digits
+   hold every value a row of ours offers (-180, 1200, 0.25). */
+.setting-item[data-id^="reference-linker-"] .slider-value {
+  min-width: 4ch;
+  text-align: end;
+}
+
 /* Styles both sigil linkers use. The plugin class prefix is substituted by build.mjs. */
 
 .reference-linker-suggestion {
@@ -317,9 +325,10 @@ body.reference-linker-hide-suggestion-path .reference-linker-suggestion-note {
   text-decoration: var(--sl-decoration);
 }
 
-/* A colour picked in Style Settings is the reader's own: the class comes from
-   trackPickedColors(), and this and the modes below are the only places a theme is answered
-   rather than left to win. See CONTRIBUTING.md. */
+/* A colour picked in Style Settings overrides the theme's for as long as the pick stands; with
+   none, the theme's own colour is used. The class comes from trackThemeColors(), and this and
+   the shift below are the only places a theme is answered rather than left to win.
+   See CONTRIBUTING.md. */
 body.reference-linker-link-color-picked .reference-linker-link,
 body.reference-linker-link-color-picked .cm-reference-linker-link {
   --sl-ink: var(--reference-linker-link-color);
@@ -327,19 +336,20 @@ body.reference-linker-link-color-picked .cm-reference-linker-link {
 }
 
 /* Relative colours: an installer without them drops the block whole and the colour above
-   stands. The source is read where the link sits, so the hue follows the link colour of the
-   note it is in. After the picked rule, so a mode outranks a picked colour. */
+   stands. A hue shift other than 0 turns the link's colour — the one picked, else the theme's
+   where the link sits, so a cssclass recolouring a note is followed too — keeping its
+   lightness and saturation. The class comes from trackThemeColors(). */
 @supports (color: oklch(from red l c h)) {
-  body.reference-linker-hue-turned .reference-linker-link,
-  body.reference-linker-hue-turned .cm-reference-linker-link {
-    --sl-ink: oklch(from var(--link-external-color, var(--link-color)) l c calc(h + var(--reference-linker-hue-shift, 0)));
+  body.reference-linker-hue-shifted .reference-linker-link,
+  body.reference-linker-hue-shifted .cm-reference-linker-link {
+    --sl-ink: oklch(from var(--link-external-color, var(--link-color))
+      l c calc(h + var(--reference-linker-hue-shift, 0)));
     color: var(--sl-ink) !important;
   }
 
-  body.reference-linker-hue-fixed .reference-linker-link,
-  body.reference-linker-hue-fixed .cm-reference-linker-link {
-    --sl-ink: oklch(from var(--link-external-color, var(--link-color)) l c var(--reference-linker-hue, 210));
-    color: var(--sl-ink) !important;
+  body.reference-linker-hue-shifted.reference-linker-link-color-picked .reference-linker-link,
+  body.reference-linker-hue-shifted.reference-linker-link-color-picked .cm-reference-linker-link {
+    --sl-ink: oklch(from var(--reference-linker-link-color) l c calc(h + var(--reference-linker-hue-shift, 0)));
   }
 }
 
@@ -477,45 +487,23 @@ settings:
   -
     id: reference-linker-link-color
     title: Link colour
-    description: Follows the theme's colour for external links until you pick one.
+    description: Theme colour for external links until you pick one.
     type: variable-color
     format: hex
     opacity: false
   -
-    id: reference-linker-hue-mode
-    title: Follow the link colour
-    description: Paints a link the plugin inserted from the link colour where it sits — including one a cssclass gives a single note — with a hue of your own, so it keeps that relationship when the theme changes. Leave empty to use the colour above. Relative colours need a recent Obsidian installer; without them the colour above is used.
-    type: class-select
-    allowEmpty: true
-    options:
-      -
-        label: Shift its hue
-        value: reference-linker-hue-turned
-      -
-        label: Replace its hue
-        value: reference-linker-hue-fixed
-  -
     id: reference-linker-hue-shift
     title: Hue shift
-    description: How far round the colour wheel such a link sits from the link colour, in degrees. Read by "Shift its hue".
+    description: Shifts the hue of the link colour. 0 is off.
     type: variable-number-slider
     default: 0
     min: -180
     max: 180
     step: 5
   -
-    id: reference-linker-hue
-    title: Hue
-    description: The hue such a link takes, in degrees, keeping the lightness and saturation of the link colour beside it. Read by "Replace its hue".
-    type: variable-number-slider
-    default: 210
-    min: 0
-    max: 360
-    step: 5
-  -
     id: reference-linker-underline
     title: Underline
-    description: How a link the plugin inserted is underlined in Reading view.
+    description: Underline of inserted links in Reading view.
     type: variable-select
     default: var(--link-external-decoration, underline)
     options:
@@ -545,14 +533,14 @@ settings:
   -
     id: reference-linker-stale-color
     title: Stale-link underline colour
-    description: Links and embeds whose target has moved — the update commands can fix them. Follows the theme's warning colour until you pick one.
+    description: Links and embeds whose target moved. Theme warning colour until you pick one.
     type: variable-color
     format: hex
     opacity: false
   -
     id: reference-linker-broken-color
     title: Broken-link underline colour
-    description: Links and embeds whose pin no longer matches anything — renamed, removed, or rewritten. Follows the theme's error colour until you pick one.
+    description: Links and embeds whose target is gone. Theme error colour until you pick one.
     type: variable-color
     format: hex
     opacity: false
@@ -578,14 +566,14 @@ settings:
   -
     id: reference-linker-stale-symbol
     title: Stale-link symbol
-    description: Any character or emoji, shown beside a link whose target has moved. Leave empty for none.
+    description: Character or emoji shown next to a link whose target moved. Empty for none.
     type: variable-text
     quotes: true
     default: ''
   -
     id: reference-linker-broken-symbol
     title: Broken-link symbol
-    description: Any character or emoji, shown beside a link whose pin no longer matches. Leave empty for none.
+    description: Character or emoji shown next to a link whose target is gone. Empty for none.
     type: variable-text
     quotes: true
     default: ''
@@ -603,7 +591,7 @@ settings:
   -
     id: reference-linker-embed-height
     title: Inline embed height
-    description: How tall an inline embed grows before it scrolls, in percent of the window.
+    description: Maximum height of an inline embed, in percent of the window.
     type: variable-number-slider
     default: 60
     min: 20
@@ -612,7 +600,7 @@ settings:
   -
     id: reference-linker-embed-tools-idle
     title: Inline embed toolbar when idle
-    description: How visible the embed's toolbar is while the pointer is elsewhere. 0 keeps it out of the way until you hover the embed or focus it.
+    description: Toolbar visibility while the pointer is elsewhere. 0 hides it until hover or focus.
     type: variable-number-slider
     default: 1
     min: 0
@@ -621,7 +609,7 @@ settings:
   -
     id: reference-linker-hover-width
     title: Hover preview width
-    description: How wide a hover preview grows, capped at 90% of the window.
+    description: Maximum width of a hover preview. Never more than 90% of the window.
     type: variable-number-slider
     default: 720
     min: 320
@@ -631,7 +619,7 @@ settings:
   -
     id: reference-linker-hover-height
     title: Hover preview height
-    description: How tall a hover preview grows before it scrolls, in percent of the window.
+    description: Maximum height of a hover preview, in percent of the window.
     type: variable-number-slider
     default: 60
     min: 20
@@ -640,7 +628,7 @@ settings:
   -
     id: reference-linker-rendered-line-height
     title: Preview text line height
-    description: How tightly a rendered markdown or HTML preview is set. Leave at default to follow the theme.
+    description: Line spacing in rendered Markdown and HTML previews.
     type: variable-number-slider
     default: 1.5
     min: 1
@@ -649,7 +637,7 @@ settings:
   -
     id: reference-linker-rendered-heading-scale
     title: Preview heading scale
-    description: How far a heading in a rendered preview outranks the text under it. 0 sets every heading at text size.
+    description: Heading size in rendered previews. 0 makes headings the size of the text.
     type: variable-number-slider
     default: 1
     min: 0
@@ -663,7 +651,7 @@ settings:
   -
     id: reference-linker-hide-suggestion-path
     title: Hide the second column
-    description: Drop the note or path shown beside a suggestion, leaving the name alone.
+    description: Hide the note or path shown next to a suggestion.
     type: class-toggle
     default: false
 

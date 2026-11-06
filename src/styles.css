@@ -7,7 +7,7 @@ settings:
   -
     id: %p%-hover-height
     title: Hover preview height
-    description: How tall a hover preview grows before it scrolls, in percent of the window.
+    description: Maximum height of a hover preview, in percent of the window.
     type: variable-number-slider
     default: 60
     min: 20
@@ -16,7 +16,7 @@ settings:
   -
     id: %p%-rendered-line-height
     title: Preview text line height
-    description: How tightly a rendered markdown or HTML preview is set. Leave at default to follow the theme.
+    description: Line spacing in rendered Markdown and HTML previews.
     type: variable-number-slider
     default: 1.5
     min: 1
@@ -25,7 +25,7 @@ settings:
   -
     id: %p%-rendered-heading-scale
     title: Preview heading scale
-    description: How far a heading in a rendered preview outranks the text under it. 0 sets every heading at text size.
+    description: Heading size in rendered previews. 0 makes headings the size of the text.
     type: variable-number-slider
     default: 1
     min: 0
