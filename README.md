@@ -12,23 +12,21 @@
 
 An Obsidian plugin that autocompletes links to the documents living outside your vault — papers, manuals, decks, spreadsheets, e-books, recordings — and inserts a markdown link that opens the right page in your default app.
 
+<p align="center">
+  <img src="docs/images/demo.gif" alt="Typing @!constr links to the Constraints section on page 4 of a PDF outside the vault, hovering shows the page, and a reference-link block embeds it as a viewer" width="760">
+</p>
+
 - **11 formats, 57 extensions, no converters.** PDF, Word, Excel, PowerPoint, OpenDocument, EPUB, HTML, Markdown, CSV, images, audio and video — every reader is the plugin's own. No pandoc, no LibreOffice, nothing to install alongside it.
 - **Sections, not just file names.** Where a format carries an outline — a PDF's bookmarks, Word and HTML headings, a workbook's sheets, an EPUB's table of contents, one entry per slide — every section is indexed on its page, so `@!intro` finds the *Introduction* of a paper rather than the paper.
 - **The document, shown in the note.** Hover a link for the page rendered, the slide drawn, the document laid out or the sheet as a real table; a ` ```reference-link ` block puts the same thing inline, and a range stacks several pages at once.
 - **Links that notice the document changed.** A link pinned to its section is checked against the index: when the file is reissued and the section moves, the link is marked and updated in place, one note or the whole vault. Point the plugin at a BibTeX or CSL-JSON bibliography and a link is pinned to its citation key too, so it survives the document being renamed or re-filed.
 - **Nothing is copied in.** Notes keep a portable `{ref-root}` path, so the same vault works on another machine that keeps its library somewhere else.
 
-It's the document counterpart to [Code Linker](https://github.com/max-fluff/obsidian-code-linker), which does the same for source code. Your reference material usually lives in project folders, download folders or a research library. This plugin makes it as linkable as a note.
+It's the document counterpart to [Code Linker](https://community.obsidian.md/plugins/code-linker), which does the same for source code. Your reference material usually lives in project folders, download folders or a research library. This plugin makes it as linkable as a note.
 
-Available in the Obsidian community catalog: **[community.obsidian.md/plugins/reference-linker](https://community.obsidian.md/plugins/reference-linker)**.
+**Install:** *Settings → Community plugins → Browse* → **Reference Linker**, or open [its catalog page](https://community.obsidian.md/plugins/reference-linker). Other ways are under [Installation](#installation).
 
 > Desktop only. It reads files from disk through Node's filesystem API, which isn't available on mobile.
-
-<p align="center">
-  <img src="docs/images/hero.png" alt="A note linking to sections of a PDF that lives outside the vault, with one page embedded inline" width="700">
-</p>
-
-The plugin ships as `main.js`, `manifest.json` and `styles.css`. It scans the folders you configure and keeps the index in memory, so there's no index file to commit and nothing to generate: the index is rebuilt on startup and on demand. PDF outlines and page previews use the pdf.js that Obsidian already ships, so no second copy is bundled. `main.js` is built from `src/` with esbuild (see [Development](#development)).
 
 ## Contents
 
@@ -53,6 +51,10 @@ The plugin ships as `main.js`, `manifest.json` and `styles.css`. It scans the fo
 - [Related plugins](#related-plugins)
 
 ## What it does
+
+<p align="center">
+  <img src="docs/images/hero.png" alt="A note linking to sections of a PDF that lives outside the vault, with one page embedded inline" width="700">
+</p>
 
 ### Autocomplete as you type
 
