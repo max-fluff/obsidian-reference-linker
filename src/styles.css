@@ -32,8 +32,32 @@ settings:
     max: 2
     step: 0.25
 %rows:pickers%
+  -
+    id: %p%-thumbnail-size
+    title: Image thumbnail size
+    description: Size of image thumbnails in autocomplete suggestions, when enabled in the plugin settings.
+    type: variable-number-slider
+    default: 48
+    min: 32
+    max: 96
+    step: 8
+    format: px
 
 */
+
+/* Thumbnail size is a Style Settings variable and can also be set in a CSS snippet. */
+.%p%-suggestion-with-thumbnail {
+  align-items: center;
+}
+
+.%p%-thumb {
+  width: var(--%p%-thumbnail-size, 48px);
+  height: var(--%p%-thumbnail-size, 48px);
+  flex: 0 0 var(--%p%-thumbnail-size, 48px);
+  object-fit: contain;
+  border-radius: var(--radius-s);
+  background: var(--background-secondary);
+}
 
 /* Chrome shared by the hover popover and the inline embed: a header above a body that holds
    the rendered PDF page (canvas) or image. The popover is a fixed overlay; the embed flows
