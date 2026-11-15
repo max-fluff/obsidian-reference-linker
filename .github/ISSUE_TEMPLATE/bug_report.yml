@@ -1,0 +1,79 @@
+name: Bug report
+description: Something in Reference Linker doesn't work the way the README says it should
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for reporting. Please check first that you are on the latest version of Reference Linker.
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Reference Linker version
+      description: Settings → Community plugins, under the plugin's name.
+    validations:
+      required: true
+  - type: input
+    id: obsidian-version
+    attributes:
+      label: Obsidian version
+      description: Settings → General → Current version.
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      multiple: true
+      options:
+        - Windows
+        - macOS
+        - Linux
+    validations:
+      required: true
+  - type: dropdown
+    id: format
+    attributes:
+      label: File format
+      multiple: true
+      options:
+        - PDF
+        - Word (DOCX)
+        - Excel (XLSX)
+        - PowerPoint (PPTX)
+        - OpenDocument
+        - EPUB
+        - HTML
+        - Markdown
+        - CSV
+        - Image
+        - Audio or video
+  - type: markdown
+    attributes:
+      value: If the problem is with one particular file and it isn't private, attaching it helps a lot.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: A small note that shows the problem helps a lot. Screenshots are welcome.
+      placeholder: |
+        1.
+        2.
+        3.
+  - type: textarea
+    id: console
+    attributes:
+      label: Console errors
+      description: Open the developer console (Ctrl+Shift+I, or Cmd+Option+I on macOS), switch to Console and paste any red lines that mention the plugin.
+      render: text
+  - type: input
+    id: other-plugins
+    attributes:
+      label: Other plugins that might be involved
+      description: Optional. For example, other linker plugins or plugins that add autocomplete or embeds.
