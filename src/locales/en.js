@@ -160,7 +160,7 @@ module.exports = {
   // Settings — suggestions & links
   'set.trigger.desc': 'Type this to start a reference suggestion. Default @! (Code Linker uses @@).',
   'set.suggestionThumbnails.name': 'Image thumbnails in suggestions',
-  'set.suggestionThumbnails.desc': 'Show thumbnails for indexed images inside this vault. Images outside the vault keep the usual suggestion row.',
+  'set.suggestionThumbnails.desc': 'Show a small preview beside each image in the list.',
   'set.editorPreset.name': 'Viewer link preset',
   'set.editorPreset.desc': 'How inserted links open. file:// uses the OS default app. Add your own under “Your viewers”.',
   'set.editors.name': 'Your viewers',

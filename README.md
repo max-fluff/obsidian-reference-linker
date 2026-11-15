@@ -60,11 +60,11 @@ It's the document counterpart to [Code Linker](https://community.obsidian.md/plu
 
 Type a trigger (default `@!`) followed by a document name and pick a match. The plugin indexes the files under your **Reference root** by name, with fuzzy matching. Suggestions are suppressed inside code blocks, inline code, frontmatter and existing links (see [Skipped contexts](#skipped-contexts)).
 
-Turn on **Image thumbnails in suggestions** to show small previews for indexed PNG, JPEG, WebP, GIF, BMP, SVG, and AVIF files inside the current vault. Images outside the vault keep the usual text-only row. This setting is off by default; thumbnail size defaults to 48 px and can be changed in Style Settings or with `--reference-linker-thumbnail-size` in a CSS snippet.
-
 <p align="center">
   <img src="docs/images/suggest.png" alt="The autocomplete dropdown after typing the trigger and a document name" width="560">
 </p>
+
+Turn on **Image thumbnails in suggestions** to see a small preview beside each image in the list. It is off by default; the 48 px size can be changed in Style Settings or with `--reference-linker-thumbnail-size`.
 
 The inserted link looks like:
 
@@ -299,7 +299,7 @@ The selection commands are also in the editor's right-click menu, as **Find and 
 | --- | --- | --- |
 | **Trigger** | `@!` | Text that starts a suggestion. (`@@` is Code Linker's default; `@!` avoids a clash when both are installed.) |
 | **Min characters / Max results** | `1` / `12` | When suggestions appear, and how many. |
-| **Image thumbnails in suggestions** | off | Show thumbnails for indexed images inside this vault. |
+| **Image thumbnails in suggestions** | off | A small preview beside each image in the list. |
 | **Viewer link preset** | file:// | The link format. With **ask-on-insert** you pick per link; add your own named URL templates under **Your viewers**. |
 | **Editor context menu** | on | Add the convert/open items to the editor right-click menu. |
 

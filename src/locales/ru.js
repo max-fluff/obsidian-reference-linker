@@ -156,7 +156,7 @@ module.exports = {
   // Settings — suggestions & links
   'set.trigger.desc': 'Введите это, чтобы начать подсказку. По умолчанию @! (Code Linker занимает @@).',
   'set.suggestionThumbnails.name': 'Миниатюры изображений в подсказках',
-  'set.suggestionThumbnails.desc': 'Показывать миниатюры индексируемых изображений внутри этого хранилища. Для файлов вне хранилища строка остаётся обычной.',
+  'set.suggestionThumbnails.desc': 'Показывать миниатюру рядом с каждым изображением в списке.',
   'set.editorPreset.name': 'Пресет открытия',
   'set.editorPreset.desc': 'Как открываются вставленные ссылки. file:// — приложение ОС по умолчанию. Свои — в «Ваши просмотрщики».',
   'set.editors.name': 'Ваши просмотрщики',
