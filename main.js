@@ -192,7 +192,6 @@ var require_constants = __commonJS({
       minChars: 1,
       maxResults: 12,
       showSuggestionThumbnails: false,
-      // optional image previews for files inside the vault
       contextMenu: true,
       // the "Convert"/"Find and open" items in the editor right-click menu
       // Breaks a tie when a link lands in both our index and the code linker's and carries no
@@ -2402,6 +2401,7 @@ var require_preview = __commonJS({
 var require_util = __commonJS({
   "src/formats/util.js"(exports2, module2) {
     "use strict";
+    var nodePath2 = require("path");
     var clampPosition = (position, total) => Math.min(Math.max(1, position | 0), total);
     function normPath(pathStr) {
       const out = [];
@@ -2416,6 +2416,7 @@ var require_util = __commonJS({
       return out.join("/");
     }
     var assetSrc = (src) => decodeURIComponent(String(src).split(/[?#]/)[0]);
+    var urlPath = (abs) => encodeURI(abs.split(nodePath2.sep).join("/").replace(/^\/+/, "")).replace(/#/g, "%23").replace(/\?/g, "%3F");
     function sectionEnd(headings, n, endOfDocument) {
       const level = headings[n - 1].level || 1;
       for (let i = n; i < headings.length; i++)
@@ -2488,6 +2489,7 @@ var require_util = __commonJS({
       clampPosition,
       normPath,
       assetSrc,
+      urlPath,
       escHtml,
       escAttr,
       usedRange,
@@ -4135,12 +4137,12 @@ var require_media = __commonJS({
   "src/formats/media.js"(exports2, module2) {
     "use strict";
     var fs2 = require("fs");
-    var nodePath2 = require("path");
     var { mountPlayer, timecode, parseVolume } = require_player();
+    var { urlPath } = require_util();
     var VIDEO = { mp4: "video/mp4", m4v: "video/mp4", webm: "video/webm", mkv: "video/x-matroska", mov: "video/quicktime", ogv: "video/ogg" };
     var AUDIO = { mp3: "audio/mpeg", m4a: "audio/mp4", wav: "audio/wav", flac: "audio/flac", ogg: "audio/ogg", opus: "audio/ogg", aac: "audio/aac" };
     var BLOB_LIMIT = 96 * 1024 * 1024;
-    var fileUrl = (abs) => "file:///" + encodeURI(abs.split(nodePath2.sep).join("/").replace(/^\/+/, "")).replace(/#/g, "%23").replace(/\?/g, "%3F");
+    var fileUrl = (abs) => "file:///" + urlPath(abs);
     function blobFallback(el, abs, ext) {
       let size = 0;
       try {
@@ -6316,31 +6318,20 @@ var require_suggestion_thumbnail = __commonJS({
   "src/suggestion-thumbnail.js"(exports2, module2) {
     "use strict";
     var nodePath2 = require("path");
-    var { normalizePath: normalizePath2, TFile } = require("obsidian");
+    var { Platform } = require("obsidian");
     var formats2 = require_formats();
+    var { urlPath } = require_util();
     function suggestionThumbnailSrc(plugin, entry) {
-      if (entry.kind !== "file")
+      if (entry.kind !== "file" || !Platform.resourcePathPrefix)
         return null;
       const handler = formats2.handlerFor(entry.lang);
       if (!handler || handler.id !== "image")
         return null;
-      const vault = plugin.app.vault;
-      const adapter = vault && vault.adapter;
-      if (!adapter || typeof adapter.getBasePath !== "function")
+      const abs = plugin.entryPath(entry);
+      if (!nodePath2.isAbsolute(abs))
         return null;
-      try {
-        const vaultBase = adapter.getBasePath();
-        const absolutePath = plugin.entryPath(entry);
-        if (!nodePath2.isAbsolute(vaultBase) || !nodePath2.isAbsolute(absolutePath))
-          return null;
-        const relativePath = nodePath2.relative(vaultBase, absolutePath);
-        if (!relativePath || relativePath === ".." || relativePath.startsWith(".." + nodePath2.sep) || nodePath2.isAbsolute(relativePath))
-          return null;
-        const file = vault.getAbstractFileByPath(normalizePath2(relativePath));
-        return file instanceof TFile ? vault.getResourcePath(file) : null;
-      } catch (e) {
-        return null;
-      }
+      const cached = plugin.fileCache && plugin.fileCache.get(entry.path);
+      return Platform.resourcePathPrefix + urlPath(abs) + (cached ? "?" + Math.trunc(cached.mtimeMs) : "");
     }
     module2.exports = { suggestionThumbnailSrc };
   }
@@ -6374,7 +6365,11 @@ var require_suggest2 = __commonJS({
               attr: { src, alt: "" }
             });
             img.loading = "lazy";
-            img.addEventListener("error", () => img.remove(), { once: true });
+            img.decoding = "async";
+            img.addEventListener("error", () => {
+              img.remove();
+              el.removeClass("reference-linker-suggestion-with-thumbnail");
+            }, { once: true });
           }
         }
         super.renderSuggestion(entry, el);
@@ -9623,7 +9618,7 @@ var require_en = __commonJS({
       // Settings — suggestions & links
       "set.trigger.desc": "Type this to start a reference suggestion. Default @! (Code Linker uses @@).",
       "set.suggestionThumbnails.name": "Image thumbnails in suggestions",
-      "set.suggestionThumbnails.desc": "Show thumbnails for indexed images inside this vault. Images outside the vault keep the usual suggestion row.",
+      "set.suggestionThumbnails.desc": "Show a small preview beside each image in the list.",
       "set.editorPreset.name": "Viewer link preset",
       "set.editorPreset.desc": "How inserted links open. file:// uses the OS default app. Add your own under \u201CYour viewers\u201D.",
       "set.editors.name": "Your viewers",
@@ -9792,7 +9787,7 @@ var require_ru = __commonJS({
       // Settings — suggestions & links
       "set.trigger.desc": "\u0412\u0432\u0435\u0434\u0438\u0442\u0435 \u044D\u0442\u043E, \u0447\u0442\u043E\u0431\u044B \u043D\u0430\u0447\u0430\u0442\u044C \u043F\u043E\u0434\u0441\u043A\u0430\u0437\u043A\u0443. \u041F\u043E \u0443\u043C\u043E\u043B\u0447\u0430\u043D\u0438\u044E @! (Code Linker \u0437\u0430\u043D\u0438\u043C\u0430\u0435\u0442 @@).",
       "set.suggestionThumbnails.name": "\u041C\u0438\u043D\u0438\u0430\u0442\u044E\u0440\u044B \u0438\u0437\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u0439 \u0432 \u043F\u043E\u0434\u0441\u043A\u0430\u0437\u043A\u0430\u0445",
-      "set.suggestionThumbnails.desc": "\u041F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0442\u044C \u043C\u0438\u043D\u0438\u0430\u0442\u044E\u0440\u044B \u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u0443\u0435\u043C\u044B\u0445 \u0438\u0437\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u0439 \u0432\u043D\u0443\u0442\u0440\u0438 \u044D\u0442\u043E\u0433\u043E \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0430. \u0414\u043B\u044F \u0444\u0430\u0439\u043B\u043E\u0432 \u0432\u043D\u0435 \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0430 \u0441\u0442\u0440\u043E\u043A\u0430 \u043E\u0441\u0442\u0430\u0451\u0442\u0441\u044F \u043E\u0431\u044B\u0447\u043D\u043E\u0439.",
+      "set.suggestionThumbnails.desc": "\u041F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0442\u044C \u043C\u0438\u043D\u0438\u0430\u0442\u044E\u0440\u0443 \u0440\u044F\u0434\u043E\u043C \u0441 \u043A\u0430\u0436\u0434\u044B\u043C \u0438\u0437\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u0435\u043C \u0432 \u0441\u043F\u0438\u0441\u043A\u0435.",
       "set.editorPreset.name": "\u041F\u0440\u0435\u0441\u0435\u0442 \u043E\u0442\u043A\u0440\u044B\u0442\u0438\u044F",
       "set.editorPreset.desc": "\u041A\u0430\u043A \u043E\u0442\u043A\u0440\u044B\u0432\u0430\u044E\u0442\u0441\u044F \u0432\u0441\u0442\u0430\u0432\u043B\u0435\u043D\u043D\u044B\u0435 \u0441\u0441\u044B\u043B\u043A\u0438. file:// \u2014 \u043F\u0440\u0438\u043B\u043E\u0436\u0435\u043D\u0438\u0435 \u041E\u0421 \u043F\u043E \u0443\u043C\u043E\u043B\u0447\u0430\u043D\u0438\u044E. \u0421\u0432\u043E\u0438 \u2014 \u0432 \xAB\u0412\u0430\u0448\u0438 \u043F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0449\u0438\u043A\u0438\xBB.",
       "set.editors.name": "\u0412\u0430\u0448\u0438 \u043F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0449\u0438\u043A\u0438",

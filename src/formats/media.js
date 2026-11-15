@@ -4,8 +4,8 @@
 // preview is the file itself, seeked to that second, which is as faithful as a preview gets.
 
 const fs = require('fs');
-const nodePath = require('path');
 const { mountPlayer, timecode, parseVolume } = require('./player');
+const { urlPath } = require('./util');
 
 const VIDEO = { mp4: 'video/mp4', m4v: 'video/mp4', webm: 'video/webm', mkv: 'video/x-matroska', mov: 'video/quicktime', ogv: 'video/ogg' };
 const AUDIO = { mp3: 'audio/mpeg', m4a: 'audio/mp4', wav: 'audio/wav', flac: 'audio/flac', ogg: 'audio/ogg', opus: 'audio/ogg', aac: 'audio/aac' };
@@ -14,11 +14,7 @@ const AUDIO = { mp3: 'audio/mpeg', m4a: 'audio/mp4', wav: 'audio/wav', flac: 'au
 // first try, and only for files small enough to be worth it.
 const BLOB_LIMIT = 96 * 1024 * 1024;
 
-// encodeURI keeps the "D:" drive colon (per-segment encoding turns it into %3A and Windows
-// resolves nothing) but leaves # and ? — in a file name those would start a fragment/query
-// and point at the wrong file, so encode them too.
-const fileUrl = (abs) => 'file:///'
-  + encodeURI(abs.split(nodePath.sep).join('/').replace(/^\/+/, '')).replace(/#/g, '%23').replace(/\?/g, '%3F');
+const fileUrl = (abs) => 'file:///' + urlPath(abs);
 
 // Returns the blob URL it set on `el`, or '' when the file can't or shouldn't be copied. The
 // caller owns the URL — this used to return its own cleanup, but the error handler that calls

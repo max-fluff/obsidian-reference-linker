@@ -1,5 +1,7 @@
 'use strict';
 
+const nodePath = require('path');
+
 // Small shared primitives for the format handlers, so the same one-liners don't drift across
 // pptx / html / epub / odf / text.
 
@@ -21,6 +23,11 @@ function normPath(pathStr) {
 
 // The file part of an <img src>: the query and fragment dropped, percent-escapes decoded.
 const assetSrc = (src) => decodeURIComponent(String(src).split(/[?#]/)[0]);
+
+// encodeURI keeps the "D:" colon (per-segment encoding breaks Windows paths) but leaves # and ?,
+// which in a file name would start a fragment or query, so those are encoded on top.
+const urlPath = (abs) => encodeURI(abs.split(nodePath.sep).join('/').replace(/^\/+/, ''))
+  .replace(/#/g, '%23').replace(/\?/g, '%3F');
 
 // Where the section that heading `n` opens ends: at the next heading of the same or shallower
 // level, not simply at the next heading. A chapter title with a subheading directly under it
@@ -109,6 +116,6 @@ function gridToHtml(grid, opts = {}) {
 }
 
 module.exports = {
-  clampPosition, normPath, assetSrc, escHtml, escAttr,
+  clampPosition, normPath, assetSrc, urlPath, escHtml, escAttr,
   usedRange, gridToHtml, cellText, spanning, isCovered, COVERED, sectionEnd, MAX_ROWS, MAX_COLS,
 };

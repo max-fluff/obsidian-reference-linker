@@ -31,7 +31,11 @@ class ReferenceSuggest extends BaseReferenceSuggest {
           attr: { src, alt: '' },
         });
         img.loading = 'lazy';
-        img.addEventListener('error', () => img.remove(), { once: true });
+        img.decoding = 'async';
+        img.addEventListener('error', () => {
+          img.remove();
+          el.removeClass('reference-linker-suggestion-with-thumbnail');
+        }, { once: true });
       }
     }
 
